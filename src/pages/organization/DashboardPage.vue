@@ -97,7 +97,7 @@ onMounted(loadDashboard)
       <!-- 快捷入口 -->
       <h2 class="text-base font-medium text-text-primary mb-3">快捷入口</h2>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <Card padding="p-4" class="cursor-pointer text-center" @click="router.push(`/org/${route.params.clubId}/members/appointments`)">
+        <Card padding="p-4" class="cursor-pointer text-center" @click="router.push(`/org/${route.params.clubId}/members`)">
           <Users :size="24" class="mx-auto text-primary mb-2" />
           <p class="text-sm text-text-primary">成员管理</p>
         </Card>

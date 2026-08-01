@@ -135,6 +135,13 @@ const identityHandlers: MockMethod[] = [
     },
   },
   {
+    url: '/api/auth/logout',
+    method: 'delete',
+    response: () => {
+      return { code: 0, data: null }
+    },
+  },
+  {
     url: '/api/auth/profile',
     method: 'get',
     response: ({ url }: { url: string }) => {
@@ -357,6 +364,33 @@ const publicHandlers: MockMethod[] = [
 /** 社团工作空间处理器 */
 const organizationHandlers: MockMethod[] = [
   {
+    url: '/api/org/:clubId/context',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const ws = getWorkspace(user)
+      if (!ws || ws.clubId !== query.clubId) {
+        return {
+          statusCode: 403,
+          body: {
+            code: 'IFC-ERR-003',
+            message: '您没有访问该社团工作空间的权限',
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          },
+        }
+      }
+      return {
+        code: 0,
+        data: {
+          clubId: ws.clubId,
+          clubName: ws.clubName,
+          role: ws.role,
+          permissions: ws.permissions,
+        },
+      }
+    },
+  },
+  {
     url: '/api/org/:clubId/dashboard',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
@@ -552,21 +586,43 @@ const memberHandlers: MockMethod[] = [
     response: ({ query }: { query: Record<string, string> }) => {
       const list = db.listMembers(query.clubId)
       const search = query.search
-      const items = search
+      const filtered = search
         ? list.filter((m) => m.name.includes(search) || m.studentId === search)
         : list
+      const activeMembers = list.filter((m) => m.status === 'active')
+      const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
+      const byDepartment = db.departments.map((d) => ({
+        name: d.name,
+        count: activeMembers.filter((m) => m.positions.some((p) => p.departmentId === d.id && p.status === 'active')).length,
+      }))
+      const zeroDeptCount = activeMembers.filter((m) => !m.positions.some((p) => p.status === 'active')).length
       return {
         code: 0,
         data: {
-          items: items.map((m) => {
-            const active = m.positions.find((p) => p.status === 'active')
+          items: filtered.map((m) => {
+            const activePositions = m.positions.filter((p) => p.status === 'active')
             return {
               id: m.id, name: m.name, studentId: m.studentId,
-              department: active?.departmentName || '-', title: active?.title || '成员',
+              email: m.email, phone: m.phone,
+              positions: activePositions.map((p) => ({
+                departmentId: p.departmentId,
+                departmentName: p.departmentName,
+                title: p.title,
+                status: p.status,
+              })),
+              department: activePositions.map((p) => p.departmentName).join(' + ') || '待分配',
+              title: activePositions[0]?.title || '成员',
               status: m.status, joinedAt: m.joinedAt.slice(0, 10),
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
             }
           }),
+          stats: {
+            total: list.length,
+            active: activeMembers.length,
+            exited: exitedMembers.length,
+            byDepartment,
+            zeroDepartment: zeroDeptCount,
+          },
           nextCursor: null,
         },
       }
