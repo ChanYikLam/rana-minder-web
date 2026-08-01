@@ -1,0 +1,63 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { Wrench, Compass, RefreshCw } from '@lucide/vue'
+
+const retrying = ref(false)
+
+async function handleRetry() {
+  if (retrying.value) return
+  retrying.value = true
+  // mock: 模拟重新探测依赖状态
+  await new Promise((r) => setTimeout(r, 1200))
+  retrying.value = false
+  window.location.reload()
+}
+</script>
+
+<template>
+  <div class="min-h-[60vh] flex items-center justify-center">
+    <div class="max-w-md text-center px-4">
+      <div class="flex items-center justify-center w-20 h-20 mx-auto mb-6 rounded-full bg-warning-subtle text-warning">
+        <Wrench :size="40" />
+      </div>
+
+      <h1 class="text-2xl font-bold text-primary mb-2">服务暂时不可用</h1>
+      <p class="text-sm text-text-secondary mb-1">
+        统一身份认证服务暂时不可用，部分功能已暂停
+      </p>
+      <p class="text-xs text-muted-foreground mb-8">
+        受影响的范围：登录、报名、邀请确认等需要身份核验的操作
+      </p>
+
+      <div class="rounded-lg border border-border bg-elevated p-4 mb-6 text-left">
+        <p class="text-sm font-medium text-primary mb-2">您现在可以：</p>
+        <ul class="text-sm text-text-secondary space-y-1.5 list-disc list-inside">
+          <li>浏览公开的社团与招新活动</li>
+          <li>等待服务恢复后重新尝试</li>
+        </ul>
+      </div>
+
+      <div class="flex flex-col gap-3">
+        <button
+          class="w-full h-11 flex items-center justify-center gap-2 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
+          :disabled="retrying"
+          @click="handleRetry"
+        >
+          <RefreshCw :size="16" :class="retrying ? 'animate-spin' : ''" />
+          {{ retrying ? '正在检测服务状态...' : '重新检测' }}
+        </button>
+        <router-link
+          to="/explore"
+          class="w-full h-11 flex items-center justify-center gap-2 rounded-md border border-border text-primary hover:bg-subtle transition-colors"
+        >
+          <Compass :size="16" />
+          浏览公开内容
+        </router-link>
+      </div>
+
+      <p class="mt-6 text-xs text-muted-foreground">
+        系统将在服务恢复后自动可用，通常不超过 15 分钟
+      </p>
+    </div>
+  </div>
+</template>

@@ -1,0 +1,168 @@
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { PageStateBoundary, Card } from '@/components/common'
+import StateTag from '@/components/business/StateTag.vue'
+import { get, post } from '@/services/client'
+import type { PageState } from '@/types/machine'
+import { Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck } from '@lucide/vue'
+
+interface JointActivity {
+  id: string; title: string; description: string; status: string; channelStatus: string
+  deadline: string; participants: { clubId: string; clubName: string; status: string; concludedCount: number }[]
+  applicantCount: number; version: number
+}
+
+const route = useRoute()
+const router = useRouter()
+const isCreate = computed(() => route.meta.mode === 'create')
+const state = ref<PageState>('loading')
+const detail = ref<JointActivity | null>(null)
+
+// 创建表单
+const form = ref({ title: '', description: '', deadline: '', participants: [] as string[] })
+const submitting = ref(false)
+
+async function loadDetail() {
+  if (isCreate.value) { state.value = 'normal'; return }
+  state.value = 'loading'
+  const clubId = route.params.clubId as string
+  const jointId = route.params.jointId as string
+  const result = await get<JointActivity>(`/org/${clubId}/joint/${jointId}`)
+  if (result.kind === 'completed') {
+    detail.value = result.data
+    state.value = 'normal'
+  } else {
+    state.value = 'error'
+  }
+}
+
+async function handleCreate() {
+  submitting.value = true
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/joint`, form.value)
+  submitting.value = false
+  if (result.kind === 'completed') {
+    router.push(`/org/${clubId}/joint/${(result.data as { id: string }).id}`)
+  }
+}
+
+function formatDeadline(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+onMounted(loadDetail)
+</script>
+
+<template>
+  <PageStateBoundary :state="state" title="联合活动" @retry="loadDetail">
+    <!-- 创建模式 -->
+    <div v-if="isCreate" class="max-w-2xl mx-auto">
+      <button class="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-4" @click="router.back()">
+        <ArrowLeft :size="16" /> 返回
+      </button>
+      <h1 class="text-2xl font-bold text-text-primary mb-6">发起联合活动</h1>
+
+      <Card class="mb-4">
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">活动名称 <span class="text-danger">*</span></label>
+            <input v-model="form.title" type="text" class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" placeholder="例：计算机+电子联合招新" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">活动描述</label>
+            <textarea v-model="form.description" rows="3" class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" placeholder="描述联合活动内容..." />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">报名截止时间 <span class="text-danger">*</span></label>
+            <input v-model="form.deadline" type="datetime-local" class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-2">参与社团</label>
+            <p class="text-xs text-text-secondary mb-2">邀请其他社团参与，各社团将独立进行评价和邀请</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="club in [{ id: 'club-002', name: '电子设计协会' }, { id: 'club-003', name: '数学建模协会' }]"
+                :key="club.id"
+                class="flex items-center gap-1 px-3 py-1.5 rounded-md border text-sm transition-colors"
+                :class="form.participants.includes(club.id) ? 'border-primary bg-primary-subtle text-primary' : 'border-border text-text-secondary hover:border-border-strong'"
+                @click="form.participants.includes(club.id) ? form.participants = form.participants.filter((id) => id !== club.id) : form.participants.push(club.id)"
+              >
+                <Users :size="14" /> {{ club.name }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <button
+        class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
+        :disabled="submitting || !form.title || !form.deadline"
+        @click="handleCreate"
+      >
+        {{ submitting ? '创建中...' : '创建联合活动' }}
+      </button>
+    </div>
+
+    <!-- 管理模式 -->
+    <div v-else-if="detail" class="max-w-3xl mx-auto">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-text-primary">{{ detail.title }}</h1>
+          <div class="flex items-center gap-2 mt-1">
+            <StateTag :status="detail.status" />
+            <StateTag :status="detail.channelStatus" />
+          </div>
+        </div>
+      </div>
+
+      <Card class="mb-4">
+        <p class="text-sm text-text-secondary mb-3">{{ detail.description }}</p>
+        <div class="flex items-center gap-4 text-sm">
+          <span class="flex items-center gap-1 text-warning"><Calendar :size="16" /> 截止 {{ formatDeadline(detail.deadline) }}</span>
+          <span class="flex items-center gap-1 text-text-secondary"><Users :size="16" /> {{ detail.applicantCount }} 报名</span>
+        </div>
+      </Card>
+
+      <!-- 参与社团 -->
+      <Card class="mb-4">
+        <h2 class="text-base font-medium text-text-primary mb-3">参与社团</h2>
+        <div class="space-y-2">
+          <div v-for="p in detail.participants" :key="p.clubId" class="flex items-center justify-between rounded-lg border border-border p-3">
+            <div class="flex items-center gap-2">
+              <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs">{{ p.clubName.charAt(0) }}</div>
+              <span class="text-sm text-text-primary">{{ p.clubName }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-text-secondary">已结论 {{ p.concludedCount }}</span>
+              <StateTag :status="p.status" />
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <!-- 管理入口 -->
+      <Card>
+        <h2 class="text-base font-medium text-text-primary mb-3">管理操作</h2>
+        <div class="space-y-1">
+          <button class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle text-left" @click="router.push(`/org/${route.params.clubId}/joint/${detail.id}/interview`)">
+            <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-subtle text-primary"><Users :size="18" /></div>
+            <div class="flex-1"><p class="text-sm font-medium text-text-primary">面试排期与评价</p><p class="text-xs text-text-secondary">共享排期、跨社评价</p></div>
+            <ChevronRight :size="18" class="text-text-secondary" />
+          </button>
+          <button class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle text-left" @click="router.push(`/org/${route.params.clubId}/joint/${detail.id}/conclusions`)">
+            <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-subtle text-primary"><UserCheck :size="18" /></div>
+            <div class="flex-1"><p class="text-sm font-medium text-text-primary">结论与邀请</p><p class="text-xs text-text-secondary">各社团独立结论与邀请</p></div>
+            <ChevronRight :size="18" class="text-text-secondary" />
+          </button>
+          <button class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle text-left" @click="router.push(`/org/${route.params.clubId}/joint/${detail.id}/close`)">
+            <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-warning-subtle text-warning"><Building2 :size="18" /></div>
+            <div class="flex-1"><p class="text-sm font-medium text-text-primary">结束确认</p><p class="text-xs text-text-secondary">确认结束联合活动</p></div>
+            <ChevronRight :size="18" class="text-text-secondary" />
+          </button>
+        </div>
+      </Card>
+    </div>
+  </PageStateBoundary>
+</template>

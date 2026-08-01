@@ -1,0 +1,131 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { PageStateBoundary, Card } from '@/components/common'
+import StateTag from '@/components/business/StateTag.vue'
+import { get, post } from '@/services/client'
+import type { PageState } from '@/types/machine'
+import { Calendar, MapPin, User, CheckCircle2 } from '@lucide/vue'
+
+interface InterviewSlot { id: string; time: string; location: string; capacity: number; booked: number }
+interface InterviewDetail {
+  id: string; activityId: string; activityTitle: string
+  applicantName: string; status: string
+  scheduledTime: string | null; location: string | null
+  interviewers: { id: string; name: string }[]
+  availableSlots: InterviewSlot[]
+}
+
+const route = useRoute()
+const state = ref<PageState>('loading')
+const detail = ref<InterviewDetail | null>(null)
+const selectedSlotId = ref<string | null>(null)
+const booking = ref(false)
+const bookError = ref<string | null>(null)
+
+async function loadDetail() {
+  state.value = 'loading'
+  const id = route.params.interviewId as string
+  const result = await get<InterviewDetail>(`/me/interviews/recruitment/${id}`)
+  if (result.kind === 'completed') {
+    detail.value = result.data
+    state.value = 'normal'
+  } else {
+    state.value = 'error'
+  }
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${days[d.getDay()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+async function handleBookSlot() {
+  if (!selectedSlotId.value || !detail.value) return
+  booking.value = true
+  bookError.value = null
+  const result = await post(`/me/interviews/recruitment/${detail.value.id}/book`, { slotId: selectedSlotId.value })
+  booking.value = false
+  if (result.kind === 'completed') {
+    await loadDetail()
+  } else {
+    bookError.value = '预约失败，该时段可能已被占用'
+  }
+}
+
+onMounted(loadDetail)
+</script>
+
+<template>
+  <PageStateBoundary :state="state" title="面试排期" @retry="loadDetail">
+    <div v-if="detail" class="max-w-2xl mx-auto">
+      <h1 class="text-2xl font-bold text-text-primary mb-1">面试排期</h1>
+      <p class="text-sm text-text-secondary mb-6">{{ detail.activityTitle }}</p>
+
+      <!-- 当前面试信息 -->
+      <Card v-if="detail.scheduledTime" class="mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-base font-medium text-text-primary">已安排的面试</h2>
+          <StateTag :status="detail.status" />
+        </div>
+        <div class="space-y-2 text-sm">
+          <div class="flex items-center gap-2 text-text-primary">
+            <Calendar :size="16" class="text-text-secondary" /> {{ formatTime(detail.scheduledTime) }}
+          </div>
+          <div class="flex items-center gap-2 text-text-primary">
+            <MapPin :size="16" class="text-text-secondary" /> {{ detail.location }}
+          </div>
+          <div class="flex items-center gap-2 text-text-primary">
+            <User :size="16" class="text-text-secondary" />
+            面试官：{{ detail.interviewers.map((i) => i.name).join('、') }}
+          </div>
+        </div>
+      </Card>
+
+      <!-- 选时面板 -->
+      <Card v-if="detail.status === 'scheduled' || !detail.scheduledTime">
+        <h2 class="text-base font-medium text-text-primary mb-2">选择面试时段</h2>
+        <p class="text-xs text-text-secondary mb-4">请选择一个可用的面试时段，每时段容量有限</p>
+
+        <div class="space-y-2">
+          <button
+            v-for="slot in detail.availableSlots"
+            :key="slot.id"
+            class="w-full flex items-center justify-between rounded-lg border p-3 transition-colors text-left"
+            :class="selectedSlotId === slot.id ? 'border-primary bg-primary-subtle' : 'border-border hover:border-border-strong'"
+            :disabled="slot.booked >= slot.capacity"
+            @click="selectedSlotId = slot.id"
+          >
+            <div>
+              <p class="text-sm font-medium text-text-primary">{{ formatTime(slot.time) }}</p>
+              <p class="text-xs text-text-secondary flex items-center gap-1 mt-0.5">
+                <MapPin :size="12" /> {{ slot.location }}
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span
+                class="text-xs px-2 py-0.5 rounded"
+                :class="slot.booked >= slot.capacity ? 'bg-muted text-text-secondary' : 'bg-success-subtle text-success'"
+              >
+                {{ slot.booked >= slot.capacity ? '已满' : `剩余 ${slot.capacity - slot.booked}` }}
+              </span>
+              <CheckCircle2 v-if="selectedSlotId === slot.id" :size="18" class="text-primary" />
+            </div>
+          </button>
+        </div>
+
+        <p v-if="bookError" class="mt-3 text-sm text-danger" role="alert">{{ bookError }}</p>
+
+        <button
+          v-if="selectedSlotId"
+          class="w-full mt-4 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
+          :disabled="booking"
+          @click="handleBookSlot"
+        >
+          {{ booking ? '预约中...' : '确认预约' }}
+        </button>
+      </Card>
+    </div>
+  </PageStateBoundary>
+</template>

@@ -1,0 +1,272 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn-vue/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   RanaMinder 设计令牌（候选视觉：墨青 + 琥珀 + HarmonyOS Sans SC）
+   来源：docs/frontend/前端UIUX设计规范-v1.0.md 第 2 节
+   状态：建议待确认（外部高保真输入后可整体替换令牌值）
+   ============================================================ */
+
+@theme inline {
+  /* 背景 */
+  --color-background: var(--bg-base);
+  --color-elevated: var(--bg-elevated);
+  --color-subtle: var(--bg-subtle);
+  --color-muted: var(--bg-muted);
+
+  /* 文字 */
+  --color-foreground: var(--text-primary);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-disabled: var(--text-disabled);
+  --color-text-on-primary: var(--text-on-primary);
+  --color-text-on-accent: var(--text-on-accent);
+
+  /* 品牌：墨青 */
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-foreground: var(--text-on-primary);
+
+  /* 强调：琥珀 */
+  --color-accent: var(--accent);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-foreground: var(--text-on-accent);
+
+  /* 语义色 */
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-foreground: var(--text-on-primary);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-foreground: var(--text-on-primary);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-foreground: var(--text-on-accent);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-foreground: var(--text-on-primary);
+
+  /* 边框 */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--border);
+  --color-ring: var(--primary);
+
+  /* shadcn 兼容 */
+  --color-card: var(--bg-elevated);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-elevated);
+  --color-popover-foreground: var(--text-primary);
+  --color-secondary: var(--bg-subtle);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted-foreground: var(--text-secondary);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--text-on-primary);
+
+  --radius: var(--radius-md);
+  --font-sans: 'HarmonyOS Sans SC', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Consolas, monospace;
+}
+
+/* ---------- 浅色主题令牌（产品候选方案） ---------- */
+
+:root {
+  /* 背景 */
+  --bg-base: #F7F8F5;
+  --bg-elevated: #FFFFFF;
+  --bg-subtle: #EEF0EB;
+  --bg-muted: #E4E7E0;
+
+  /* 文字 */
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-disabled: #A8A29E;
+  --text-on-primary: #FAFAF9;
+  --text-on-accent: #1C1917;
+
+  /* 边框 */
+  --border: #8F8984;
+  --border-strong: #78716C;
+
+  /* 品牌：墨青 */
+  --primary: #134E4A;
+  --primary-hover: #0F3D3E;
+  --primary-subtle: #CCFBF1;
+
+  /* 强调：琥珀 */
+  --accent: #F59E0B;
+  --accent-subtle: #FEF3C7;
+
+  /* 语义色 */
+  --success: #166534;
+  --success-subtle: #DCFCE7;
+  --danger: #991B1B;
+  --danger-subtle: #FEE2E2;
+  --warning: #92400E;
+  --warning-subtle: #FEF3C7;
+  --info: #155E75;
+  --info-subtle: #CFFAFE;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(28, 25, 23, 0.08), 0 2px 4px -2px rgba(28, 25, 23, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(28, 25, 23, 0.10), 0 4px 6px -4px rgba(28, 25, 23, 0.05);
+
+  /* shadcn 兼容变量（映射到产品令牌） */
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+  --card: var(--bg-elevated);
+  --card-foreground: var(--text-primary);
+  --popover: var(--bg-elevated);
+  --popover-foreground: var(--text-primary);
+  --primary-foreground: var(--text-on-primary);
+  --secondary: var(--bg-subtle);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-muted);
+  --muted-foreground: var(--text-secondary);
+  --accent-foreground: var(--text-on-accent);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--text-on-primary);
+  --input: var(--border);
+  --ring: var(--primary);
+
+  /* 侧边栏 */
+  --sidebar: var(--bg-elevated);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--text-on-primary);
+  --sidebar-accent: var(--primary-subtle);
+  --sidebar-accent-foreground: var(--primary);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--primary);
+
+  /* 图表 */
+  --chart-1: var(--primary);
+  --chart-2: var(--accent);
+  --chart-3: var(--success);
+  --chart-4: var(--info);
+  --chart-5: var(--warning);
+}
+
+/* ---------- 深色主题令牌（候选定义，未通过评审前不暴露切换） ---------- */
+
+.dark {
+  /* 背景 */
+  --bg-base: #0B0F0E;
+  --bg-elevated: #131918;
+  --bg-subtle: #1A201E;
+  --bg-muted: #232B28;
+
+  /* 文字 */
+  --text-primary: #F5F5F4;
+  --text-secondary: #A8A29E;
+  --text-disabled: #78716C;
+  --text-on-primary: #1C1917;
+  --text-on-accent: #1C1917;
+
+  /* 边框 */
+  --border: #5F716C;
+  --border-strong: #6B7D78;
+
+  /* 品牌：亮墨青 */
+  --primary: #2DD4BF;
+  --primary-hover: #5EEAD4;
+  --primary-subtle: #134E4A;
+
+  /* 强调：亮琥珀 */
+  --accent: #FBBF24;
+  --accent-subtle: #78350F;
+
+  /* 语义色 */
+  --success: #4ADE80;
+  --success-subtle: #14532D;
+  --danger: #FCA5A5;
+  --danger-subtle: #7F1D1D;
+  --warning: #FBBF24;
+  --warning-subtle: #78350F;
+  --info: #67E8F9;
+  --info-subtle: #155E63;
+
+  /* 阴影（深色使用更深黑色叠加） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.50), 0 2px 4px -2px rgba(0, 0, 0, 0.30);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.60), 0 4px 6px -4px rgba(0, 0, 0, 0.40);
+
+  /* shadcn 兼容变量 */
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+  --card: var(--bg-elevated);
+  --card-foreground: var(--text-primary);
+  --popover: var(--bg-elevated);
+  --popover-foreground: var(--text-primary);
+  --primary-foreground: var(--text-on-primary);
+  --secondary: var(--bg-subtle);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-muted);
+  --muted-foreground: var(--text-secondary);
+  --accent-foreground: var(--text-on-accent);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--text-on-primary);
+  --input: var(--border);
+  --ring: var(--primary);
+
+  /* 侧边栏 */
+  --sidebar: var(--bg-elevated);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--text-on-primary);
+  --sidebar-accent: var(--primary-subtle);
+  --sidebar-accent-foreground: var(--primary);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--primary);
+
+  /* 图表 */
+  --chart-1: var(--primary);
+  --chart-2: var(--accent);
+  --chart-3: var(--success);
+  --chart-4: var(--info);
+  --chart-5: var(--warning);
+}
+
+/* ---------- 全局基础样式 ---------- */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* 焦点可见性 */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  /* 尊重减少动效偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
