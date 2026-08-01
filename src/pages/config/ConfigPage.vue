@@ -6,6 +6,7 @@ import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Save, ShieldAlert, Building2 } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -19,8 +20,9 @@ const isAdmin = computed(() => route.path.startsWith('/admin'))
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await get<typeof config.value>(`/org/${clubId}/config`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<typeof config.value>(`${apiScope.prefix}/config`)
   if (result.kind === 'completed') {
     config.value = { ...config.value, ...result.data }
     state.value = 'normal'
@@ -29,8 +31,9 @@ async function loadData() {
 
 async function handleSave() {
   saving.value = true
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await post(`/org/${clubId}/config`, { ...config.value })
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { saving.value = false; return }
+  const result = await post(`${apiScope.prefix}/config`, { ...config.value })
   saving.value = false
   if (result.kind === 'completed') {
     toast.success('配置已保存')

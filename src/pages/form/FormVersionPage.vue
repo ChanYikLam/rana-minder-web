@@ -6,6 +6,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { Save, Send, Upload, FileWarning } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
 interface FormVersion { version: number; status: string; publishedAt: string | null; fields: FormField[] }
@@ -21,9 +22,10 @@ const saving = ref(false)
 
 async function loadForm() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
   const formId = route.params.formId as string
-  const result = await get<{ id: string; title: string; versions: FormVersion[] }>(`/org/${clubId}/forms/${formId}`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<{ id: string; title: string; versions: FormVersion[] }>(`${apiScope.prefix}/forms/${formId}`)
   if (result.kind === 'completed') {
     formTitle.value = result.data.title
     versions.value = result.data.versions
@@ -36,9 +38,10 @@ async function loadForm() {
 
 async function handleSaveDraft() {
   saving.value = true
-  const clubId = route.params.clubId as string
   const formId = route.params.formId as string
-  const result = await post(`/org/${clubId}/forms/designer/${formId}/save`, {
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { saving.value = false; return }
+  const result = await post(`${apiScope.prefix}/forms/designer/${formId}/save`, {
     fields: currentVersion.value?.fields || [],
     version: currentVersion.value?.version || 1,
   })

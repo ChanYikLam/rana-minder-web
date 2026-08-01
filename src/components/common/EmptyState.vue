@@ -9,7 +9,7 @@ interface Props {
   actionLabel?: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   type: 'no_data',
   description: '',
   actionLabel: '',

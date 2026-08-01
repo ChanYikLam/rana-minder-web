@@ -5,6 +5,7 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Type, AlignLeft, List, FileUp, Calendar, CheckSquare, Plus, X, GripVertical, Save, Eye } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 interface Field { id: string; type: string; label: string; required: boolean; readonly: boolean; permission: string; options: string[] | null; description: string | null }
 
@@ -24,9 +25,10 @@ const fieldTypes = [
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
   const formId = route.params.formId as string
-  const result = await get<{ title: string; fields: Field[] }>(`/org/${clubId}/forms/designer/${formId}`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<{ title: string; fields: Field[] }>(`${apiScope.prefix}/forms/designer/${formId}`)
   if (result.kind === 'completed') {
     formTitle.value = result.data.title
     fields.value = result.data.fields

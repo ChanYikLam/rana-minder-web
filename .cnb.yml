@@ -1,0 +1,18 @@
+dev:
+  pull_request:
+    - name: pr-quality-gate
+      docker:
+        image: node:24
+      stages:
+        - name: install
+          script: corepack enable && corepack prepare pnpm@11.0.9 --activate && pnpm install --frozen-lockfile
+        - name: lint
+          script: pnpm run lint
+        - name: typecheck
+          script: pnpm run typecheck
+        - name: test
+          script: pnpm run test
+        - name: build
+          script: pnpm run build
+        - name: audit
+          script: pnpm audit --audit-level high --registry=https://registry.npmjs.org

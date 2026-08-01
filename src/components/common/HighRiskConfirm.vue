@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
 import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw } from '@lucide/vue'
 import {
   Dialog,
@@ -26,7 +26,8 @@ interface Props {
   confirmLabel?: string
   cancelLabel?: string
   reauthRequired?: boolean
-  reauthDeadline?: number
+  reauthenticated?: boolean
+  reauthenticating?: boolean
   executing?: boolean
 }
 
@@ -34,7 +35,8 @@ const props = withDefaults(defineProps<Props>(), {
   confirmLabel: '确认执行',
   cancelLabel: '取消',
   reauthRequired: false,
-  reauthDeadline: 10 * 60 * 1000,
+  reauthenticated: false,
+  reauthenticating: false,
   executing: false,
 })
 
@@ -42,6 +44,7 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   confirm: []
   cancel: []
+  reauthenticate: []
 }>()
 
 const step = ref<'preview' | 'confirm' | 'executing' | 'done'>('preview')
@@ -54,7 +57,7 @@ watch(
 )
 
 function handleNext() {
-  if (step.value === 'preview') {
+  if (step.value === 'preview' && (!props.reauthRequired || props.reauthenticated)) {
     step.value = 'confirm'
   }
 }
@@ -69,10 +72,6 @@ function handleCancel() {
   emit('update:open', false)
 }
 
-const remainingSeconds = computed(() => {
-  if (!props.reauthRequired) return 0
-  return Math.ceil(props.reauthDeadline / 1000)
-})
 </script>
 
 <template>
@@ -108,8 +107,14 @@ const remainingSeconds = computed(() => {
 
         <div v-if="reauthRequired" class="flex items-center gap-2 text-xs text-warning bg-warning-subtle rounded-md px-3 py-2">
           <ShieldAlert :size="14" />
-          <span>此操作需要重新认证（剩余 {{ remainingSeconds }} 秒）</span>
+          <span>{{ reauthenticated ? '身份验证已完成' : '此操作需要重新验证身份' }}</span>
         </div>
+        <Button
+          v-if="reauthRequired && !reauthenticated"
+          variant="outline"
+          :loading="reauthenticating"
+          @click="emit('reauthenticate')"
+        >重新验证身份</Button>
       </div>
 
       <!-- Step: Confirm -->
@@ -137,7 +142,7 @@ const remainingSeconds = computed(() => {
 
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
-        <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>
+        <Button v-if="step === 'preview'" :disabled="reauthRequired && !reauthenticated" @click="handleNext">下一步</Button>
         <Button v-else variant="destructive" :loading="executing" @click="handleConfirm">{{ confirmLabel }}</Button>
       </DialogFooter>
     </DialogContent>

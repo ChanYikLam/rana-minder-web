@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { ShieldAlert, Trash2, CheckCircle2, AlertTriangle, Database } from '@lucide/vue'
+import { identityApi } from '@/services/modules'
 
 interface DeleteTarget { id: string; label: string; type: string; recordCount: number; memberCount: number }
-interface DeletePreview { scope: string; targets: DeleteTarget[]; totalRecords: number; totalMembers: number; warning: string }
+interface DeletePreview { scope: string; targets: DeleteTarget[]; totalRecords: number; totalMembers: number; warning: string; previewVersion: number }
 interface DeleteResult { targetId: string; success: boolean; stores: string[] }
 
 const state = ref<PageState>('loading')
@@ -15,22 +16,45 @@ const preview = ref<DeletePreview | null>(null)
 const step = ref<'preview' | 'confirm' | 'executing' | 'result'>('preview')
 const results = ref<DeleteResult[]>([])
 const auditRef = ref('')
+const reason = ref('')
+const reauthProof = ref('')
+const reauthenticating = ref(false)
+const hasActiveRelationships = computed(() => preview.value?.targets.some((target) => target.memberCount > 0) ?? true)
+const canExecute = computed(() => !hasActiveRelationships.value && reason.value.trim().length >= 5 && Boolean(reauthProof.value))
 
 async function loadData() {
   state.value = 'loading'
   const result = await get<DeletePreview>('/admin/delete/preview')
   if (result.kind === 'completed') {
     preview.value = result.data
+    reason.value = ''
+    reauthProof.value = ''
     state.value = 'normal'
   } else { state.value = 'error' }
 }
 
+async function reauthenticate() {
+  reauthenticating.value = true
+  const result = await identityApi.reauthenticate()
+  reauthenticating.value = false
+  if (result.kind === 'completed') {
+    reauthProof.value = result.data.proof
+    toast.success('身份验证已完成')
+    return
+  }
+  toast.error('身份验证失败，请重新登录后再试')
+}
+
 async function execute() {
+  if (!preview.value || !canExecute.value) return
   step.value = 'executing'
   results.value = []
   const result = await post<{ results: DeleteResult[]; auditRef: string }>('/admin/delete/execute', {
     targetIds: preview.value!.targets.map((t) => t.id),
-  })
+    reason: reason.value.trim(),
+    previewVersion: preview.value.previewVersion,
+    reauthProof: reauthProof.value,
+  }, { expectedVersion: preview.value.previewVersion })
   if (result.kind === 'completed') {
     results.value = result.data.results
     auditRef.value = result.data.auditRef
@@ -93,7 +117,11 @@ onMounted(loadData)
           </div>
         </Card>
 
-        <button class="w-full h-11 rounded-md bg-danger text-text-on-primary font-medium hover:opacity-90 flex items-center justify-center gap-2" @click="step = 'confirm'">
+        <button
+          class="w-full h-11 rounded-md bg-danger text-text-on-primary font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+          :disabled="hasActiveRelationships"
+          @click="step = 'confirm'"
+        >
           <ShieldAlert :size="18" /> 下一步：重新认证
         </button>
       </template>
@@ -107,9 +135,27 @@ onMounted(loadData)
             <p class="text-sm text-text-secondary mt-1">此操作不可撤销，{{ preview.totalRecords }} 条记录将被永久清除</p>
           </div>
         </Card>
+        <Card class="mb-4">
+          <label for="delete-reason" class="block text-sm font-medium text-text-primary mb-2">删除原因</label>
+          <textarea
+            id="delete-reason"
+            v-model="reason"
+            rows="3"
+            maxlength="500"
+            class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text-primary"
+            placeholder="请填写至少 5 个字符的删除原因"
+          />
+          <button
+            class="mt-3 w-full h-10 rounded-md border border-border text-text-primary hover:bg-subtle disabled:opacity-50"
+            :disabled="reauthenticating || Boolean(reauthProof)"
+            @click="reauthenticate"
+          >
+            {{ reauthProof ? '身份验证已完成' : reauthenticating ? '正在验证...' : '重新验证身份' }}
+          </button>
+        </Card>
         <div class="flex gap-3">
           <button class="flex-1 h-11 rounded-md border border-border text-text-primary hover:bg-subtle" @click="step = 'preview'">返回</button>
-          <button class="flex-1 h-11 rounded-md bg-danger text-text-on-primary font-medium hover:opacity-90" @click="execute">确认删除</button>
+          <button class="flex-1 h-11 rounded-md bg-danger text-text-on-primary font-medium hover:opacity-90 disabled:opacity-50" :disabled="!canExecute" @click="execute">确认删除</button>
         </div>
       </template>
 

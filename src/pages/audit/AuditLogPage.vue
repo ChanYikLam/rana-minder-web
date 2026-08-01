@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Search, Clock } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 interface AuditLog { id: string; actorName: string; action: string; targetType: string; targetId: string; detail: string; createdAt: string }
 
@@ -15,8 +16,9 @@ const searchKeyword = ref('')
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await get<{ items: AuditLog[] }>(`/org/${clubId}/audit/logs`, { search: searchKeyword.value || undefined })
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<{ items: AuditLog[] }>(`${apiScope.prefix}/audit/logs`, { search: searchKeyword.value || undefined })
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: AuditLog[] } }).data.items
     state.value = 'normal'

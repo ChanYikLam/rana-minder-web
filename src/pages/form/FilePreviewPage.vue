@@ -7,6 +7,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { Download, FileText, ShieldCheck, ArrowLeft } from '@lucide/vue'
+import { openAuthorizedDownload } from '@/services/download'
 
 interface FileMeta {
   id: string; name: string; size: number; mimeType: string
@@ -44,10 +45,14 @@ function formatTime(iso: string): string {
 async function handleDownload() {
   downloading.value = true
   const id = route.params.fileId as string
-  const result = await post(`/files/${id}/download`, {})
+  const result = await post<{ downloadUrl: string }>(`/files/${id}/download`, {})
   downloading.value = false
   if (result.kind === 'completed') {
-    toast.success('已生成下载链接')
+    if (openAuthorizedDownload(result.data.downloadUrl)) {
+      toast.success('已开始下载')
+    } else {
+      toast.error('下载地址无效，请重新获取')
+    }
   } else {
     toast.error('下载失败，请稍后重试')
   }

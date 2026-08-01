@@ -6,12 +6,14 @@ import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Crown, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Users } from '@lucide/vue'
+import { identityApi } from '@/services/modules'
 
 interface TransitionData {
   currentLeader: { id: string; name: string; title: string }
   candidates: { id: string; name: string; currentTitle: string; proposedTitle: string; department: string }[]
   appointments: { id: string; name: string; currentTitle: string; proposedTitle: string; department: string }[]
   canExecute: boolean
+  version: number
 }
 
 interface TransitionResult { memberId: string; action: string; targetTitle: string; success: boolean }
@@ -22,6 +24,8 @@ const state = ref<PageState>('loading')
 const data = ref<TransitionData | null>(null)
 const executing = ref(false)
 const result = ref<{ success: string[]; failed: string[] } | null>(null)
+const reauthProof = ref('')
+const reauthenticating = ref(false)
 
 async function loadData() {
   state.value = 'loading'
@@ -35,11 +39,25 @@ async function loadData() {
   }
 }
 
+async function reauthenticate() {
+  reauthenticating.value = true
+  const response = await identityApi.reauthenticate()
+  reauthenticating.value = false
+  if (response.kind === 'completed') {
+    reauthProof.value = response.data.proof
+    toast.success('身份验证已完成')
+    return
+  }
+  toast.error('身份验证失败，请重新登录后再试')
+}
+
 async function handleExecute() {
-  if (!data.value?.canExecute) return
+  if (!data.value?.canExecute || !reauthProof.value) return
   executing.value = true
   const clubId = route.params.clubId as string
-  const r = await post<{ results: TransitionResult[] }>(`/org/${clubId}/members/transition`, {})
+  const r = await post<{ results: TransitionResult[] }>(`/org/${clubId}/members/transition`, {
+    reauthProof: reauthProof.value,
+  }, { expectedVersion: data.value.version })
   executing.value = false
   if (r.kind === 'completed') {
     const results = (r as { kind: 'completed'; data: { results: TransitionResult[] } }).data.results
@@ -54,6 +72,7 @@ async function handleExecute() {
     result.value = { success, failed }
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
   } else {
+    reauthProof.value = ''
     toast.error('换届执行失败，请重试')
   }
 }
@@ -129,8 +148,16 @@ onMounted(loadData)
         </Card>
 
         <button
+          class="w-full h-11 rounded-md border border-border text-text-primary font-medium hover:bg-subtle disabled:opacity-60 flex items-center justify-center gap-2 mb-3"
+          :disabled="reauthenticating || Boolean(reauthProof)"
+          @click="reauthenticate"
+        >
+          <ShieldAlert :size="18" /> {{ reauthProof ? '身份验证已完成' : reauthenticating ? '正在验证...' : '重新验证身份' }}
+        </button>
+
+        <button
           class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
-          :disabled="executing || !data.canExecute"
+          :disabled="executing || !data.canExecute || !reauthProof"
           @click="handleExecute"
         >
           <ShieldAlert :size="18" /> {{ executing ? '执行中...' : '确认执行换届' }}

@@ -182,11 +182,30 @@ export const mockUsers: Record<string, MockUser> = {
   },
 }
 
+let activeMockUserKey: string | null = null
+
+export function resolveMockSessionUser(url: string): MockUser | null {
+  const u = new URL(url, 'http://localhost')
+  const requestedKey = u.searchParams.get('_mock_user')
+  if (requestedKey && mockUsers[requestedKey]) {
+    activeMockUserKey = requestedKey
+  }
+  return activeMockUserKey ? mockUsers[activeMockUserKey] : null
+}
+
+export function clearMockSession(): void {
+  activeMockUserKey = null
+}
+
+export function getActiveMockUser(): MockUser | null {
+  return activeMockUserKey ? mockUsers[activeMockUserKey] : null
+}
+
 /** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换） */
 export function resolveMockUser(url: string): MockUser {
   try {
     const u = new URL(url, 'http://localhost')
-    const key = u.searchParams.get('_mock_user') || 'leader'
+    const key = u.searchParams.get('_mock_user') || activeMockUserKey || 'leader'
     return mockUsers[key] || mockUsers.leader
   } catch {
     return mockUsers.leader

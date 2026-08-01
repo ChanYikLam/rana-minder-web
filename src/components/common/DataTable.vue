@@ -72,6 +72,11 @@ function renderCell(col: Column<unknown>, row: unknown): string {
   return String((row as Record<string, unknown>)[col.key] ?? '')
 }
 
+function getRowLabel(row: unknown): string {
+  const firstColumn = props.columns[0]
+  return firstColumn ? `打开 ${renderCell(firstColumn, row)}` : '打开该行'
+}
+
 function handleRowClick(row: unknown) {
   if (hasRowClickListener.value) emit('rowClick', row)
 }
@@ -87,6 +92,7 @@ function handleRowClick(row: unknown) {
               type="checkbox"
               class="rounded border-border"
               :checked="allRowsSelected"
+              :indeterminate="localSelected.size > 0 && localSelected.size < rowIds.length"
               :disabled="loading || rows.length === 0"
               :aria-label="allRowsSelected ? '取消全选' : '全选'"
               @change="toggleAll"
@@ -131,6 +137,7 @@ function handleRowClick(row: unknown) {
             :class="hasRowClickListener ? 'cursor-pointer' : ''"
             :tabindex="hasRowClickListener ? 0 : undefined"
             role="row"
+            :aria-label="getRowLabel(row)"
             @click="handleRowClick(row)"
             @keydown.enter="handleRowClick(row)"
             @keydown.space.prevent="handleRowClick(row)"

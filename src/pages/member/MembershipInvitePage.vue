@@ -18,10 +18,11 @@ const actingId = ref<string | null>(null)
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
-  const result = await get<{ items: Invite[] }>(`/org/${clubId}/members/invite`)
+  const result = isManageView.value
+    ? await get<{ items: Invite[] }>(`/org/${route.params.clubId as string}/members/invite`)
+    : await get<Invite>(`/me/invitations/membership/${route.params.invitationId as string}`)
   if (result.kind === 'completed') {
-    items.value = (result as { kind: 'completed'; data: { items: Invite[] } }).data.items
+    items.value = isManageView.value ? (result.data as { items: Invite[] }).items : [result.data as Invite]
     state.value = 'normal'
   } else { state.value = 'error' }
 }
@@ -50,7 +51,7 @@ async function handleWithdraw(inv: Invite) {
 
 async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
   actingId.value = inv.id
-  const r = await post(`/me/invitations/recruitment/${inv.id}/respond`, { action })
+  const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
   actingId.value = null
   if (r.kind === 'completed') {
     toast.success(action === 'accept' ? '已接受邀请' : '已拒绝邀请')
