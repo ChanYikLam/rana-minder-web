@@ -5,13 +5,15 @@ import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { Calendar, Mail, Phone, Building2, Clock } from '@lucide/vue'
+import { Calendar, Mail, Phone, Building2, Clock, AlertTriangle, History } from '@lucide/vue'
 
 interface MemberDetail {
   id: string; studentId: string; name: string; email: string; phone: string
   status: string; joinedAt: string; exitedAt: string | null
   positions: { id: string; departmentName: string; title: string; startDate: string; endDate: string | null; status: string }[]
   tenures: { id: string; departmentName: string; title: string; startDate: string; endDate: string | null; endReason: string | null }[]
+  departmentHistory: { id: string; action: string; departmentName: string; at: string }[]
+  anomalies: { id: string; kind: string; message: string; createdAt: string }[]
 }
 
 const route = useRoute()
@@ -34,6 +36,10 @@ async function loadData() {
 function formatDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}年${d.getMonth() + 1}月`
+}
+
+function actionLabel(a: string): string {
+  return { join: '加入', leave: '退出', transfer: '调岗' }[a] ?? a
 }
 
 onMounted(loadData)
@@ -79,6 +85,34 @@ onMounted(loadData)
         </div>
         <!-- MEM-014: 计划任期只用于内部提醒，不改变前台展示 -->
         <p class="text-xs text-text-secondary mt-2">注：计划任期结束时间仅用于换届规划提醒，不触发自动卸任</p>
+      </Card>
+
+      <!-- 数据异常（Casdoor 不一致等） -->
+      <Card v-if="member.anomalies.length > 0" class="mb-4 border-warning">
+        <h2 class="text-base font-medium text-warning mb-3 flex items-center gap-2">
+          <AlertTriangle :size="16" /> 数据异常
+        </h2>
+        <div class="space-y-2">
+          <div v-for="an in member.anomalies" :key="an.id" class="rounded-lg bg-warning-subtle p-3">
+            <p class="text-xs text-warning">{{ an.message }}</p>
+            <p class="text-xs text-text-secondary mt-0.5">发现于 {{ formatDate(an.createdAt) }}</p>
+          </div>
+        </div>
+      </Card>
+
+      <!-- 部门经历 -->
+      <Card class="mb-4">
+        <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
+          <History :size="16" /> 部门经历
+        </h2>
+        <div class="space-y-2">
+          <div v-for="h in member.departmentHistory" :key="h.id" class="flex items-center gap-2 text-sm">
+            <span class="text-xs px-1.5 py-0.5 rounded bg-subtle text-text-secondary">{{ actionLabel(h.action) }}</span>
+            <span class="text-text-primary">{{ h.departmentName }}</span>
+            <span class="text-xs text-text-secondary ml-auto">{{ formatDate(h.at) }}</span>
+          </div>
+          <p v-if="member.departmentHistory.length === 0" class="text-sm text-text-secondary text-center py-2">暂无部门经历</p>
+        </div>
       </Card>
 
       <!-- 任期历史 -->

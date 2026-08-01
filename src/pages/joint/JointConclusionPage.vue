@@ -1,35 +1,53 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Star, Send, Building2, CheckCircle2 } from '@lucide/vue'
+import { Star, Send, Building2, CheckCircle2, ThumbsUp, ThumbsDown, RefreshCw, XCircle } from '@lucide/vue'
 
-interface Conclusion { id: string; applicantId?: string; applicantName: string; clubName: string; status: string; rating: number | null; comment: string; concludedAt: string | null }
+interface Conclusion {
+  id: string; applicantId?: string; applicantName: string; clubName: string; status: string
+  conclusion: 'admit' | 'not_admit' | null; reviewFlag: boolean
+  rating: number | null; comment: string; concludedAt: string | null
+}
+interface JointInvitation {
+  id: string; applicantId: string; applicantName: string; clubId: string
+  status: string; sentAt: string; expiredAt: string
+}
 
 const route = useRoute()
 const state = ref<PageState>('loading')
 const conclusions = ref<Conclusion[]>([])
+const invitations = ref<JointInvitation[]>([])
 const selected = ref<Conclusion | null>(null)
 const rating = ref(0)
 const comment = ref('')
 const evaluating = ref(false)
 const invitingName = ref<string | null>(null)
-const invitedNames = ref<Set<string>>(new Set())
+const actionError = ref('')
+
+const clubId = computed(() => (route.params.clubId as string) || 'club-001')
+const jointId = computed(() => (route.params.jointId as string) || 'jnt-001')
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
-  const jointId = route.params.jointId as string
-  const result = await get<{ items: Conclusion[] }>(`/org/${clubId}/joint/${jointId}/conclusions`)
+  const result = await get<{ items: Conclusion[] }>(`/org/${clubId.value}/joint/${jointId.value}/conclusions`)
   if (result.kind === 'completed') {
-    conclusions.value = (result as { kind: 'completed'; data: { items: Conclusion[] } }).data.items
+    conclusions.value = result.data.items
     state.value = 'normal'
   } else {
     state.value = 'error'
+  }
+}
+
+async function loadInvitations() {
+  const result = await get<{ items: JointInvitation[] }>(`/org/${clubId.value}/joint/${jointId.value}/invitations`)
+  if (result.kind === 'completed') {
+    invitations.value = result.data.items.filter((i) => i.clubId === clubId.value)
   }
 }
 
@@ -42,9 +60,8 @@ function openEvaluate(c: Conclusion) {
 async function handleEvaluate() {
   if (!selected.value || rating.value === 0) return
   evaluating.value = true
-  const clubId = route.params.clubId as string
-  const jointId = route.params.jointId as string
-  const result = await post(`/org/${clubId}/joint/${jointId}/conclusions/${selected.value.id}/evaluate`, {
+  actionError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${selected.value.id}/evaluate`, {
     rating: rating.value,
     comment: comment.value,
   })
@@ -61,28 +78,73 @@ async function handleEvaluate() {
     rating.value = 0
     comment.value = ''
     toast.success('评价已提交')
-  } else {
-    toast.error('评价提交失败，请稍后重试')
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '评价提交失败'
   }
 }
 
 async function handleInvite(c: Conclusion) {
   invitingName.value = c.applicantName
-  const clubId = route.params.clubId as string
-  const jointId = route.params.jointId as string
-  const result = await post(`/org/${clubId}/joint/${jointId}/invitations`, {
+  actionError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations`, {
     applicantId: c.applicantId || '',
   })
   invitingName.value = null
   if (result.kind === 'completed') {
-    invitedNames.value.add(c.applicantName)
     toast.success(`邀请已发送至 ${c.applicantName}`)
-  } else {
-    toast.error('邀请发送失败，请稍后重试')
+    await loadInvitations()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '邀请发送失败'
   }
 }
 
-onMounted(loadData)
+async function handleSetConclusion(c: Conclusion, conclusion: 'admit' | 'not_admit') {
+  if (!c.applicantId) return
+  actionError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/set`, { conclusion })
+  if (result.kind === 'completed') {
+    toast.success(`已设定结论：${conclusion === 'admit' ? '录用' : '不录用'}`)
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '设定结论失败'
+  }
+}
+
+const reviewingId = ref<string | null>(null)
+
+async function handleReview(c: Conclusion, action: 'keep' | 'modify', newConclusion?: 'admit' | 'not_admit') {
+  if (!c.applicantId) return
+  actionError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/review`, {
+    action,
+    newConclusion,
+  })
+  if (result.kind === 'completed') {
+    toast.success(action === 'keep' ? '结论已保持' : '结论已复核修改')
+    reviewingId.value = null
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '复核失败'
+  }
+}
+
+async function handleInvitationAction(invitationId: string, action: string) {
+  actionError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations/${invitationId}/${action}`, {})
+  if (result.kind === 'completed') {
+    toast.success(action === 'withdraw' ? '邀请已撤回' : '邀请已同步生效')
+    await loadInvitations()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '操作失败'
+  }
+}
+
+const invitedFor = (applicantName: string) => invitations.value.filter((i) => i.applicantName === applicantName)
+
+onMounted(async () => {
+  await loadData()
+  await loadInvitations()
+})
 </script>
 
 <template>
@@ -91,53 +153,144 @@ onMounted(loadData)
       <h1 class="text-2xl font-bold text-text-primary mb-2">联合结论与邀请</h1>
       <p class="text-sm text-text-secondary mb-6">各参与社团独立给出结论和邀请</p>
 
-      <!-- 按申请人分组 -->
-      <div class="space-y-4">
-        <Card v-for="name in [...new Set(conclusions.map((c) => c.applicantName))]" :key="name">
-          <p class="text-base font-medium text-text-primary mb-3">{{ name }}</p>
-          <div class="space-y-2">
-            <div
-              v-for="c in conclusions.filter((c) => c.applicantName === name)"
-              :key="c.id"
-              class="flex items-center justify-between rounded-lg border border-border p-3"
-            >
-              <div class="flex items-center gap-2">
-                <Building2 :size="16" class="text-text-secondary" />
-                <span class="text-sm text-text-primary">{{ c.clubName }}</span>
-              </div>
-              <div class="flex items-center gap-3">
-                <template v-if="c.status === 'concluded'">
-                  <span class="flex items-center gap-1 text-sm">
-                    <Star :size="14" class="text-warning fill-warning" /> {{ c.rating }}
-                  </span>
-                  <StateTag status="concluded" />
-                </template>
-                <!-- JNT-014: 过期与拒绝是不同状态，不得混用 -->
-                <template v-else-if="c.status === 'expired'">
-                  <StateTag status="expired" />
-                  <span class="text-xs text-text-secondary">逾期未处理（非主动拒绝）</span>
-                </template>
-                <template v-else-if="c.status === 'rejected'">
-                  <StateTag status="rejected" />
-                </template>
-                <template v-else>
-                  <StateTag :status="c.status" />
-                  <button class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
-                </template>
+      <PermissionGuard permission="club:joint:manage">
+        <div class="space-y-4">
+          <Card v-for="name in [...new Set(conclusions.map((c) => c.applicantName))]" :key="name">
+            <p class="text-base font-medium text-text-primary mb-3">{{ name }}</p>
+            <div class="space-y-2">
+              <div
+                v-for="c in conclusions.filter((c) => c.applicantName === name)"
+                :key="c.id"
+                class="flex items-center justify-between rounded-lg border border-border p-3"
+              >
+                <div class="flex items-center gap-2">
+                  <Building2 :size="16" class="text-text-secondary" />
+                  <span class="text-sm text-text-primary">{{ c.clubName }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <template v-if="c.conclusion">
+                    <span
+                      class="flex items-center gap-1 text-xs px-2 py-0.5 rounded"
+                      :class="c.conclusion === 'admit' ? 'bg-success-subtle text-success' : 'bg-destructive-subtle text-destructive'"
+                    >
+                      {{ c.conclusion === 'admit' ? '录用' : '不录用' }}
+                    </span>
+                  </template>
+                  <template v-if="c.status === 'concluded'">
+                    <span class="flex items-center gap-1 text-sm">
+                      <Star :size="14" class="text-warning fill-warning" /> {{ c.rating }}
+                    </span>
+                    <StateTag status="concluded" />
+                    <button class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
+                    <div v-if="reviewingId === c.id" class="flex items-center gap-1.5">
+                      <button
+                        class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
+                        @click="handleReview(c, 'keep')"
+                      >
+                        保持结论
+                      </button>
+                      <button
+                        class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
+                        @click="handleReview(c, 'modify', 'admit')"
+                      >
+                        改为录用
+                      </button>
+                      <button
+                        class="px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted"
+                        @click="handleReview(c, 'modify', 'not_admit')"
+                      >
+                        改为不录用
+                      </button>
+                    </div>
+                  </template>
+                  <!-- JNT-014: 过期与拒绝是不同状态，不得混用 -->
+                  <template v-else-if="c.status === 'expired'">
+                    <StateTag status="expired" />
+                    <span class="text-xs text-text-secondary">逾期未处理（非主动拒绝）</span>
+                  </template>
+                  <template v-else-if="c.status === 'rejected'">
+                    <StateTag status="rejected" />
+                  </template>
+                  <template v-else-if="c.status === 'pending'">
+                    <div class="flex items-center gap-1.5">
+                      <button
+                        class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
+                        @click="handleSetConclusion(c, 'admit')"
+                      >
+                        <ThumbsUp :size="12" /> 录用
+                      </button>
+                      <button
+                        class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
+                        @click="handleSetConclusion(c, 'not_admit')"
+                      >
+                        <ThumbsDown :size="12" /> 不录用
+                      </button>
+                      <button class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <StateTag :status="c.status" />
+                    <button class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
+                  </template>
+                </div>
               </div>
             </div>
-          </div>
-          <div v-if="conclusions.filter((c) => c.applicantName === name).every((c) => c.status === 'concluded') && !invitedNames.has(name)" class="mt-3 pt-3 border-t border-border">
-            <button
-              class="flex items-center gap-1.5 text-sm text-primary hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="invitingName !== null"
-              @click="handleInvite(conclusions.find((c) => c.applicantName === name)!)"
+
+            <!-- 已发邀请 -->
+            <div v-if="invitedFor(name).length > 0" class="mt-3 pt-3 border-t border-border space-y-2">
+              <p class="text-xs text-text-secondary">已发送的邀请</p>
+              <div
+                v-for="inv in invitedFor(name)"
+                :key="inv.id"
+                class="flex items-center justify-between rounded-md bg-subtle px-3 py-2"
+              >
+                <div class="flex items-center gap-2">
+                  <Send :size="13" class="text-text-secondary" />
+                  <StateTag :status="inv.status" />
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <button
+                    v-if="inv.status === 'pending_acceptance'"
+                    class="flex items-center gap-1 px-2 h-7 rounded-md bg-muted text-text-primary text-xs font-medium hover:bg-border disabled:opacity-60"
+                    @click="handleInvitationAction(inv.id, 'withdraw')"
+                  >
+                    <XCircle :size="12" /> 撤回
+                  </button>
+                  <button
+                    v-if="inv.status === 'accepted'"
+                    class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+                    @click="handleInvitationAction(inv.id, 'sync')"
+                  >
+                    <CheckCircle2 :size="12" /> 同步生效
+                  </button>
+                  <button
+                    v-if="['rejected', 'withdrawn', 'expired'].includes(inv.status)"
+                    class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+                    @click="handleInvite(conclusions.find((c) => c.applicantId === inv.applicantId)!)"
+                  >
+                    <RefreshCw :size="12" /> {{ invitingName === inv.applicantName ? '发送中...' : '重发' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-else-if="conclusions.filter((c) => c.applicantName === name).every((c) => c.status === 'concluded')"
+              class="mt-3 pt-3 border-t border-border"
             >
-              <Send :size="14" /> {{ invitingName === name ? '发送中...' : '发送邀请' }}
-            </button>
-          </div>
-        </Card>
-      </div>
+              <button
+                class="flex items-center gap-1.5 text-sm text-primary hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
+                :disabled="invitingName !== null"
+                @click="handleInvite(conclusions.find((c) => c.applicantName === name)!)"
+              >
+                <Send :size="14" /> {{ invitingName === name ? '发送中...' : '发送邀请' }}
+              </button>
+            </div>
+          </Card>
+        </div>
+      </PermissionGuard>
+
+      <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
 
       <!-- 评价面板 -->
       <Card v-if="selected" class="mt-4">

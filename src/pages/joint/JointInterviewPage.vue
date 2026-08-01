@@ -1,44 +1,167 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
-import { get } from '@/services/client'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
+import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { Star, Calendar, MapPin, Users, AlertTriangle } from '@lucide/vue'
+import { toast } from 'vue-sonner'
+import { Calendar, Users, AlertTriangle, Play, CheckCircle2, XCircle, Clock3, CalendarPlus } from '@lucide/vue'
 
-interface JointInterview { id: string; applicantName: string; status: string; scheduledTime: string; location: string; interviewers: { id: string; name: string }[] }
+interface JointInterview {
+  id: string; jointId: string; applicantId: string; applicantName: string
+  status: string; scheduledTime: string; attendance: string; invalidReason: string | null; attempt: number
+}
+interface JointApp { applicantId: string; applicantName: string; status: string }
+interface Slot { id: string; startAt: string; capacity: number; available: number }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
 const interviews = ref<JointInterview[]>([])
+const applications = ref<JointApp[]>([])
+const slots = ref<Slot[]>([])
+const invalidReason = ref('')
+const actionLoading = ref(false)
+const actionError = ref('')
+const bookOpen = ref(false)
+const bookForm = ref({ applicantId: '', slotId: '' })
+
+const clubId = computed(() => (route.params.clubId as string) || 'club-001')
+const jointId = computed(() => (route.params.jointId as string) || 'jnt-001')
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
-  const jointId = route.params.jointId as string
-  const result = await get<{ items: JointInterview[] }>(`/org/${clubId}/joint/${jointId}/interviews`)
+  const result = await get<{ items: JointInterview[] }>(`/org/${clubId.value}/joint/${jointId.value}/interviews`)
   if (result.kind === 'completed') {
-    interviews.value = (result as { kind: 'completed'; data: { items: JointInterview[] } }).data.items
+    interviews.value = result.data.items
     state.value = 'normal'
   } else {
     state.value = 'error'
   }
 }
 
+async function loadOptions() {
+  const [a, s] = await Promise.all([
+    get<{ items: JointApp[] }>(`/org/${clubId.value}/joint/${jointId.value}/applications`),
+    get<{ items: Slot[] }>(`/org/${clubId.value}/joint/${jointId.value}/slots`),
+  ])
+  if (a.kind === 'completed') applications.value = a.data.items
+  if (s.kind === 'completed') slots.value = s.data.items
+}
+
 function formatTime(iso: string): string {
+  if (!iso) return '-'
   const d = new Date(iso)
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-onMounted(loadData)
+async function runAction(applicantId: string, action: string, input?: Record<string, unknown>) {
+  if (actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const result = await post(
+    `/org/${clubId.value}/joint/${jointId.value}/interviews/${applicantId}/${action}`,
+    { ...(input || {}) }
+  )
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '操作失败'
+  }
+}
+
+async function handleBook() {
+  if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviews/book`, {
+    applicantId: bookForm.value.applicantId,
+    slotId: bookForm.value.slotId,
+  })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    toast.success('预约成功')
+    bookOpen.value = false
+    bookForm.value = { applicantId: '', slotId: '' }
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '预约失败'
+  }
+}
+
+const canRegisterAttendance = (s: string) => s === 'scheduled'
+const canStart = (s: string) => ['scheduled', 'late'].includes(s)
+const canComplete = (s: string) => s === 'in_progress'
+const canInvalidate = (s: string) => !['cancelled', 'invalidated', 'completed'].includes(s)
+
+onMounted(async () => {
+  await loadData()
+  await loadOptions()
+})
 </script>
 
 <template>
   <PageStateBoundary :state="state" title="联合面试" @retry="loadData">
     <div>
-      <h1 class="text-2xl font-bold text-text-primary mb-2">联合面试排期与评价</h1>
-      <p class="text-sm text-text-secondary mb-6">共享排期，一次面试，各参与社团独立评价</p>
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-text-primary">联合面试排期与评价</h1>
+          <p class="text-sm text-text-secondary mt-1">共享排期，一次面试，各参与社团独立评价</p>
+        </div>
+        <PermissionGuard permission="club:joint:manage">
+          <button
+            class="flex items-center gap-1.5 px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
+            :disabled="actionLoading"
+            @click="bookOpen = !bookOpen"
+          >
+            <CalendarPlus :size="16" /> 代预约面试
+          </button>
+        </PermissionGuard>
+      </div>
+
+      <!-- 代预约 -->
+      <Card v-if="bookOpen" class="mb-4">
+        <h2 class="text-base font-medium text-text-primary mb-3">代申请人预约联合面试</h2>
+        <div class="grid sm:grid-cols-3 gap-3 mb-3">
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">申请人</label>
+            <select
+              v-model="bookForm.applicantId"
+              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            >
+              <option value="" disabled>选择申请人</option>
+              <option v-for="a in applications.filter((x) => x.status === 'submitted')" :key="a.applicantId" :value="a.applicantId">
+                {{ a.applicantName }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">面试时段</label>
+            <select
+              v-model="bookForm.slotId"
+              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            >
+              <option value="" disabled>选择时段</option>
+              <option v-for="s in slots.filter((x) => x.available > 0)" :key="s.id" :value="s.id">
+                {{ formatTime(s.startAt) }}（剩 {{ s.available }}）
+              </option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button
+              class="px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading || !bookForm.applicantId || !bookForm.slotId"
+              @click="handleBook"
+            >
+              {{ actionLoading ? '预约中...' : '确认预约' }}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <p v-if="actionError" class="mb-3 text-xs text-destructive">{{ actionError }}</p>
 
       <div class="grid gap-3">
         <Card v-for="iv in interviews" :key="iv.id">
@@ -47,14 +170,16 @@ onMounted(loadData)
               <p class="text-base font-medium text-text-primary">{{ iv.applicantName }}</p>
               <div class="flex items-center gap-3 mt-1 text-sm text-text-secondary">
                 <span class="flex items-center gap-1"><Calendar :size="14" /> {{ formatTime(iv.scheduledTime) }}</span>
-                <span class="flex items-center gap-1"><MapPin :size="14" /> {{ iv.location }}</span>
-              </div>
-              <div class="flex items-center gap-1 mt-1 text-sm text-text-secondary">
-                <Users :size="14" /> 面试官：{{ iv.interviewers.map((i) => i.name).join('、') }}
+                <span class="flex items-center gap-1"><Users :size="14" /> 第 {{ iv.attempt }} 次尝试</span>
               </div>
             </div>
-            <StateTag :status="iv.status" />
+            <div class="flex items-center gap-2">
+              <StateTag :status="iv.status" />
+              <StateTag v-if="iv.attendance !== 'none'" :status="iv.attendance" />
+            </div>
           </div>
+
+          <p v-if="iv.invalidReason" class="text-xs text-destructive mb-2">作废原因：{{ iv.invalidReason }}</p>
 
           <!-- JNT-012: 联合面试评价实时互见（与普通面试"首评前隔离"不同） -->
           <div v-if="iv.status === 'completed' || iv.status === 'in_progress'" class="border-t border-border pt-3 mt-2">
@@ -62,21 +187,6 @@ onMounted(loadData)
               <p class="text-xs text-text-secondary">跨社评价（实时互见）</p>
               <span class="text-xs text-info">各社团评价实时互相可见</span>
             </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div class="rounded-lg bg-subtle p-3">
-                <p class="text-xs text-text-secondary">计算机协会</p>
-                <div class="flex items-center gap-1 mt-1">
-                  <Star :size="14" class="text-warning fill-warning" />
-                  <span class="text-sm text-text-primary">4 分</span>
-                </div>
-                <p class="text-xs text-text-secondary mt-0.5">表现优秀</p>
-              </div>
-              <div class="rounded-lg bg-subtle p-3">
-                <p class="text-xs text-text-secondary">电子设计协会</p>
-                <p class="text-sm text-text-secondary mt-1">待评价</p>
-              </div>
-            </div>
-            <!-- JNT-012: 任何人都不能修改其他作者记录 -->
             <p class="text-xs text-text-secondary mt-2">注：只能修改本人提交的评语，活动结束后锁定</p>
           </div>
 
@@ -91,6 +201,69 @@ onMounted(loadData)
               <p class="text-xs text-warning">面试作废待复核 — 邀请暂不可接受，等待补面后各社团独立复核</p>
             </div>
           </div>
+
+          <!-- 管理操作 -->
+          <PermissionGuard permission="club:joint:manage">
+            <div class="border-t border-border pt-3 mt-2 space-y-3">
+              <div v-if="canRegisterAttendance(iv.status)" class="flex flex-wrap items-center gap-2">
+                <span class="text-xs text-text-secondary">出席登记：</span>
+                <button
+                  class="flex items-center gap-1 px-3 h-8 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runAction(iv.applicantId, 'attendance', { event: 'late' })"
+                >
+                  <Clock3 :size="13" /> 迟到
+                </button>
+                <button
+                  class="px-3 h-8 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runAction(iv.applicantId, 'attendance', { event: 'leave' })"
+                >
+                  请假
+                </button>
+                <button
+                  class="px-3 h-8 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runAction(iv.applicantId, 'attendance', { event: 'absent' })"
+                >
+                  缺席
+                </button>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  v-if="canStart(iv.status)"
+                  class="flex items-center gap-1.5 px-3 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runAction(iv.applicantId, 'start')"
+                >
+                  <Play :size="13" /> 开始面试
+                </button>
+                <button
+                  v-if="canComplete(iv.status)"
+                  class="flex items-center gap-1.5 px-3 h-8 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runAction(iv.applicantId, 'complete')"
+                >
+                  <CheckCircle2 :size="13" /> 完成面试
+                </button>
+                <template v-if="canInvalidate(iv.status)">
+                  <input
+                    v-model="invalidReason"
+                    class="flex-1 max-w-52 px-2 h-8 rounded-md border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
+                    placeholder="作废原因（必填）"
+                  />
+                  <button
+                    class="flex items-center gap-1 px-3 h-8 rounded-md bg-destructive text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60"
+                    :disabled="actionLoading || !invalidReason.trim()"
+                    @click="runAction(iv.applicantId, 'invalidate', { reason: invalidReason })"
+                  >
+                    <XCircle :size="13" /> 作废
+                  </button>
+                </template>
+              </div>
+            </div>
+          </PermissionGuard>
         </Card>
       </div>
     </div>

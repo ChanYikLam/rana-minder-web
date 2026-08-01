@@ -180,6 +180,69 @@ export const mockUsers: Record<string, MockUser> = {
       },
     ],
   },
+
+  /** 候选人（收到常规入社邀请待处理） */
+  candidate: {
+    id: 'user-candidate-001',
+    studentId: '20240010',
+    name: '周明轩',
+    email: 'candidate@example.edu.cn',
+    phone: '13800000010',
+    avatar: null,
+    emailVerified: true,
+    profileComplete: true,
+    currentClubId: null,
+    roles: [
+      {
+        clubId: '',
+        clubName: '',
+        role: 'applicant',
+        permissions: [],
+      },
+    ],
+  },
+
+  /** 第二申请人（受邀人 u-002 的操作者） */
+  applicant2: {
+    id: 'user-applicant-002',
+    studentId: '20240002',
+    name: '陈雨桐',
+    email: 'applicant2@example.edu.cn',
+    phone: '13800000002',
+    avatar: null,
+    emailVerified: true,
+    profileComplete: true,
+    currentClubId: null,
+    roles: [
+      {
+        clubId: '',
+        clubName: '',
+        role: 'applicant',
+        permissions: [],
+      },
+    ],
+  },
+
+  /** 第三申请人（联合受邀人 u-006 的操作者） */
+  applicant3: {
+    id: 'user-applicant-003',
+    studentId: '20240006',
+    name: '孙一凡',
+    email: 'applicant3@example.edu.cn',
+    phone: '13800000003',
+    avatar: null,
+    emailVerified: true,
+    profileComplete: true,
+    currentClubId: null,
+    roles: [
+      {
+        clubId: '',
+        clubName: '',
+        role: 'applicant',
+        permissions: [],
+      },
+    ],
+  },
 }
 
 let activeMockUserKey: string | null = null
@@ -202,8 +265,7 @@ export function getActiveMockUser(): MockUser | null {
 }
 
 /** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换） */
-export function resolveMockUser(url: string): MockUser {
-  try {
+export function resolveMockUser(url: string): MockUser {  try {
     const u = new URL(url, 'http://localhost')
     const key = u.searchParams.get('_mock_user') || activeMockUserKey || 'leader'
     return mockUsers[key] || mockUsers.leader
@@ -221,4 +283,20 @@ export function getPermissions(user: MockUser, clubId: string): string[] {
   }
   const role = user.roles.find((r) => r.clubId === clubId)
   return role?.permissions || []
+}
+
+/** mock 用户 id → 社团成员 id（成员生命周期以成员视角模拟操作者） */
+export const USER_MEMBER_MAP: Record<string, string> = {
+  'user-leader-001': 'mem-004',
+  'user-hr-001': 'mem-003',
+  'user-interviewer-001': 'mem-002',
+  'user-member-001': 'mem-001',
+}
+
+/** 获取当前用户的默认工作空间（有社团归属时返回） */
+export function getWorkspace(user: MockUser): { clubId: string; clubName: string; role: MockRole['role']; memberId?: string } | null {
+  if (!user.currentClubId) return null
+  const role = user.roles.find((r) => r.clubId === user.currentClubId)
+  if (!role) return null
+  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, memberId: USER_MEMBER_MAP[user.id] }
 }

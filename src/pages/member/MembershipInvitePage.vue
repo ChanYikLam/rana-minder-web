@@ -6,23 +6,51 @@ import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle } from '@lucide/vue'
+import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, Search, RefreshCw } from '@lucide/vue'
 
-interface Invite { id: string; candidateName: string; candidateStudentId: string; status: string; sentAt: string; acceptedAt: string | null; expiredAt: string; departmentName?: string }
+interface Invite {
+  id: string
+  candidateId?: string
+  candidateName: string
+  candidateStudentId?: string
+  clubName?: string
+  departmentId?: string | null
+  departmentName?: string | null
+  status: string
+  sentAt: string
+  acceptedAt: string | null
+  expiredAt: string
+  withdrawnAt?: string | null
+}
+interface Candidate { id: string; studentId: string; name: string; isMember: boolean }
+interface Dept { id: string; name: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
 const items = ref<Invite[]>([])
+const departments = ref<Dept[]>([])
 const isManageView = computed(() => route.meta.view === 'manage')
 const actingId = ref<string | null>(null)
 
+// 发送邀请弹窗
+const showSend = ref(false)
+const candidateKeyword = ref('')
+const candidates = ref<Candidate[]>([])
+const selectedCandidate = ref<Candidate | null>(null)
+const targetDept = ref('')
+const sendError = ref('')
+const sendSubmitting = ref(false)
+
+const actionableStatuses = ['sent', 'pending_acceptance']
+
 async function loadData() {
   state.value = 'loading'
-  const result = isManageView.value
-    ? await get<{ items: Invite[] }>(`/org/${route.params.clubId as string}/members/invite`)
-    : await get<Invite>(`/me/invitations/membership/${route.params.invitationId as string}`)
+  const clubId = route.params.clubId as string
+  const path = isManageView.value ? `/org/${clubId}/members/invite` : `/me/invitations/membership`
+  const result = await get<{ items: Invite[]; departments?: Dept[] }>(path)
   if (result.kind === 'completed') {
-    items.value = isManageView.value ? (result.data as { items: Invite[] }).items : [result.data as Invite]
+    items.value = result.data.items
+    if (result.data.departments) departments.value = result.data.departments
     state.value = 'normal'
   } else { state.value = 'error' }
 }
@@ -32,8 +60,52 @@ function formatDate(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
-function handleSendInvite() {
-  toast.info('演示环境暂不支持')
+function isActionable(inv: Invite): boolean {
+  return actionableStatuses.includes(inv.status)
+}
+
+function isExpired(inv: Invite): boolean {
+  return inv.status === 'expired' || (isActionable(inv) && new Date(inv.expiredAt).getTime() < Date.now())
+}
+
+// 候选搜索（姓名连续子串/学号精确）
+async function searchCandidates() {
+  const clubId = route.params.clubId as string
+  const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: candidateKeyword.value })
+  if (r.kind === 'completed') {
+    candidates.value = r.data.items
+  }
+}
+
+function openSend() {
+  candidateKeyword.value = ''
+  candidates.value = []
+  selectedCandidate.value = null
+  targetDept.value = departments.value[0]?.id ?? ''
+  sendError.value = ''
+  showSend.value = true
+}
+
+async function handleSend() {
+  if (!selectedCandidate.value) {
+    sendError.value = '请选择目标候选人'
+    return
+  }
+  sendSubmitting.value = true
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/invite`, {
+    candidateId: selectedCandidate.value.id,
+    departmentId: targetDept.value || null,
+    expireDays: 7,
+  })
+  sendSubmitting.value = false
+  if (r.kind === 'completed') {
+    toast.success('邀请已发送')
+    showSend.value = false
+    await loadData()
+  } else {
+    sendError.value = '发送失败，请重试'
+  }
 }
 
 async function handleWithdraw(inv: Invite) {
@@ -54,10 +126,23 @@ async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
   const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
   actingId.value = null
   if (r.kind === 'completed') {
-    toast.success(action === 'accept' ? '已接受邀请' : '已拒绝邀请')
+    toast.success(action === 'accept' ? '已整体接受邀请' : '已拒绝邀请')
     await loadData()
   } else {
     toast.error('操作失败，请重试')
+  }
+}
+
+// Casdoor 回读确认：接受后成员身份正式生效
+async function handleSyncConfirm(inv: Invite) {
+  actingId.value = inv.id
+  const r = await post(`/me/invitations/membership/${inv.id}/sync-confirm`)
+  actingId.value = null
+  if (r.kind === 'completed') {
+    toast.success('已确认生效')
+    await loadData()
+  } else {
+    toast.error('确认失败，请重试')
   }
 }
 
@@ -68,13 +153,13 @@ onMounted(loadData)
   <PageStateBoundary :state="state" title="常规入社邀请" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-text-primary">常规入社邀请</h1>
-        <button v-if="isManageView" class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleSendInvite">
+        <h1 class="text-2xl font-bold text-text-primary">{{ isManageView ? '常规入社邀请' : '我的入社邀请' }}</h1>
+        <button v-if="isManageView" class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openSend">
           <UserPlus :size="16" /> 发送邀请
         </button>
       </div>
 
-      <EmptyState v-if="items.length === 0" type="no_data" title="暂无入社邀请" description="发出的入社邀请将显示在这里" />
+      <EmptyState v-if="items.length === 0" type="no_data" :title="isManageView ? '暂无入社邀请' : '暂无待处理的入社邀请'" :description="isManageView ? '发出的入社邀请将显示在这里' : '收到邀请后将在这里处理'" />
 
       <div v-else class="space-y-3">
         <Card v-for="inv in items" :key="inv.id">
@@ -84,8 +169,8 @@ onMounted(loadData)
                 <Mail :size="18" />
               </div>
               <div>
-                <p class="text-sm font-medium text-text-primary">{{ inv.candidateName }}</p>
-                <p class="text-xs text-text-secondary">{{ inv.candidateStudentId }}</p>
+                <p class="text-sm font-medium text-text-primary">{{ isManageView ? inv.candidateName : inv.clubName }}</p>
+                <p class="text-xs text-text-secondary">{{ isManageView ? inv.candidateStudentId : inv.candidateName }}</p>
                 <p v-if="inv.departmentName" class="text-xs text-text-secondary mt-0.5">加入部门：{{ inv.departmentName }}</p>
               </div>
             </div>
@@ -94,16 +179,22 @@ onMounted(loadData)
           <div class="mt-3 flex items-center gap-4 text-xs text-text-secondary">
             <span>发送于 {{ formatDate(inv.sentAt) }}</span>
             <span v-if="inv.acceptedAt" class="text-success">接受于 {{ formatDate(inv.acceptedAt) }}</span>
-            <span>截止 {{ formatDate(inv.expiredAt) }}</span>
+            <span v-if="inv.withdrawnAt" class="text-danger">撤回于 {{ formatDate(inv.withdrawnAt) }}</span>
+            <span v-else>截止 {{ formatDate(inv.expiredAt) }}</span>
           </div>
 
-          <!-- MEM-018: 管理视角 - 撤回仅限待处理且未被接受 -->
-          <div v-if="isManageView && (inv.status === 'sent' || inv.status === 'pending_acceptance')" class="mt-2">
+          <!-- 已过期提示 -->
+          <div v-if="isExpired(inv) && isActionable(inv)" class="mt-2 flex items-center gap-1 text-xs text-warning">
+            <AlertTriangle :size="12" /> 邀请已过期，无法处理
+          </div>
+
+          <!-- 管理视角：撤回仅限待处理且未被接受 -->
+          <div v-if="isManageView && isActionable(inv) && !isExpired(inv)" class="mt-2">
             <button class="text-xs text-danger hover:underline" :disabled="actingId === inv.id" @click="handleWithdraw(inv)">{{ actingId === inv.id ? '处理中...' : '撤回邀请' }}</button>
           </div>
 
-          <!-- MEM-018: 申请人视角 - 整体接受/整体拒绝 -->
-          <div v-if="!isManageView && (inv.status === 'sent' || inv.status === 'pending_acceptance')" class="mt-3">
+          <!-- 被邀请人视角：整体接受/整体拒绝（过期不可处理） -->
+          <div v-if="!isManageView && isActionable(inv) && !isExpired(inv)" class="mt-3">
             <div class="rounded-lg bg-warning-subtle p-2.5 mb-3">
               <p class="text-xs text-warning">接受邀请将同时加入社团{{ inv.departmentName ? `和「${inv.departmentName}」部门` : '' }}，不可拆分接受</p>
             </div>
@@ -117,14 +208,69 @@ onMounted(loadData)
             </div>
           </div>
 
-          <!-- 已接受不可撤回 -->
-          <div v-if="inv.status === 'accepted'" class="mt-2 flex items-center gap-1 text-xs text-success">
-            <CheckCircle2 :size="12" /> 已接受（不可撤回）
+          <!-- 已接受待回读确认：Casdoor 同步确认 -->
+          <div v-if="!isManageView && inv.status === 'accepted_pending_sync'" class="mt-3">
+            <div class="rounded-lg bg-warning-subtle p-2.5 mb-3 flex items-center gap-2">
+              <RefreshCw :size="14" class="text-warning" />
+              <p class="text-xs text-warning">已接受，正在等待成员身份生效确认</p>
+            </div>
+            <button class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="handleSyncConfirm(inv)">{{ actingId === inv.id ? '确认中...' : '确认生效' }}</button>
           </div>
-          <div v-if="inv.status === 'pending_casdoor_sync'" class="mt-2 flex items-center gap-1 text-xs text-warning">
-            <AlertTriangle :size="12" /> 成员身份生效处理中...
+
+          <!-- 已生效 -->
+          <div v-if="inv.status === 'effective'" class="mt-2 flex items-center gap-1 text-xs text-success">
+            <CheckCircle2 :size="12" /> 已生效，欢迎加入
           </div>
         </Card>
+      </div>
+
+      <!-- 发送邀请弹窗 -->
+      <div v-if="showSend" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" aria-label="发送入社邀请">
+        <div class="bg-elevated rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
+          <h3 class="text-base font-medium text-text-primary mb-4">发送常规入社邀请</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">搜索候选人</label>
+              <div class="flex gap-2">
+                <div class="relative flex-1">
+                  <Search :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                  <input
+                    v-model="candidateKeyword"
+                    type="search"
+                    placeholder="姓名或学号..."
+                    class="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                    @input="searchCandidates"
+                  />
+                </div>
+              </div>
+              <div v-if="candidates.length > 0" class="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                <button
+                  v-for="c in candidates"
+                  :key="c.id"
+                  class="w-full flex items-center justify-between rounded-lg p-2 text-left text-sm transition-colors"
+                  :class="selectedCandidate?.id === c.id ? 'bg-primary-subtle' : 'hover:bg-subtle'"
+                  @click="selectedCandidate = c"
+                >
+                  <span class="text-text-primary">{{ c.name }}</span>
+                  <span class="text-xs text-text-secondary">{{ c.studentId }}</span>
+                </button>
+              </div>
+              <p v-else-if="candidateKeyword" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
+              <select v-model="targetDept" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary">
+                <option value="">不指定</option>
+                <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+              </select>
+            </div>
+            <p v-if="sendError" class="text-xs text-danger" role="alert">{{ sendError }}</p>
+            <div class="flex gap-2">
+              <button class="flex-1 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="showSend = false">取消</button>
+              <button class="flex-1 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" :disabled="sendSubmitting" @click="handleSend">{{ sendSubmitting ? '发送中...' : '发送邀请' }}</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </PageStateBoundary>

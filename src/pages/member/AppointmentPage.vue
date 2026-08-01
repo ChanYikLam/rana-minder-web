@@ -1,15 +1,24 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { PageStateBoundary, Card } from '@/components/common'
+import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
-import { Crown, ArrowRightLeft, UserMinus, AlertTriangle } from '@lucide/vue'
+import { Crown, ArrowRightLeft, UserMinus, AlertTriangle, CalendarClock, RefreshCw } from '@lucide/vue'
 
 interface AppointMember { id: string; name: string; studentId: string; department: string; title: string; status: string }
 interface Dept { id: string; name: string }
+interface Command {
+  id: string; action: 'appoint' | 'transfer' | 'dismiss'
+  memberId: string; memberName: string
+  departmentId: string | null; departmentName: string | null
+  title: string | null; scheduledAt: string | null
+  status: string; createdAt: string; createdBy: string
+  executedAt: string | null; failReason: string | null
+}
 
 const route = useRoute()
 const session = useSessionViewStore()
@@ -17,11 +26,15 @@ const state = ref<PageState>('loading')
 const members = ref<AppointMember[]>([])
 const departments = ref<Dept[]>([])
 const titles = ref<string[]>([])
+const commands = ref<Command[]>([])
 const selectedMember = ref<AppointMember | null>(null)
 const action = ref<'appoint' | 'transfer' | 'dismiss'>('appoint')
 const targetDept = ref('')
 const targetTitle = ref('')
+const isScheduled = ref(false)
+const scheduledAt = ref('')
 const submitting = ref(false)
+const actingId = ref<string | null>(null)
 
 const actions = [
   { key: 'appoint' as const, label: '任命', icon: Crown, desc: '为成员分配新职位' },
@@ -32,11 +45,12 @@ const actions = [
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const result = await get<{ items: AppointMember[]; departments: Dept[]; titles: string[] }>(`/org/${clubId}/members/appointments`)
+  const result = await get<{ items: AppointMember[]; departments: Dept[]; titles: string[]; commands: Command[] }>(`/org/${clubId}/members/appointments`)
   if (result.kind === 'completed') {
     members.value = result.data.items
     departments.value = result.data.departments
     titles.value = result.data.titles
+    commands.value = result.data.commands
     state.value = 'normal'
   } else {
     state.value = 'error'
@@ -45,26 +59,27 @@ async function loadData() {
 
 function selectMember(m: AppointMember) {
   selectedMember.value = m
-  targetDept.value = m.department
+  const first = departments.value.find((d) => d.name === m.department)
+  targetDept.value = first?.id ?? departments.value[0]?.id ?? ''
   targetTitle.value = m.title
+  scheduledAt.value = ''
 }
 
-// MEM-008: 免职时检查是否为最后一位负责人
+// 不能免职自己
+const isSelf = computed(() => selectedMember.value?.id === session.workspace?.memberId)
+
+// 末位负责人不可免职（需先交接）
 const isLastLeader = computed(() => {
   if (!selectedMember.value || action.value !== 'dismiss') return false
   return selectedMember.value.title === '负责人' &&
     members.value.filter((m) => m.title === '负责人' && m.status === 'active').length <= 1
 })
 
-// MEM-008: 不能免职自己
-const isSelf = computed(() => {
-  return selectedMember.value?.id === session.user?.id
-})
-
 const canExecute = computed(() => {
   if (!selectedMember.value) return false
   if (isSelf.value) return false
   if (isLastLeader.value) return false
+  if (isScheduled.value && !scheduledAt.value) return false
   return true
 })
 
@@ -74,15 +89,69 @@ async function handleExecute() {
   const clubId = route.params.clubId as string
   const r = await post(`/org/${clubId}/members/appointments`, {
     action: action.value,
-    memberIds: [selectedMember.value.id],
+    memberId: selectedMember.value.id,
+    departmentId: action.value === 'dismiss' ? null : targetDept.value,
+    title: action.value === 'dismiss' ? null : targetTitle.value,
+    scheduledAt: isScheduled.value ? new Date(scheduledAt.value).toISOString() : null,
   })
   submitting.value = false
   if (r.kind === 'completed') {
-    toast.success(action.value === 'appoint' ? '任命成功' : action.value === 'transfer' ? '调岗成功' : '免职成功')
+    toast.success(isScheduled.value ? '预约命令已创建' : (action.value === 'appoint' ? '任命已生效' : action.value === 'transfer' ? '调岗已生效' : '免职已生效'))
+    selectedMember.value = null
     await loadData()
   } else {
     toast.error('操作失败，请重试')
   }
+}
+
+// 取消预约命令
+async function handleCancel(cmd: Command) {
+  actingId.value = cmd.id
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/appointments/${cmd.id}/cancel`)
+  actingId.value = null
+  if (r.kind === 'completed') {
+    toast.success('预约已取消')
+    await loadData()
+  } else { toast.error('取消失败') }
+}
+
+// 重新确认预约命令（失权后恢复）
+async function handleReconfirm(cmd: Command) {
+  actingId.value = cmd.id
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/appointments/${cmd.id}/reconfirm`, { scheduledAt: cmd.scheduledAt || new Date().toISOString() })
+  actingId.value = null
+  if (r.kind === 'completed') {
+    toast.success('已重新确认')
+    await loadData()
+  } else { toast.error('重新确认失败') }
+}
+
+// 执行预约命令（首次可能失败，失败后可重试）
+async function handleExecuteCommand(cmd: Command) {
+  actingId.value = cmd.id
+  const clubId = route.params.clubId as string
+  const r = await post<{ failed?: boolean; message?: string }>(`/org/${clubId}/members/appointments/${cmd.id}/execute`)
+  actingId.value = null
+  if (r.kind === 'completed') {
+    if (r.data.failed) {
+      toast.warning(r.data.message || '执行失败，可重试')
+    } else {
+      toast.success('已执行生效')
+    }
+    await loadData()
+  } else { toast.error('执行失败') }
+}
+
+function actionLabel(a: string): string {
+  return { appoint: '任命', transfer: '调岗', dismiss: '免职' }[a] ?? a
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 onMounted(loadData)
@@ -107,7 +176,7 @@ onMounted(loadData)
         </button>
       </div>
 
-      <div class="grid lg:grid-cols-[1fr_320px] gap-4">
+      <div class="grid lg:grid-cols-[1fr_320px] gap-4 mb-6">
         <!-- 成员列表 -->
         <Card>
           <p class="text-sm font-medium text-text-primary mb-3">选择成员</p>
@@ -137,7 +206,7 @@ onMounted(loadData)
             <div>
               <label class="block text-xs text-text-secondary mb-1">目标部门</label>
               <select v-model="targetDept" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary">
-                <option v-for="d in departments" :key="d.id" :value="d.name">{{ d.name }}</option>
+                <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
               </select>
             </div>
             <div>
@@ -152,11 +221,22 @@ onMounted(loadData)
             <p class="text-xs text-danger">免职后该成员将不再担任当前职位，但保留社团成员身份。</p>
           </div>
 
-          <div v-if="isSelf" class="rounded-lg bg-warning-subtle p-3 mb-3 flex items-center gap-2">
+          <!-- 预约执行 -->
+          <div class="mt-3 rounded-lg border border-border p-3">
+            <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer">
+              <input v-model="isScheduled" type="checkbox" class="accent-primary" />
+              预约执行（延迟到指定时间生效）
+            </label>
+            <div v-if="isScheduled" class="mt-2">
+              <input v-model="scheduledAt" type="datetime-local" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary" aria-label="预约执行时间" />
+            </div>
+          </div>
+
+          <div v-if="isSelf" class="rounded-lg bg-warning-subtle p-3 mb-3 mt-3 flex items-center gap-2">
             <AlertTriangle :size="16" class="text-warning" />
             <p class="text-xs text-warning">不能免职自己</p>
           </div>
-          <div v-else-if="isLastLeader" class="rounded-lg bg-warning-subtle p-3 mb-3 flex items-center gap-2">
+          <div v-else-if="isLastLeader" class="rounded-lg bg-warning-subtle p-3 mb-3 mt-3 flex items-center gap-2">
             <AlertTriangle :size="16" class="text-warning" />
             <p class="text-xs text-warning">最后一位负责人，需先交接方可免职</p>
           </div>
@@ -170,6 +250,40 @@ onMounted(loadData)
           <p class="text-sm text-text-secondary">请选择成员</p>
         </Card>
       </div>
+
+      <!-- 预约命令列表 -->
+      <div v-if="commands.length > 0">
+        <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
+          <CalendarClock :size="18" /> 预约命令
+        </h2>
+        <div class="space-y-2">
+          <Card v-for="cmd in commands" :key="cmd.id">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium text-text-primary">{{ actionLabel(cmd.action) }} · {{ cmd.memberName }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ cmd.departmentName || cmd.title || '当前职位' }}{{ cmd.title ? ` · ${cmd.title}` : '' }} · 执行时间 {{ formatDate(cmd.scheduledAt) }}
+                </p>
+                <p v-if="cmd.status === 'exec_failed'" class="text-xs text-warning mt-0.5 flex items-center gap-1">
+                  <AlertTriangle :size="12" /> {{ cmd.failReason || '执行失败，可重试' }}
+                </p>
+                <p v-if="cmd.status === 'initiator_lost_rights'" class="text-xs text-warning mt-0.5 flex items-center gap-1">
+                  <AlertTriangle :size="12" /> 发起人已失去操作权限，需重新确认后执行
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <StateTag :status="cmd.status" />
+                <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed'" class="text-xs text-danger hover:underline" :disabled="actingId === cmd.id" @click="handleCancel(cmd)">取消</button>
+                <button v-if="cmd.status === 'initiator_lost_rights'" class="text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleReconfirm(cmd)">重新确认</button>
+                <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed' || cmd.status === 'exec_failed'" class="flex items-center gap-1 text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleExecuteCommand(cmd)">
+                  <RefreshCw :size="12" /> {{ cmd.status === 'exec_failed' ? '重试' : '执行' }}
+                </button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+      <EmptyState v-else type="no_data" title="暂无预约命令" description="发起预约执行的任命/调岗/免职将显示在这里" />
     </div>
   </PageStateBoundary>
 </template>

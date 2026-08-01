@@ -28,7 +28,7 @@ export const STATE_MACHINES = {
   },
   'SM-ORG-003': {
     name: '预约管理',
-    states: ['draft', 'pending_confirm', 'confirmed', 'executing', 'completed', 'partially_failed', 'cancelled'] as const,
+    states: ['pending_exec', 'initiator_lost_rights', 'precondition_failed', 'reconfirmed', 'cancelled', 'executing', 'executed', 'exec_failed'] as const,
   },
   'SM-ORG-004': {
     name: '批量操作',
@@ -84,7 +84,7 @@ export const STATE_MACHINES = {
   },
   'SM-MEM-001': {
     name: '成员经历',
-    states: ['active', 'suspended', 'exiting', 'exited', 'removed', 'rejoining'] as const,
+    states: ['non_member', 'pending_effective', 'active', 'exiting', 'exited', 'removed'] as const,
   },
   'SM-MEM-002': {
     name: '部门职位关系',
@@ -92,11 +92,11 @@ export const STATE_MACHINES = {
   },
   'SM-MEM-003': {
     name: '部门关系申请',
-    states: ['draft', 'submitted', 'under_review', 'approved', 'rejected', 'withdrawn'] as const,
+    states: ['draft', 'under_review', 'approved_pending_exec', 'executing', 'effective', 'exec_failed', 'rejected', 'withdrawn'] as const,
   },
   'SM-MEM-004': {
     name: '常规入社邀请',
-    states: ['draft', 'sent', 'pending_acceptance', 'accepted', 'rejected', 'withdrawn', 'expired', 'pending_casdoor_sync', 'effective', 'failed'] as const,
+    states: ['sent', 'pending_acceptance', 'accepted_pending_sync', 'effective', 'sync_failed', 'sync_anomaly', 'withdrawn', 'rejected', 'expired', 'target_already_member'] as const,
   },
   'SM-FORM-001': {
     name: '表单定义',

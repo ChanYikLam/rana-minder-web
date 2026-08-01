@@ -1,29 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ShieldAlert, CheckCircle2, Users, Mail, ArrowLeft } from '@lucide/vue'
-import { resolveApiScope } from '@/services/route-scope'
+import { ShieldAlert, CheckCircle2, Users, Mail, ArrowLeft, XCircle } from '@lucide/vue'
 
 const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
 const closing = ref(false)
+const actionError = ref('')
 const detail = ref<{
   id: string; title: string; status: string
-  participants: { clubId: string; clubName: string; status: string; concludedCount: number; invitationSent: number }[]
+  participants: { clubId: string; clubName: string; status: string; concludedCount: number; invitationSent: number; endConfirmed: boolean }[]
   totalApplicants: number; totalConcluded: number; totalInvited: number; canClose: boolean
 } | null>(null)
 
 async function loadData() {
   state.value = 'loading'
+  const clubId = route.params.clubId as string
   const jointId = route.params.jointId as string
-  const apiScope = resolveApiScope(route)
-  if (!apiScope) { state.value = 'error'; return }
-  const result = await get(`${apiScope.prefix}/joint/${jointId}/close`)
+  const result = await get(`/org/${clubId}/joint/${jointId}/close`)
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value
     state.value = 'normal'
@@ -32,22 +31,43 @@ async function loadData() {
   }
 }
 
-onMounted(loadData)
+const allConfirmed = computed(() => {
+  if (!detail.value) return false
+  return detail.value.participants.length > 0 && detail.value.participants.every((p) => p.endConfirmed)
+})
 
-async function handleClose() {
+async function handleStartClose() {
+  if (!detail.value || closing.value) return
   closing.value = true
-  const jointId = route.params.jointId as string
-  const apiScope = resolveApiScope(route)
-  if (!apiScope) { closing.value = false; return }
-  const result = await post(`${apiScope.prefix}/joint/${jointId}/close`, {})
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/joint/${detail.value.id}/close/start`, {})
   closing.value = false
   if (result.kind === 'completed') {
-    toast.success('联合活动已结束')
-    router.push(apiScope.kind === 'platform' ? '/admin/joint' : `${apiScope.prefix}/joint`)
-  } else {
-    toast.error('结束失败，请稍后重试')
+    toast.success('已进入结束确认阶段')
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '进入结束确认失败'
   }
 }
+
+async function handleClose() {
+  if (!detail.value || closing.value) return
+  closing.value = true
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const jointId = route.params.jointId as string
+  const result = await post(`/org/${clubId}/joint/${jointId}/close`, {})
+  closing.value = false
+  if (result.kind === 'completed') {
+    toast.success('本社团确认完成')
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '确认失败'
+  }
+}
+
+onMounted(loadData)
 </script>
 
 <template>
@@ -87,34 +107,61 @@ async function handleClose() {
         <h2 class="text-base font-medium text-text-primary mb-3">各社团完成情况</h2>
         <div class="space-y-2">
           <div v-for="p in detail.participants" :key="p.clubId" class="flex items-center justify-between rounded-lg border border-border p-3">
-            <span class="text-sm text-text-primary">{{ p.clubName }}</span>
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-text-primary">{{ p.clubName }}</span>
+              <CheckCircle2 v-if="p.endConfirmed" :size="15" class="text-success" />
+            </div>
             <div class="flex items-center gap-3 text-xs text-text-secondary">
               <span>结论 {{ p.concludedCount }}</span>
               <span>邀请 {{ p.invitationSent }}</span>
+              <span :class="p.endConfirmed ? 'text-success' : 'text-warning'">{{ p.endConfirmed ? '已确认' : '未确认' }}</span>
             </div>
           </div>
         </div>
       </Card>
 
       <!-- 高风险确认提示 -->
-      <Card v-if="detail.canClose" class="mb-4 border-warning">
+      <Card v-if="detail.canClose && !['closing_confirm', 'closed'].includes(detail.status)" class="mb-4 border-warning">
         <div class="flex items-start gap-2">
           <ShieldAlert :size="20" class="text-warning mt-0.5 shrink-0" />
           <div>
             <p class="text-sm font-medium text-warning">结束操作不可撤销</p>
-            <p class="text-xs text-text-secondary mt-1">结束后将关闭报名通道，已发出的邀请不受影响，但不可再发新邀请。</p>
+            <p class="text-xs text-text-secondary mt-1">结束后将关闭报名通道，已发出的邀请不受影响，但不可再发新邀请。需全部参与社团确认后方可结束。</p>
           </div>
         </div>
       </Card>
 
+      <template v-if="detail.status === 'closing_confirm'">
+        <button
+          v-if="!allConfirmed"
+          class="w-full h-11 rounded-md bg-warning text-text-on-accent font-medium hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
+          :disabled="closing"
+          @click="handleClose"
+        >
+          <ShieldAlert :size="18" /> {{ closing ? '提交中...' : '确认本社团同意结束' }}
+        </button>
+        <p v-if="allConfirmed" class="flex items-center justify-center gap-2 text-sm text-success">
+          <CheckCircle2 :size="18" /> 全部社团已确认，联合活动已结束
+        </p>
+      </template>
+
       <button
+        v-else-if="detail.canClose && !['closed'].includes(detail.status)"
         class="w-full h-11 rounded-md bg-warning text-text-on-accent font-medium hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
         :disabled="!detail.canClose || closing"
-        @click="handleClose"
+        @click="handleStartClose"
       >
-        <ShieldAlert :size="18" /> {{ closing ? '结束中...' : '确认结束联合活动' }}
+        <ShieldAlert :size="18" /> {{ closing ? '提交中...' : '进入结束确认' }}
       </button>
-      <p v-if="!detail.canClose" class="mt-3 text-xs text-text-secondary text-center">尚有未完成的结论或邀请，暂时无法结束</p>
+      <p v-if="!detail.canClose && !['closed', 'closing_confirm'].includes(detail.status)" class="mt-3 text-xs text-text-secondary text-center">尚有未完成的结论或邀请，暂时无法结束</p>
+      <p v-if="detail.status === 'closed'" class="flex items-center justify-center gap-2 text-sm text-success">
+        <CheckCircle2 :size="18" /> 联合活动已结束
+      </p>
+      <p v-if="['cancelled', 'force_closed'].includes(detail.status)" class="flex items-center justify-center gap-2 text-sm text-text-secondary">
+        <XCircle :size="18" /> 活动已取消，无需结束确认
+      </p>
+
+      <p v-if="actionError" class="mt-3 text-xs text-destructive text-center">{{ actionError }}</p>
     </div>
   </PageStateBoundary>
 </template>

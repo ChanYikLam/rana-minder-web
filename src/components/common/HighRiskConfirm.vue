@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw } from '@lucide/vue'
+import { ref, watch, computed } from 'vue'
+import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound } from '@lucide/vue'
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import Button from '../common/Button.vue'
+import { post } from '@/services/client'
 
 interface TargetItem {
   id: string
@@ -26,8 +27,7 @@ interface Props {
   confirmLabel?: string
   cancelLabel?: string
   reauthRequired?: boolean
-  reauthenticated?: boolean
-  reauthenticating?: boolean
+  reauthDeadline?: number
   executing?: boolean
 }
 
@@ -35,8 +35,7 @@ const props = withDefaults(defineProps<Props>(), {
   confirmLabel: '确认执行',
   cancelLabel: '取消',
   reauthRequired: false,
-  reauthenticated: false,
-  reauthenticating: false,
+  reauthDeadline: 10 * 60 * 1000,
   executing: false,
 })
 
@@ -44,27 +43,55 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   confirm: []
   cancel: []
-  reauthenticate: []
 }>()
 
 const step = ref<'preview' | 'confirm' | 'executing' | 'done'>('preview')
 
+const reauthPassword = ref('')
+const reauthError = ref('')
+const reauthBusy = ref(false)
+
 watch(
   () => props.open,
   (open) => {
-    if (open) step.value = 'preview'
+    if (open) {
+      step.value = 'preview'
+      reauthPassword.value = ''
+      reauthError.value = ''
+    }
   }
 )
 
 function handleNext() {
-  if (step.value === 'preview' && (!props.reauthRequired || props.reauthenticated)) {
+  if (step.value === 'preview') {
     step.value = 'confirm'
   }
 }
 
-function handleConfirm() {
-  step.value = 'executing'
-  emit('confirm')
+async function handleConfirm() {
+  if (!props.reauthRequired) {
+    step.value = 'executing'
+    emit('confirm')
+    return
+  }
+  // 需要先完成密码重认证
+  if (!reauthPassword.value) {
+    reauthError.value = '请输入密码完成身份验证'
+    return
+  }
+  reauthBusy.value = true
+  reauthError.value = ''
+  const result = await post('/auth/reauth', { password: reauthPassword.value })
+  reauthBusy.value = false
+  if (result.kind === 'completed') {
+    step.value = 'executing'
+    emit('confirm')
+  } else if (result.kind === 'rejected' && result.error) {
+    const fieldMsg = (result.error as { fieldErrors?: Record<string, string[]> }).fieldErrors?.password?.[0]
+    reauthError.value = fieldMsg || (result.error as { message?: string }).message || '密码错误，请重试'
+  } else {
+    reauthError.value = '验证失败，请稍后重试'
+  }
 }
 
 function handleCancel() {
@@ -72,6 +99,10 @@ function handleCancel() {
   emit('update:open', false)
 }
 
+const remainingSeconds = computed(() => {
+  if (!props.reauthRequired) return 0
+  return Math.ceil(props.reauthDeadline / 1000)
+})
 </script>
 
 <template>
@@ -107,14 +138,8 @@ function handleCancel() {
 
         <div v-if="reauthRequired" class="flex items-center gap-2 text-xs text-warning bg-warning-subtle rounded-md px-3 py-2">
           <ShieldAlert :size="14" />
-          <span>{{ reauthenticated ? '身份验证已完成' : '此操作需要重新验证身份' }}</span>
+          <span>此操作需要重新认证（剩余 {{ remainingSeconds }} 秒）</span>
         </div>
-        <Button
-          v-if="reauthRequired && !reauthenticated"
-          variant="outline"
-          :loading="reauthenticating"
-          @click="emit('reauthenticate')"
-        >重新验证身份</Button>
       </div>
 
       <!-- Step: Confirm -->
@@ -125,6 +150,21 @@ function handleCancel() {
         </div>
         <div class="text-sm text-text-secondary">
           <p>即将执行：<span class="font-medium text-primary">{{ title }}</span></p>
+        </div>
+
+        <div v-if="reauthRequired" class="space-y-2">
+          <label class="block text-sm font-medium text-text-primary flex items-center gap-1.5">
+            <KeyRound :size="14" /> 重新认证（剩余 {{ remainingSeconds }} 秒）
+          </label>
+          <input
+            v-model="reauthPassword"
+            type="password"
+            class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            :class="reauthError ? 'border-danger' : ''"
+            placeholder="请输入登录密码"
+            @keyup.enter="handleConfirm"
+          />
+          <p v-if="reauthError" class="text-xs text-danger" role="alert">{{ reauthError }}</p>
         </div>
       </div>
 
@@ -142,8 +182,8 @@ function handleCancel() {
 
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
-        <Button v-if="step === 'preview'" :disabled="reauthRequired && !reauthenticated" @click="handleNext">下一步</Button>
-        <Button v-else variant="destructive" :loading="executing" @click="handleConfirm">{{ confirmLabel }}</Button>
+        <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>
+        <Button v-else variant="destructive" :loading="executing || reauthBusy" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

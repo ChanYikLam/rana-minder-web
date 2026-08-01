@@ -169,7 +169,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/me/interviews/joint/:interviewId',
     name: 'P-JNT-03-self',
-    component: () => import('@/pages/joint/JointInterviewPage.vue'),
+    component: () => import('@/pages/joint/JointInterviewSchedulePage.vue'),
     meta: { layout: 'default', requiresAuth: true, view: 'self' },
   },
   {
@@ -185,7 +185,7 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, view: 'self' },
   },
   {
-    path: '/me/invitations/membership/:invitationId',
+    path: '/me/invitations/membership',
     name: 'P-MEM-03-self',
     component: () => import('@/pages/member/MembershipInvitePage.vue'),
     meta: { layout: 'default', requiresAuth: true, view: 'self' },
@@ -262,7 +262,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/org/:clubId/recruitment/:activityId/interview',
     name: 'P-REC-04-manage',
-    component: () => import('@/pages/recruitment/InterviewSchedulePage.vue'),
+    component: () => import('@/pages/recruitment/InterviewManagePage.vue'),
     meta: { layout: 'default', requiresAuth: true, requiresWorkspace: true, view: 'manage' },
   },
   {
@@ -274,7 +274,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/org/:clubId/recruitment/:activityId/invitations',
     name: 'P-REC-06-manage',
-    component: () => import('@/pages/recruitment/RecruitmentInvitationManagePage.vue'),
+    component: () => import('@/pages/recruitment/InvitationManagePage.vue'),
     meta: { layout: 'default', requiresAuth: true, requiresWorkspace: true, view: 'manage' },
   },
   {
@@ -421,6 +421,12 @@ const routes: RouteRecordRaw[] = [
     path: '/admin/joint',
     name: 'P-JNT-admin-list',
     component: () => import('@/pages/joint/AdminJointListPage.vue'),
+    meta: { layout: 'default', requiresAuth: true, requiresAdmin: true },
+  },
+  {
+    path: '/admin/recruitment',
+    name: 'P-REC-admin-list',
+    component: () => import('@/pages/recruitment/AdminRecruitmentListPage.vue'),
     meta: { layout: 'default', requiresAuth: true, requiresAdmin: true },
   },
   {

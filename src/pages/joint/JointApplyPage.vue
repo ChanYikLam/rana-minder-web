@@ -5,7 +5,7 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Users, Send } from '@lucide/vue'
+import { ArrowLeft, Users, Send, Save } from '@lucide/vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,6 +38,18 @@ async function handleSubmit() {
     router.push('/me/ongoing')
   } else {
     toast.error('提交失败，请稍后重试')
+  }
+}
+
+async function handleSaveDraft() {
+  if (submitting.value) return
+  const result = await post(`/activity/joint/${route.params.jointId}/draft`, {})
+  if (result.kind === 'completed') {
+    toast.success('报名草稿已保存，可随时回来继续填写')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '草稿保存失败')
+  } else {
+    toast.error('草稿保存失败，请稍后重试')
   }
 }
 
@@ -85,6 +97,14 @@ onMounted(loadData)
         @click="handleSubmit"
       >
         <Send :size="16" /> {{ submitting ? '提交中...' : '提交联合报名' }}
+      </button>
+
+      <button
+        class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2"
+        :disabled="submitting"
+        @click="handleSaveDraft"
+      >
+        <Save :size="14" /> 暂存草稿
       </button>
     </div>
   </PageStateBoundary>

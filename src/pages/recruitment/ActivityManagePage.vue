@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
-import { get } from '@/services/client'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
+import { get, post, put } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { Users, FileText, Mail, ClipboardList, ChevronRight } from '@lucide/vue'
+import {
+  ClipboardList, Users, Mail, Rocket, PauseCircle, Flag, XCircle, PlayCircle,
+  DoorOpen, DoorClosed, RefreshCw, PencilLine, Save, ChevronRight, FileText,
+} from '@lucide/vue'
 
 interface ActivityManage {
   id: string; title: string; description: string
@@ -19,6 +24,11 @@ const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
 const detail = ref<ActivityManage | null>(null)
+const actionLoading = ref(false)
+const actionError = ref('')
+const newDeadline = ref('2026-09-16T23:59:00+08:00')
+const riskOpen = ref(false)
+const riskAction = ref<'complete' | 'cancel' | null>(null)
 
 async function loadDetail() {
   state.value = 'loading'
@@ -36,6 +46,77 @@ async function loadDetail() {
 function formatDeadline(iso: string): string {
   const d = new Date(iso)
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+async function runAction(action: string, input?: Record<string, unknown>) {
+  if (!detail.value || actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/${action}`, { ...(input || {}) })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '操作失败'
+  }
+}
+
+async function runChannel(action: string, input?: Record<string, unknown>) {
+  if (!detail.value || actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/channel`, { action, ...(input || {}) })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '操作失败'
+  }
+}
+
+const canOpenChannel = computed(() => {
+  if (!detail.value) return false
+  return ['not_open', 'closed'].includes(detail.value.channelStatus)
+})
+
+const canCloseChannel = computed(() => {
+  return detail.value?.channelStatus === 'open'
+})
+
+// 活动编辑
+const editOpen = ref(false)
+const editForm = ref({ title: '', description: '' })
+const editError = ref('')
+
+async function openEdit() {
+  if (!detail.value) return
+  editOpen.value = true
+  editForm.value = { title: detail.value.title, description: detail.value.description }
+  editError.value = ''
+}
+
+async function handleSaveEdit() {
+  if (!detail.value || actionLoading.value) return
+  if (!editForm.value.title.trim()) {
+    editError.value = '活动名称不能为空'
+    return
+  }
+  actionLoading.value = true
+  editError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await put(`/org/${clubId}/recruitment/${detail.value.id}`, {
+    title: editForm.value.title.trim(),
+    description: editForm.value.description.trim(),
+  })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    editOpen.value = false
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    editError.value = (result.error as { message?: string }).message || '保存失败'
+  }
 }
 
 onMounted(loadDetail)
@@ -78,6 +159,144 @@ onMounted(loadDetail)
           <p class="text-2xl font-bold text-text-primary">{{ detail.invitationCount }}</p>
         </Card>
       </div>
+
+      <!-- 活动状态操作 -->
+      <PermissionGuard permission="club:recruitment:manage">
+        <Card class="mb-4">
+          <h2 class="text-base font-medium text-text-primary mb-3">活动状态操作</h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="detail.status === 'draft'"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction('publish')"
+            >
+              <Rocket :size="15" /> 发布活动
+            </button>
+            <button
+              v-if="['draft', 'in_progress', 'paused'].includes(detail.status)"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="openEdit"
+            >
+              <PencilLine :size="15" /> 编辑活动
+            </button>
+
+            <template v-if="detail.status === 'in_progress'">
+              <button
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runAction('pause', { reason: '临时调整' })"
+              >
+                <PauseCircle :size="15" /> 暂停活动
+              </button>
+              <button
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-warning text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="riskAction = 'complete'; riskOpen = true"
+              >
+                <Flag :size="15" /> 结束活动
+              </button>
+              <button
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-destructive text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="riskAction = 'cancel'; riskOpen = true"
+              >
+                <XCircle :size="15" /> 取消活动
+              </button>
+            </template>
+
+            <button
+              v-if="detail.status === 'paused'"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction('resume')"
+            >
+              <PlayCircle :size="15" /> 恢复活动
+            </button>
+          </div>
+
+          <!-- 报名通道 -->
+          <div v-if="['in_progress', 'paused'].includes(detail.status)" class="mt-4 pt-4 border-t border-border">
+            <p class="text-sm font-medium text-text-primary mb-2">
+              报名通道：<StateTag :status="detail.channelStatus" />
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <template v-if="canOpenChannel">
+                <input
+                  v-model="newDeadline"
+                  class="px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                  placeholder="新截止时间"
+                />
+                <button
+                  class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runChannel('open', { newDeadline: newDeadline })"
+                >
+                  <DoorOpen :size="15" /> 开放/重开通道
+                </button>
+              </template>
+              <button
+                v-if="canCloseChannel"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runChannel('close', { reason: '报满关闭' })"
+              >
+                <DoorClosed :size="15" /> 关闭通道
+              </button>
+              <button
+                v-if="detail.channelStatus === 'open'"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runChannel('pause')"
+              >
+                <PauseCircle :size="15" /> 暂停通道
+              </button>
+              <button
+                v-if="detail.channelStatus === 'paused'"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runChannel('resume', { newDeadline: newDeadline })"
+              >
+                <RefreshCw :size="15" /> 恢复通道
+              </button>
+            </div>
+          </div>
+
+          <!-- 编辑面板 -->
+          <div v-if="editOpen" class="mt-4 pt-4 border-t border-border space-y-3">
+            <input
+              v-model="editForm.title"
+              class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              placeholder="活动名称"
+            />
+            <textarea
+              v-model="editForm.description"
+              rows="3"
+              class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              placeholder="活动描述"
+            />
+            <div class="flex items-center gap-2">
+              <button
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="handleSaveEdit"
+              >
+                <Save :size="15" /> {{ actionLoading ? '保存中...' : '保存修改' }}
+              </button>
+              <button
+                class="px-3 h-9 rounded-md border border-border text-text-secondary text-sm hover:bg-subtle"
+                @click="editOpen = false"
+              >
+                取消
+              </button>
+              <p v-if="editError" class="text-xs text-destructive">{{ editError }}</p>
+            </div>
+          </div>
+
+          <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
+        </Card>
+      </PermissionGuard>
 
       <!-- 管理入口 -->
       <Card class="mb-4">
@@ -134,6 +353,17 @@ onMounted(loadDetail)
           </div>
         </dl>
       </Card>
+
+      <HighRiskConfirm
+        v-model:open="riskOpen"
+        :title="riskAction === 'complete' ? '结束招新活动' : '取消招新活动'"
+        :description="riskAction === 'complete' ? '活动将进入已结束状态，报名通道关闭，已提交的申请将锁定。' : '活动将被取消，所有申请和面试安排将失效，此操作不可撤销。'"
+        :targets="detail ? [{ id: detail.id, label: detail.title, detail: '影响全部报名与面试数据' }] : []"
+        impact-summary="操作后活动状态不可自行恢复；取消仅限未发出邀请的活动。"
+        confirm-label="确认执行"
+        :executing="actionLoading"
+        @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
+      />
     </div>
   </PageStateBoundary>
 </template>

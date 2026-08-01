@@ -7,14 +7,16 @@ import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
-import { UserMinus, LogOut, AlertTriangle } from '@lucide/vue'
+import { UserMinus, LogOut, AlertTriangle, FileText, CheckCircle2, XCircle } from '@lucide/vue'
 
 interface ExitMember { id: string; name: string; studentId: string; department: string; title: string; status: string; joinedAt: string; exitedAt: string | null }
+interface Resignation { id: string; memberId: string; memberName: string; departmentName: string; title: string; reason: string; status: string; submittedAt: string; decidedAt: string | null; decidedBy: string | null }
 
 const route = useRoute()
 const session = useSessionViewStore()
 const state = ref<PageState>('loading')
 const items = ref<ExitMember[]>([])
+const resignations = ref<Resignation[]>([])
 
 // 移除确认弹窗
 const removingId = ref<string | null>(null)
@@ -22,13 +24,15 @@ const removeReason = ref('')
 const removeError = ref('')
 const exitingId = ref<string | null>(null)
 const removeSubmitting = ref(false)
+const actingId = ref<string | null>(null)
 
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const result = await get<{ items: ExitMember[] }>(`/org/${clubId}/members/exit`)
+  const result = await get<{ items: ExitMember[]; resignations: Resignation[] }>(`/org/${clubId}/members/exit`)
   if (result.kind === 'completed') {
-    items.value = (result as { kind: 'completed'; data: { items: ExitMember[] } }).data.items
+    items.value = result.data.items
+    resignations.value = result.data.resignations
     state.value = 'normal'
   } else { state.value = 'error' }
 }
@@ -38,12 +42,12 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月`
 }
 
-// MEM-008: 操作者不能通过移除入口移除自己
+// 操作者不能通过移除入口移除自己
 function canRemove(m: ExitMember): boolean {
-  return m.id !== session.user?.id
+  return m.id !== session.workspace?.memberId
 }
 
-// MEM-008: 最后负责人不可移除/退出（简化：title 为负责人的标记）
+// 最后负责人不可移除/退出（需先交接）
 function isLastLeader(m: ExitMember): boolean {
   return m.title === '负责人' && items.value.filter((i) => i.title === '负责人' && i.status === 'active').length <= 1
 }
@@ -57,7 +61,7 @@ function startRemove(id: string) {
 async function handleMarkExit(m: ExitMember) {
   exitingId.value = m.id
   const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/exit`, { memberIds: [m.id] })
+  const r = await post(`/org/${clubId}/members/exit`, { memberId: m.id })
   exitingId.value = null
   if (r.kind === 'completed') {
     toast.success('已标记退出')
@@ -74,7 +78,7 @@ async function handleRemove() {
   }
   removeSubmitting.value = true
   const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/exit`, { memberIds: [removingId.value!] })
+  const r = await post(`/org/${clubId}/members/exit`, { memberId: removingId.value! })
   removeSubmitting.value = false
   if (r.kind === 'completed') {
     toast.success('成员已移除')
@@ -82,6 +86,47 @@ async function handleRemove() {
     await loadData()
   } else {
     toast.error('移除失败，请重试')
+  }
+}
+
+// 辞职审批
+async function handleResignDecide(res: Resignation, decision: 'approve' | 'reject') {
+  actingId.value = res.id
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/resignation/${res.id}/decide`, { decision })
+  actingId.value = null
+  if (r.kind === 'completed') {
+    toast.success(decision === 'approve' ? '已批准辞职' : '已驳回辞职')
+    await loadData()
+  } else {
+    toast.error('操作失败，请重试')
+  }
+}
+
+// 本人提交辞职申请
+const resignOpen = ref(false)
+const resignReason = ref('')
+const resignError = ref('')
+const resignSubmitting = ref(false)
+
+async function handleSubmitResignation() {
+  if (!resignReason.value.trim()) {
+    resignError.value = '请填写辞职原因'
+    return
+  }
+  resignSubmitting.value = true
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/resignation`, { reason: resignReason.value.trim() })
+  resignSubmitting.value = false
+  if (r.kind === 'completed') {
+    toast.success('辞职申请已提交，等待负责人审批')
+    resignOpen.value = false
+    resignReason.value = ''
+    await loadData()
+  } else if (r.kind === 'rejected' && r.error) {
+    resignError.value = (r.error as { message?: string }).message || '提交失败'
+  } else {
+    resignError.value = '提交失败，请稍后重试'
   }
 }
 
@@ -93,6 +138,75 @@ onMounted(loadData)
     <div class="max-w-2xl mx-auto">
       <h1 class="text-2xl font-bold text-text-primary mb-2">成员退出与移除</h1>
       <p class="text-sm text-text-secondary mb-6">管理成员退出和移除操作</p>
+
+      <!-- 本人辞职申请 -->
+      <Card class="mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <p class="text-sm font-medium text-text-primary flex items-center gap-1.5"><FileText :size="15" /> 提交辞职申请</p>
+            <p class="text-xs text-text-secondary mt-0.5">以本人身份提交，提交后由负责人审批</p>
+          </div>
+          <button
+            class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle"
+            @click="resignOpen = true; resignReason = ''; resignError = ''"
+          >
+            <FileText :size="14" /> 提交申请
+          </button>
+        </div>
+        <div v-if="resignOpen" class="pt-3 border-t border-border space-y-3">
+          <textarea
+            v-model="resignReason"
+            rows="3"
+            class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            placeholder="请填写辞职原因（必填）"
+          />
+          <p v-if="resignError" class="text-xs text-danger">{{ resignError }}</p>
+          <div class="flex gap-2">
+            <button
+              class="flex-1 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+              @click="resignOpen = false"
+            >
+              取消
+            </button>
+            <button
+              class="flex-1 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="resignSubmitting"
+              @click="handleSubmitResignation"
+            >
+              {{ resignSubmitting ? '提交中...' : '确认提交' }}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <!-- 辞职审批 -->
+      <div v-if="resignations.length > 0" class="mb-6">
+        <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
+          <FileText :size="18" /> 辞职申请审批
+        </h2>
+        <div class="space-y-3">
+          <Card v-for="res in resignations" :key="res.id">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <p class="text-sm font-medium text-text-primary">{{ res.memberName }} <span class="text-xs text-text-secondary ml-1">{{ res.departmentName }} · {{ res.title }}</span></p>
+                <p class="text-xs text-text-secondary mt-1">原因：{{ res.reason }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">提交于 {{ formatDate(res.submittedAt) }}</p>
+              </div>
+              <StateTag :status="res.status" />
+            </div>
+            <div v-if="res.status === 'under_review'" class="mt-3 flex gap-2">
+              <button class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90" :disabled="actingId === res.id" @click="handleResignDecide(res, 'approve')">
+                <CheckCircle2 :size="14" /> 批准
+              </button>
+              <button class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === res.id" @click="handleResignDecide(res, 'reject')">
+                <XCircle :size="14" /> 驳回
+              </button>
+            </div>
+            <p v-else-if="res.status === 'rejected' && res.decidedBy" class="text-xs text-text-secondary mt-2">由 {{ res.decidedBy }} 驳回</p>
+            <p v-else-if="res.status === 'approved' && res.decidedBy" class="text-xs text-success mt-2">由 {{ res.decidedBy }} 批准</p>
+          </Card>
+        </div>
+      </div>
 
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无成员记录" />
 
@@ -125,7 +239,7 @@ onMounted(loadData)
         </Card>
       </div>
 
-      <!-- 移除确认弹窗（MEM-008: 原因+二次确认） -->
+      <!-- 移除确认弹窗 -->
       <div v-if="removingId" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" aria-label="移除成员确认">
         <div class="bg-elevated rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
           <div class="flex items-center gap-2 mb-3">

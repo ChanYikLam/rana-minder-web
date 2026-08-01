@@ -3,9 +3,14 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck } from '@lucide/vue'
+import {
+  Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck,
+  Rocket, XCircle, DoorOpen, DoorClosed, RefreshCw, CheckCircle2,
+} from '@lucide/vue'
 
 interface JointActivity {
   id: string; title: string; description: string; status: string; channelStatus: string
@@ -23,6 +28,12 @@ const detail = ref<JointActivity | null>(null)
 const form = ref({ title: '', description: '', deadline: '', participants: [] as string[] })
 const submitting = ref(false)
 
+// 管理操作
+const actionLoading = ref(false)
+const actionError = ref('')
+const newDeadline = ref('2026-09-16T23:59:00+08:00')
+const riskOpen = ref(false)
+
 async function loadDetail() {
   if (isCreate.value) { state.value = 'normal'; return }
   state.value = 'loading'
@@ -34,6 +45,74 @@ async function loadDetail() {
     state.value = 'normal'
   } else {
     state.value = 'error'
+  }
+}
+
+async function runAction(action: string, input?: Record<string, unknown>) {
+  if (!detail.value || actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/joint/${detail.value.id}/${action}`, { ...(input || {}) })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '操作失败'
+  }
+}
+
+async function runChannel(action: string, input?: Record<string, unknown>) {
+  if (!detail.value || actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/joint/${detail.value.id}/channel`, { action, ...(input || {}) })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '操作失败'
+  }
+}
+
+const canOpenChannel = computed(() => {
+  if (!detail.value) return false
+  return ['not_open', 'closed'].includes(detail.value.channelStatus)
+})
+
+const canCloseChannel = computed(() => detail.value?.channelStatus === 'open')
+
+// 名单调整
+const clubOptions = [
+  { id: 'club-001', name: '计算机协会' },
+  { id: 'club-002', name: '电子设计协会' },
+  { id: 'club-003', name: '数学建模协会' },
+]
+const adjustOpen = ref(false)
+const selectedClubs = ref<string[]>([])
+const newConfirmDeadline = ref('2026-09-30T23:59:00+08:00')
+
+async function openAdjust() {
+  adjustOpen.value = true
+  selectedClubs.value = detail.value ? detail.value.participants.map((p) => p.clubId) : []
+}
+
+async function handleAdjust() {
+  if (!detail.value || actionLoading.value) return
+  actionLoading.value = true
+  actionError.value = ''
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/joint/${detail.value.id}/clubs`, {
+    clubIds: selectedClubs.value,
+    newDeadline: newConfirmDeadline.value,
+  })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    adjustOpen.value = false
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    actionError.value = (result.error as { message?: string }).message || '调整失败'
   }
 }
 
@@ -142,6 +221,132 @@ onMounted(loadDetail)
         </div>
       </Card>
 
+      <!-- 状态与通道操作 -->
+      <PermissionGuard permission="club:joint:manage">
+        <Card class="mb-4">
+          <h2 class="text-base font-medium text-text-primary mb-3">状态与通道操作</h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="['draft', 'confirmed'].includes(detail.status)"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction('publish')"
+            >
+              <Rocket :size="15" /> 发布活动
+            </button>
+            <button
+              v-if="detail.status === 'draft'"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction('confirm')"
+            >
+              <CheckCircle2 :size="15" /> 确认参与
+            </button>
+            <button
+              v-if="detail.status === 'draft'"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="openAdjust"
+            >
+              <Building2 :size="15" /> 调整名单
+            </button>
+            <button
+              v-if="detail.status === 'draft'"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-secondary text-sm font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction('withdraw')"
+            >
+              <XCircle :size="15" /> 退出联合
+            </button>
+            <button
+              v-if="!['cancelled', 'force_closed', 'closed'].includes(detail.status)"
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-destructive text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="riskOpen = true"
+            >
+              <XCircle :size="15" /> 取消活动
+            </button>
+          </div>
+
+          <!-- 调整名单 -->
+          <div v-if="adjustOpen" class="mt-4 pt-4 border-t border-border">
+            <p class="text-sm font-medium text-text-primary mb-2">调整参与社团（至少两个）</p>
+            <div class="flex flex-wrap gap-2 mb-2">
+              <button
+                v-for="club in clubOptions"
+                :key="club.id"
+                class="px-3 py-1.5 rounded-md border text-sm transition-colors"
+                :class="selectedClubs.includes(club.id) ? 'border-primary bg-primary-subtle text-primary' : 'border-border text-text-secondary hover:border-border-strong'"
+                @click="selectedClubs.includes(club.id) ? (selectedClubs = selectedClubs.filter((id) => id !== club.id)) : selectedClubs.push(club.id)"
+              >
+                {{ club.name }}
+              </button>
+            </div>
+            <input
+              v-model="newConfirmDeadline"
+              class="px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary mb-2"
+              placeholder="新的确认截止时间（ISO）"
+            />
+            <button
+              class="px-4 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading || selectedClubs.length < 2"
+              @click="handleAdjust"
+            >
+              {{ actionLoading ? '提交中...' : '保存名单' }}
+            </button>
+          </div>
+
+          <!-- 联合报名通道 -->
+          <div v-if="detail.status === 'published' || detail.status === 'invite_phase'" class="mt-4 pt-4 border-t border-border">
+            <p class="text-sm font-medium text-text-primary mb-2">
+              联合报名通道：<StateTag :status="detail.channelStatus" />
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <template v-if="canOpenChannel">
+                <input
+                  v-model="newDeadline"
+                  class="px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                  placeholder="新截止时间"
+                />
+                <button
+                  class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runChannel('open', { deadline: newDeadline })"
+                >
+                  <DoorOpen :size="15" /> 开放/重开通道
+                </button>
+              </template>
+              <button
+                v-if="canCloseChannel"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runChannel('close', { reason: '报满关闭' })"
+              >
+                <DoorClosed :size="15" /> 关闭通道
+              </button>
+              <button
+                v-if="detail.channelStatus === 'open'"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runChannel('pause')"
+              >
+                <PauseCircle :size="15" /> 暂停通道
+              </button>
+              <button
+                v-if="detail.channelStatus === 'paused'"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="runChannel('resume', { deadline: newDeadline })"
+              >
+                <RefreshCw :size="15" /> 恢复通道
+              </button>
+            </div>
+          </div>
+
+          <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
+        </Card>
+      </PermissionGuard>
+
       <!-- 管理入口 -->
       <Card>
         <h2 class="text-base font-medium text-text-primary mb-3">管理操作</h2>
@@ -163,6 +368,18 @@ onMounted(loadDetail)
           </button>
         </div>
       </Card>
+
+      <HighRiskConfirm
+        v-model:open="riskOpen"
+        title="取消联合活动"
+        description="活动将被取消，所有联合报名与面试安排将失效，此操作不可撤销。"
+        :targets="detail ? [{ id: detail.id, label: detail.title, detail: '影响全部参与社团与报名数据' }] : []"
+        impact-summary="取消后活动进入已取消状态，不可恢复；未确认结束的联合活动可取消。"
+        confirm-label="确认取消"
+        reauth-required
+        :executing="actionLoading"
+        @confirm="runAction('cancel', { confirm: true, reason: '发起方取消联合活动' })"
+      />
     </div>
   </PageStateBoundary>
 </template>

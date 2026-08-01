@@ -5,27 +5,33 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Crown, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Users } from '@lucide/vue'
-import { identityApi } from '@/services/modules'
+import { Crown, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Users, Plus, Trash2, RefreshCw } from '@lucide/vue'
 
+interface PlanItem { memberId: string; name: string; currentTitle: string; proposedTitle: string; department: string }
 interface TransitionData {
   currentLeader: { id: string; name: string; title: string }
-  candidates: { id: string; name: string; currentTitle: string; proposedTitle: string; department: string }[]
-  appointments: { id: string; name: string; currentTitle: string; proposedTitle: string; department: string }[]
+  candidates: PlanItem[]
+  appointments: PlanItem[]
   canExecute: boolean
-  version: number
+  executedAt: string | null
+  results: { memberId: string; name: string; action: string; targetTitle: string; success: boolean; message: string }[]
 }
-
-interface TransitionResult { memberId: string; action: string; targetTitle: string; success: boolean }
+interface Member { id: string; name: string; studentId: string; department: string; title: string; status: string }
 
 const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
 const data = ref<TransitionData | null>(null)
+const members = ref<Member[]>([])
 const executing = ref(false)
-const result = ref<{ success: string[]; failed: string[] } | null>(null)
-const reauthProof = ref('')
-const reauthenticating = ref(false)
+const saving = ref(false)
+const showEditor = ref(false)
+
+// 编辑方案表单
+const editList = ref<'candidates' | 'appointments'>('candidates')
+const editMemberId = ref('')
+const editTitle = ref('')
+const editError = ref('')
 
 async function loadData() {
   state.value = 'loading'
@@ -39,45 +45,91 @@ async function loadData() {
   }
 }
 
-async function reauthenticate() {
-  reauthenticating.value = true
-  const response = await identityApi.reauthenticate()
-  reauthenticating.value = false
-  if (response.kind === 'completed') {
-    reauthProof.value = response.data.proof
-    toast.success('身份验证已完成')
-    return
+async function loadMembers() {
+  const clubId = route.params.clubId as string
+  const r = await get<{ items: Member[] }>(`/org/${clubId}/members`)
+  if (r.kind === 'completed') members.value = r.data.items
+}
+
+function openEditor() {
+  editMemberId.value = ''
+  editTitle.value = ''
+  editError.value = ''
+  showEditor.value = true
+}
+
+function addPlanItem() {
+  if (!data.value) return
+  if (!editMemberId.value) { editError.value = '请选择成员'; return }
+  if (!editTitle.value.trim()) { editError.value = '请填写目标职位'; return }
+  const m = members.value.find((x) => x.id === editMemberId.value)
+  if (!m) { editError.value = '成员不存在'; return }
+  const item: PlanItem = { memberId: m.id, name: m.name, currentTitle: m.title, proposedTitle: editTitle.value.trim(), department: m.department }
+  const list = editList.value === 'candidates' ? data.value.candidates : data.value.appointments
+  if (list.some((x) => x.memberId === m.id)) { editError.value = '该成员已在方案中'; return }
+  list.push(item)
+  editError.value = ''
+}
+
+function removePlanItem(list: 'candidates' | 'appointments', memberId: string) {
+  if (!data.value) return
+  if (list === 'candidates') data.value.candidates = data.value.candidates.filter((x) => x.memberId !== memberId)
+  else data.value.appointments = data.value.appointments.filter((x) => x.memberId !== memberId)
+}
+
+async function savePlan() {
+  if (!data.value) return
+  saving.value = true
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/transition/plan`, {
+    candidates: data.value.candidates,
+    appointments: data.value.appointments,
+  })
+  saving.value = false
+  if (r.kind === 'completed') {
+    toast.success('换届方案已保存')
+    showEditor.value = false
+    await loadData()
+  } else {
+    toast.error('保存失败，请重试')
   }
-  toast.error('身份验证失败，请重新登录后再试')
 }
 
 async function handleExecute() {
-  if (!data.value?.canExecute || !reauthProof.value) return
+  if (!data.value?.canExecute) return
   executing.value = true
   const clubId = route.params.clubId as string
-  const r = await post<{ results: TransitionResult[] }>(`/org/${clubId}/members/transition`, {
-    reauthProof: reauthProof.value,
-  }, { expectedVersion: data.value.version })
+  const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition`)
   executing.value = false
   if (r.kind === 'completed') {
-    const results = (r as { kind: 'completed'; data: { results: TransitionResult[] } }).data.results
-    const nameOf = (memberId: string) => {
-      const c = data.value?.candidates.find((x) => x.id === memberId)
-      if (c) return c.name
-      const a = data.value?.appointments.find((x) => x.id === memberId)
-      return a ? a.name : memberId
-    }
-    const success = results.filter((x) => x.success).map((x) => nameOf(x.memberId))
-    const failed = results.filter((x) => !x.success).map((x) => nameOf(x.memberId))
-    result.value = { success, failed }
+    data.value.results = r.data.results
+    data.value.executedAt = new Date().toISOString()
+    data.value.canExecute = false
+    const failed = r.data.results.filter((x) => !x.success)
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
   } else {
-    reauthProof.value = ''
     toast.error('换届执行失败，请重试')
   }
 }
 
-onMounted(loadData)
+// 失败项重试
+async function handleRetry() {
+  executing.value = true
+  const clubId = route.params.clubId as string
+  const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition/retry`)
+  executing.value = false
+  if (r.kind === 'completed' && data.value) {
+    data.value.results = r.data.results
+    toast.success('失败项已重试成功')
+  } else {
+    toast.error('重试失败，请重试')
+  }
+}
+
+onMounted(async () => {
+  await loadData()
+  await loadMembers()
+})
 </script>
 
 <template>
@@ -87,10 +139,15 @@ onMounted(loadData)
         <ArrowLeft :size="16" /> 返回
       </button>
 
-      <h1 class="text-2xl font-bold text-text-primary mb-6">换届管理</h1>
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-text-primary">换届管理</h1>
+        <button v-if="!data.executedAt" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="openEditor">
+          <Plus :size="16" /> 编辑方案
+        </button>
+      </div>
 
       <!-- 执行前 -->
-      <template v-if="!result">
+      <template v-if="!data.executedAt">
         <!-- 当前负责人 -->
         <Card class="mb-4">
           <div class="flex items-center gap-3">
@@ -104,9 +161,10 @@ onMounted(loadData)
 
         <!-- 新任方案 -->
         <Card class="mb-4">
-          <h2 class="text-base font-medium text-text-primary mb-3">新任方案</h2>
-          <div class="space-y-2">
-            <div v-for="c in data.candidates" :key="c.id" class="flex items-center justify-between rounded-lg border border-border p-3">
+          <h2 class="text-base font-medium text-text-primary mb-3">新任方案（{{ data.candidates.length }}）</h2>
+          <div v-if="data.candidates.length === 0" class="text-sm text-text-secondary text-center py-4">暂无晋升安排</div>
+          <div v-else class="space-y-2">
+            <div v-for="c in data.candidates" :key="c.memberId" class="flex items-center justify-between rounded-lg border border-border p-3">
               <div class="flex items-center gap-2">
                 <Users :size="16" class="text-text-secondary" />
                 <div>
@@ -118,21 +176,52 @@ onMounted(loadData)
                 <p class="text-xs text-text-secondary">{{ c.currentTitle }}</p>
                 <p class="text-sm font-medium text-primary">→ {{ c.proposedTitle }}</p>
               </div>
+              <button v-if="showEditor" class="text-danger ml-2" aria-label="移除" @click="removePlanItem('candidates', c.memberId)"><Trash2 :size="16" /></button>
             </div>
           </div>
         </Card>
 
         <!-- 任命方案 -->
-        <Card v-if="data.appointments.length > 0" class="mb-4">
-          <h2 class="text-base font-medium text-text-primary mb-3">同期任命</h2>
-          <div class="space-y-2">
-            <div v-for="a in data.appointments" :key="a.id" class="flex items-center justify-between rounded-lg border border-border p-3">
+        <Card v-if="data.appointments.length > 0 || showEditor" class="mb-4">
+          <h2 class="text-base font-medium text-text-primary mb-3">同期任命（{{ data.appointments.length }}）</h2>
+          <div v-if="data.appointments.length === 0" class="text-sm text-text-secondary text-center py-4">暂无同期任命</div>
+          <div v-else class="space-y-2">
+            <div v-for="a in data.appointments" :key="a.memberId" class="flex items-center justify-between rounded-lg border border-border p-3">
               <span class="text-sm text-text-primary">{{ a.name }} · {{ a.department }}</span>
               <div class="text-right">
                 <p class="text-xs text-text-secondary">{{ a.currentTitle }}</p>
                 <p class="text-sm font-medium text-primary">→ {{ a.proposedTitle }}</p>
               </div>
+              <button v-if="showEditor" class="text-danger ml-2" aria-label="移除" @click="removePlanItem('appointments', a.memberId)"><Trash2 :size="16" /></button>
             </div>
+          </div>
+        </Card>
+
+        <!-- 方案编辑器 -->
+        <Card v-if="showEditor" class="mb-4 border-primary">
+          <h2 class="text-base font-medium text-text-primary mb-3">添加方案项</h2>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">方案类型</label>
+              <select v-model="editList" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary">
+                <option value="candidates">晋升方案（新负责人等）</option>
+                <option value="appointments">同期任命（部长/副部长等）</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">成员</label>
+              <select v-model="editMemberId" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary">
+                <option value="">请选择成员</option>
+                <option v-for="m in members.filter((x) => x.status === 'active')" :key="m.id" :value="m.id">{{ m.name }}（{{ m.department }} · {{ m.title }}）</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">目标职位</label>
+              <input v-model="editTitle" type="text" class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" placeholder="如：负责人 / 副部长" aria-label="目标职位" />
+            </div>
+            <p v-if="editError" class="text-xs text-danger" role="alert">{{ editError }}</p>
+            <button class="w-full h-9 rounded-md border border-primary text-primary text-sm font-medium hover:bg-primary-subtle" @click="addPlanItem">加入方案</button>
+            <button class="w-full h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" :disabled="saving" @click="savePlan">{{ saving ? '保存中...' : '保存方案' }}</button>
           </div>
         </Card>
 
@@ -148,16 +237,8 @@ onMounted(loadData)
         </Card>
 
         <button
-          class="w-full h-11 rounded-md border border-border text-text-primary font-medium hover:bg-subtle disabled:opacity-60 flex items-center justify-center gap-2 mb-3"
-          :disabled="reauthenticating || Boolean(reauthProof)"
-          @click="reauthenticate"
-        >
-          <ShieldAlert :size="18" /> {{ reauthProof ? '身份验证已完成' : reauthenticating ? '正在验证...' : '重新验证身份' }}
-        </button>
-
-        <button
           class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
-          :disabled="executing || !data.canExecute || !reauthProof"
+          :disabled="executing || !data.canExecute"
           @click="handleExecute"
         >
           <ShieldAlert :size="18" /> {{ executing ? '执行中...' : '确认执行换届' }}
@@ -168,23 +249,29 @@ onMounted(loadData)
       <template v-else>
         <Card class="mb-4">
           <div class="flex items-center gap-3 mb-4">
-            <div class="flex items-center justify-center w-12 h-12 rounded-full" :class="result.failed.length === 0 ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'">
-              <CheckCircle2 v-if="result.failed.length === 0" :size="24" />
+            <div class="flex items-center justify-center w-12 h-12 rounded-full" :class="data.results.some((x) => !x.success) ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'">
+              <CheckCircle2 v-if="!data.results.some((x) => !x.success)" :size="24" />
               <AlertTriangle v-else :size="24" />
             </div>
             <div>
-              <p class="text-base font-medium text-text-primary">{{ result.failed.length === 0 ? '换届完成' : '部分成功' }}</p>
-              <p class="text-sm text-text-secondary">成功 {{ result.success.length }} 项{{ result.failed.length > 0 ? `，失败 ${result.failed.length} 项` : '' }}</p>
+              <p class="text-base font-medium text-text-primary">{{ data.results.some((x) => !x.success) ? '部分成功' : '换届完成' }}</p>
+              <p class="text-sm text-text-secondary">成功 {{ data.results.filter((x) => x.success).length }} 项{{ data.results.some((x) => !x.success) ? `，失败 ${data.results.filter((x) => !x.success).length} 项` : '' }}</p>
             </div>
           </div>
 
           <div class="space-y-2">
-            <div v-for="name in result.success" :key="name" class="flex items-center gap-2 text-sm">
-              <CheckCircle2 :size="14" class="text-success" />
-              <span class="text-text-primary">{{ name }}</span>
-              <span class="text-xs text-success ml-auto">成功</span>
+            <div v-for="r in data.results" :key="r.memberId + r.action" class="flex items-center gap-2 text-sm">
+              <CheckCircle2 v-if="r.success" :size="14" class="text-success" />
+              <AlertTriangle v-else :size="14" class="text-warning" />
+              <span class="text-text-primary">{{ r.name }}</span>
+              <span class="text-xs text-text-secondary">→ {{ r.targetTitle }}</span>
+              <span class="text-xs ml-auto" :class="r.success ? 'text-success' : 'text-warning'">{{ r.message }}</span>
             </div>
           </div>
+
+          <button v-if="data.results.some((x) => !x.success)" class="w-full mt-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover flex items-center justify-center gap-2" :disabled="executing" @click="handleRetry">
+            <RefreshCw :size="16" /> {{ executing ? '重试中...' : '重试失败项' }}
+          </button>
         </Card>
 
         <button class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover" @click="router.push(`/org/${route.params.clubId}/dashboard`)">
