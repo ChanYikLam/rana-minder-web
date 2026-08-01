@@ -33,7 +33,6 @@ const emit = defineEmits<{
   rowClick: [row: unknown]
 }>()
 
-const slots = useSlots()
 const instance = getCurrentInstance()
 const localSelected = ref<Set<string>>(new Set(props.selectedIds))
 const rowIds = computed(() => props.rows.map(getRowId))
@@ -141,7 +140,7 @@ function handleRowClick(row: unknown) {
                 type="checkbox"
                 class="rounded border-border"
                 :checked="localSelected.has(getRowId(row))"
-                :aria-label="`选择行`"
+                :aria-label="`选择第 ${rows.indexOf(row) + 1} 行`"
                 @change="toggleRow(getRowId(row))"
               />
             </td>

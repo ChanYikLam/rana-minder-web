@@ -304,7 +304,7 @@ async function handleLogout() {
       </aside>
 
       <!-- Main Content -->
-      <main class="flex-1 overflow-y-auto" role="main" tabindex="-1">
+      <main id="default-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
         <div class="mx-auto max-w-[1400px] p-4 md:p-6">
           <slot />
         </div>

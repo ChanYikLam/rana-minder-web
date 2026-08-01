@@ -43,21 +43,19 @@ const describedBy = computed(() => hasDisabledReason.value ? disabledReasonId : 
 </script>
 
 <template>
-  <div class="inline-flex flex-col items-start gap-1">
-    <ShadcnButton
-      v-bind="attrs"
-      :variant="variant"
-      :size="size"
-      :type="type"
-      :disabled="isDisabled"
-      :aria-describedby="describedBy"
-      :class="cn(computedSize)"
-    >
-      <Loader2 v-if="loading" :size="16" class="mr-1.5 animate-spin" aria-hidden="true" />
-      <slot />
-    </ShadcnButton>
-    <p v-if="hasDisabledReason" :id="disabledReasonId" class="text-xs text-text-secondary">
-      {{ disabledReason }}
-    </p>
-  </div>
+  <ShadcnButton
+    v-bind="attrs"
+    :variant="variant"
+    :size="size"
+    :type="type"
+    :disabled="isDisabled"
+    :aria-describedby="describedBy"
+    :class="cn(computedSize)"
+  >
+    <Loader2 v-if="loading" :size="16" class="mr-1.5 animate-spin" aria-hidden="true" />
+    <slot />
+  </ShadcnButton>
+  <p v-if="hasDisabledReason" :id="disabledReasonId" class="mt-1 text-xs text-text-secondary">
+    {{ disabledReason }}
+  </p>
 </template>

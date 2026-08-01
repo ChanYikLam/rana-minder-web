@@ -24,7 +24,14 @@ const mockRoles = [
 
 function getRedirect(): string {
   const redirect = route.query.redirect
-  return typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/me'
+  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return '/me'
+
+  try {
+    const target = new URL(redirect, window.location.origin)
+    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : '/me'
+  } catch {
+    return '/me'
+  }
 }
 
 async function handleLogin() {
