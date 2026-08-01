@@ -767,6 +767,51 @@ const jointHandlers: MockMethod[] = [
   },
 ]
 
+interface DepartmentApplyRecord {
+  id: string
+  applicantId: string
+  applicantName: string
+  operation: 'join' | 'leave' | 'transfer'
+  currentDept: string
+  targetDept: string
+  reason: string
+  status: 'under_review' | 'withdrawn' | 'approved' | 'rejected'
+  submittedAt: string
+  withdrawnAt?: string
+  decidedAt?: string
+  rejectReason?: string
+}
+
+const departmentApplications: DepartmentApplyRecord[] = [
+  {
+    id: 'dap-001',
+    applicantId: 'user-member-001',
+    applicantName: '陈雨桐',
+    operation: 'transfer',
+    currentDept: '技术部',
+    targetDept: '运营部',
+    reason: '希望尝试新的方向',
+    status: 'under_review',
+    submittedAt: '2025-07-28T10:00:00+08:00',
+  },
+  {
+    id: 'dap-002',
+    applicantId: 'user-applicant-002',
+    applicantName: '王梓涵',
+    operation: 'transfer',
+    currentDept: '设计部',
+    targetDept: '技术部',
+    reason: '对前端开发更感兴趣',
+    status: 'approved',
+    submittedAt: '2025-07-20T10:00:00+08:00',
+    decidedAt: '2025-07-21T10:00:00+08:00',
+  },
+]
+
+function departmentApplyError(code: 'IFC-ERR-004' | 'IFC-ERR-006' | 'IFC-ERR-007' | 'IFC-ERR-008') {
+  return { statusCode: MOCK_ERROR_HTTP[code], body: mockErrorBody(code) }
+}
+
 /** 成员生命周期处理器 */
 const memberHandlers: MockMethod[] = [
   // 成员列表（静态路由必须排在动态 :memberId 之前）
@@ -789,21 +834,105 @@ const memberHandlers: MockMethod[] = [
       }
     },
   },
-  // 部门关系申请列表
   {
     url: '/api/org/:clubId/members/department-apply',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          items: [
-            { id: 'dap-001', applicantName: '陈雨桐', currentDept: '技术部', targetDept: '运营部', reason: '希望尝试新的方向', status: 'under_review', submittedAt: '2025-07-28T10:00:00+08:00' },
-            { id: 'dap-002', applicantName: '王梓涵', currentDept: '设计部', targetDept: '技术部', reason: '对前端开发更感兴趣', status: 'approved', submittedAt: '2025-07-20T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
+    response: ({ url }: { url: string }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      return { code: 0, data: { items: departmentApplications, nextCursor: null } }
+    },
+  },
+  {
+    url: '/api/org/:clubId/members/department-apply',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input?: Partial<Pick<DepartmentApplyRecord, 'operation' | 'currentDept' | 'targetDept' | 'reason'>> } }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const user = resolveMockUser(url)
+      const input = body.input || {}
+      const operation = input.operation
+      const currentDept = input.currentDept?.trim() || ''
+      const targetDept = input.targetDept?.trim() || ''
+      const reason = input.reason?.trim() || ''
+      if ((operation !== 'join' && operation !== 'leave' && operation !== 'transfer') || !reason || (operation !== 'join' && !currentDept) || (operation !== 'leave' && !targetDept) || (operation === 'transfer' && currentDept === targetDept)) {
+        return departmentApplyError('IFC-ERR-007')
+      }
+      const application: DepartmentApplyRecord = {
+        id: `dap-${Date.now()}`,
+        applicantId: user.id,
+        applicantName: user.name,
+        operation,
+        currentDept,
+        targetDept,
+        reason,
+        status: 'under_review',
+        submittedAt: new Date().toISOString(),
+      }
+      departmentApplications.unshift(application)
+      return { code: 0, data: application }
+    },
+  },
+  {
+    url: '/api/org/:clubId/members/department-apply/:applicationId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const application = departmentApplications.find((item) => item.id === query.applicationId)
+      if (!application) {
+        return departmentApplyError('IFC-ERR-004')
+      }
+      if (application.applicantId !== resolveMockUser(url).id) {
+        return departmentApplyError('IFC-ERR-008')
+      }
+      if (application.status !== 'under_review') {
+        return departmentApplyError('IFC-ERR-006')
+      }
+      application.status = 'withdrawn'
+      application.withdrawnAt = new Date().toISOString()
+      return { code: 0, data: application }
+    },
+  },
+  {
+    url: '/api/org/:clubId/members/department-apply/:applicationId/decide',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { decision?: string; reason?: string } } }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const application = departmentApplications.find((item) => item.id === query.applicationId)
+      if (!application) {
+        return departmentApplyError('IFC-ERR-004')
+      }
+      const user = resolveMockUser(url)
+      if (application.applicantId === user.id) {
+        return departmentApplyError('IFC-ERR-008')
+      }
+      if (application.status !== 'under_review') {
+        return departmentApplyError('IFC-ERR-006')
+      }
+      const decision = body.input?.decision
+      const rejectReason = body.input?.reason?.trim() || ''
+      if (decision !== 'approve' && decision !== 'reject') {
+        return departmentApplyError('IFC-ERR-007')
+      }
+      if (decision === 'reject' && !rejectReason) {
+        return departmentApplyError('IFC-ERR-007')
+      }
+      application.status = decision === 'approve' ? 'approved' : 'rejected'
+      application.decidedAt = new Date().toISOString()
+      if (decision === 'reject') {
+        application.rejectReason = rejectReason
+      }
+      return { code: 0, data: application }
     },
   },
   // 常规入社邀请列表
