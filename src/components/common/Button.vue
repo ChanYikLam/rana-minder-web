@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useAttrs, useId } from 'vue'
 import { cn } from '@/lib/utils'
 import { Loader2 } from '@lucide/vue'
 import { Button as ShadcnButton } from '@/components/ui/button'
+
+defineOptions({ inheritAttrs: false })
 
 interface Props {
   variant?: 'default' | 'outline' | 'secondary' | 'ghost' | 'destructive' | 'link'
@@ -21,6 +23,7 @@ const props = withDefaults(defineProps<Props>(), {
   type: 'button',
 })
 
+const attrs = useAttrs()
 const sizeMap = {
   default: 'h-10 px-4 text-sm',
   xs: 'h-6 px-2 text-xs',
@@ -34,24 +37,27 @@ const sizeMap = {
 
 const computedSize = computed(() => sizeMap[props.size])
 const isDisabled = computed(() => props.disabled || props.loading)
-
-const describedBy = computed(() => {
-  if (props.disabled && props.disabledReason) return 'disabled-reason'
-  return undefined
-})
+const disabledReasonId = `disabled-reason-${useId()}`
+const hasDisabledReason = computed(() => isDisabled.value && Boolean(props.disabledReason))
+const describedBy = computed(() => hasDisabledReason.value ? disabledReasonId : undefined)
 </script>
 
 <template>
-  <ShadcnButton
-    :variant="variant"
-    :size="size"
-    :type="type"
-    :disabled="isDisabled"
-    :aria-describedby="describedBy"
-    :class="cn(computedSize)"
-  >
-    <Loader2 v-if="loading" :size="16" class="mr-1.5 animate-spin" aria-hidden="true" />
-    <slot />
-    <span v-if="disabled && disabledReason" id="disabled-reason" class="sr-only">{{ disabledReason }}</span>
-  </ShadcnButton>
+  <div class="inline-flex flex-col items-start gap-1">
+    <ShadcnButton
+      v-bind="attrs"
+      :variant="variant"
+      :size="size"
+      :type="type"
+      :disabled="isDisabled"
+      :aria-describedby="describedBy"
+      :class="cn(computedSize)"
+    >
+      <Loader2 v-if="loading" :size="16" class="mr-1.5 animate-spin" aria-hidden="true" />
+      <slot />
+    </ShadcnButton>
+    <p v-if="hasDisabledReason" :id="disabledReasonId" class="text-xs text-text-secondary">
+      {{ disabledReason }}
+    </p>
+  </div>
 </template>

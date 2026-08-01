@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
-import { LogIn, Compass, AlertTriangle, ShieldCheck, Users, UserCog, ClipboardCheck, User, GraduationCap } from '@lucide/vue'
+import { authMode, startLogin } from '@/services/auth'
+import { LogIn, Compass, ShieldCheck, Users, UserCog, ClipboardCheck, User, GraduationCap } from '@lucide/vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -10,7 +11,6 @@ const session = useSessionViewStore()
 
 const loggingIn = ref(false)
 const loginError = ref<string | null>(null)
-const degraded = ref(false)
 const selectedRole = ref('leader')
 
 const mockRoles = [
@@ -22,26 +22,34 @@ const mockRoles = [
   { key: 'applicant', label: '申请人', desc: '报名与查看邀请', icon: GraduationCap },
 ]
 
+function getRedirect(): string {
+  const redirect = route.query.redirect
+  return typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/me'
+}
+
 async function handleLogin() {
-  if (loggingIn.value) return
+  if (loggingIn.value || authMode === 'disabled') return
   loggingIn.value = true
   loginError.value = null
-  degraded.value = false
 
   try {
-    await session.loadSession(selectedRole.value)
-    loggingIn.value = false
-
-    if (!session.isAuthenticated) {
-      degraded.value = true
-      loginError.value = '统一认证服务暂时不可用，请稍后再试'
+    const result = await startLogin(getRedirect(), selectedRole.value)
+    if (result === 'redirected') return
+    if (result === 'disabled') {
+      loginError.value = '统一认证尚未配置，当前无法登录'
       return
     }
 
-    const redirect = (route.query.redirect as string) || '/me'
-    router.push(redirect)
+    await session.loadSession()
+    if (!session.isAuthenticated) {
+      loginError.value = '登录失败，请稍后重试'
+      return
+    }
+
+    await router.push(getRedirect())
   } catch {
     loginError.value = '登录失败，请稍后重试'
+  } finally {
     loggingIn.value = false
   }
 }
@@ -49,25 +57,11 @@ async function handleLogin() {
 
 <template>
   <div>
-    <!-- 降级提示 -->
-    <div
-      v-if="degraded"
-      class="mb-4 flex items-start gap-2 rounded-lg border border-warning bg-warning-subtle p-3"
-      role="alert"
-    >
-      <AlertTriangle :size="16" class="text-warning mt-0.5 shrink-0" />
-      <div class="text-sm text-warning">
-        <p class="font-medium">认证服务暂时不可用</p>
-        <p class="text-xs mt-0.5">您可以先浏览公开内容，待服务恢复后再登录</p>
-      </div>
-    </div>
-
     <div class="rounded-lg border border-border bg-elevated shadow-md p-8">
       <h2 class="text-lg font-semibold text-primary mb-1">登录</h2>
       <p class="text-sm text-text-secondary mb-6">使用学校统一身份认证（Casdoor）登录</p>
 
-      <!-- Mock 角色选择器 -->
-      <div class="mb-6">
+      <div v-if="authMode === 'mock'" class="mb-6">
         <p class="text-xs font-medium text-text-secondary mb-2">选择登录身份（Mock 演示）</p>
         <div class="grid grid-cols-2 gap-2">
           <button
@@ -92,9 +86,13 @@ async function handleLogin() {
         </div>
       </div>
 
+      <p v-if="authMode === 'disabled'" class="mb-6 rounded-lg border border-warning bg-warning-subtle p-3 text-sm text-warning" role="alert">
+        统一认证尚未配置，当前无法登录。
+      </p>
+
       <button
         class="w-full h-12 flex items-center justify-center gap-2 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-primary"
-        :disabled="loggingIn"
+        :disabled="loggingIn || authMode === 'disabled'"
         :aria-busy="loggingIn"
         @click="handleLogin"
       >
@@ -104,7 +102,7 @@ async function handleLogin() {
           aria-hidden="true"
         />
         <LogIn v-else :size="18" aria-hidden="true" />
-        {{ loggingIn ? '正在登录...' : '使用统一身份认证登录' }}
+        {{ loggingIn ? '正在登录...' : authMode === 'disabled' ? '统一认证未配置' : '使用统一身份认证登录' }}
       </button>
 
       <p v-if="loginError" class="mt-3 text-sm text-danger text-center" role="alert">

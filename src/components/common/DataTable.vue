@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, getCurrentInstance, ref, watch } from 'vue'
 
 interface Column<T> {
   key: string
@@ -33,7 +33,12 @@ const emit = defineEmits<{
   rowClick: [row: unknown]
 }>()
 
+const slots = useSlots()
+const instance = getCurrentInstance()
 const localSelected = ref<Set<string>>(new Set(props.selectedIds))
+const rowIds = computed(() => props.rows.map(getRowId))
+const allRowsSelected = computed(() => rowIds.value.length > 0 && rowIds.value.every((id) => localSelected.value.has(id)))
+const hasRowClickListener = computed(() => Boolean(instance?.vnode.props?.onRowClick))
 
 watch(() => props.selectedIds, (ids) => {
   localSelected.value = new Set(ids)
@@ -48,6 +53,17 @@ function toggleRow(id: string) {
   emit('update:selectedIds', [...localSelected.value])
 }
 
+function toggleAll() {
+  if (props.loading || rowIds.value.length === 0) return
+
+  if (allRowsSelected.value) {
+    rowIds.value.forEach((id) => localSelected.value.delete(id))
+  } else {
+    rowIds.value.forEach((id) => localSelected.value.add(id))
+  }
+  emit('update:selectedIds', [...localSelected.value])
+}
+
 function getRowId(row: unknown): string {
   return String((row as Record<string, unknown>)[props.rowKey] || '')
 }
@@ -55,6 +71,10 @@ function getRowId(row: unknown): string {
 function renderCell(col: Column<unknown>, row: unknown): string {
   if (col.render) return col.render(row)
   return String((row as Record<string, unknown>)[col.key] ?? '')
+}
+
+function handleRowClick(row: unknown) {
+  if (hasRowClickListener.value) emit('rowClick', row)
 }
 </script>
 
@@ -67,7 +87,10 @@ function renderCell(col: Column<unknown>, row: unknown): string {
             <input
               type="checkbox"
               class="rounded border-border"
-              :aria-label="localSelected.size === rows.length && rows.length > 0 ? '取消全选' : '全选'"
+              :checked="allRowsSelected"
+              :disabled="loading || rows.length === 0"
+              :aria-label="allRowsSelected ? '取消全选' : '全选'"
+              @change="toggleAll"
             />
           </th>
           <th
@@ -105,9 +128,13 @@ function renderCell(col: Column<unknown>, row: unknown): string {
           <tr
             v-for="row in rows"
             :key="getRowId(row)"
-            class="border-b border-border last:border-0 hover:bg-subtle transition-colors cursor-pointer"
+            class="border-b border-border last:border-0 hover:bg-subtle transition-colors"
+            :class="hasRowClickListener ? 'cursor-pointer' : ''"
+            :tabindex="hasRowClickListener ? 0 : undefined"
             role="row"
-            @click="emit('rowClick', row)"
+            @click="handleRowClick(row)"
+            @keydown.enter="handleRowClick(row)"
+            @keydown.space.prevent="handleRowClick(row)"
           >
             <td v-if="selectable" class="px-3 py-2.5" @click.stop>
               <input
@@ -124,7 +151,9 @@ function renderCell(col: Column<unknown>, row: unknown): string {
               class="px-3 py-2.5 text-primary whitespace-nowrap"
               role="cell"
             >
-              {{ renderCell(col, row) }}
+              <slot :name="`cell-${col.key}`" :row="row" :column="col">
+                {{ renderCell(col, row) }}
+              </slot>
             </td>
           </tr>
         </template>

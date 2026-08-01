@@ -10,6 +10,12 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'auth', public: true },
   },
   {
+    path: '/auth/callback',
+    name: 'P-IDN-01-callback',
+    component: () => import('@/pages/auth/AuthCallbackPage.vue'),
+    meta: { layout: 'auth', public: true },
+  },
+  {
     path: '/explore',
     name: 'P-REC-07-clubs',
     component: () => import('@/pages/recruitment/PublicCatalogPage.vue'),
