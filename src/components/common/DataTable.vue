@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, getCurrentInstance, ref, watch } from 'vue'
 
 interface Column<T> {
   key: string
@@ -33,7 +33,11 @@ const emit = defineEmits<{
   rowClick: [row: unknown]
 }>()
 
+const instance = getCurrentInstance()
 const localSelected = ref<Set<string>>(new Set(props.selectedIds))
+const rowIds = computed(() => props.rows.map(getRowId))
+const allRowsSelected = computed(() => rowIds.value.length > 0 && rowIds.value.every((id) => localSelected.value.has(id)))
+const hasRowClickListener = computed(() => Boolean(instance?.vnode.props?.onRowClick))
 
 watch(() => props.selectedIds, (ids) => {
   localSelected.value = new Set(ids)
@@ -49,10 +53,13 @@ function toggleRow(id: string) {
 }
 
 function toggleAll() {
-  const allIds = props.rows.map(getRowId).filter(Boolean)
-  localSelected.value = localSelected.value.size === allIds.length
-    ? new Set()
-    : new Set(allIds)
+  if (props.loading || rowIds.value.length === 0) return
+
+  if (allRowsSelected.value) {
+    rowIds.value.forEach((id) => localSelected.value.delete(id))
+  } else {
+    rowIds.value.forEach((id) => localSelected.value.add(id))
+  }
   emit('update:selectedIds', [...localSelected.value])
 }
 
@@ -69,6 +76,10 @@ function getRowLabel(row: unknown): string {
   const firstColumn = props.columns[0]
   return firstColumn ? `打开 ${renderCell(firstColumn, row)}` : '打开该行'
 }
+
+function handleRowClick(row: unknown) {
+  if (hasRowClickListener.value) emit('rowClick', row)
+}
 </script>
 
 <template>
@@ -80,9 +91,10 @@ function getRowLabel(row: unknown): string {
             <input
               type="checkbox"
               class="rounded border-border"
-              :checked="localSelected.size === rows.length && rows.length > 0"
-              :indeterminate="localSelected.size > 0 && localSelected.size < rows.length"
-              :aria-label="localSelected.size === rows.length && rows.length > 0 ? '取消全选' : '全选'"
+              :checked="allRowsSelected"
+              :indeterminate="localSelected.size > 0 && localSelected.size < rowIds.length"
+              :disabled="loading || rows.length === 0"
+              :aria-label="allRowsSelected ? '取消全选' : '全选'"
               @change="toggleAll"
             />
           </th>
@@ -121,20 +133,21 @@ function getRowLabel(row: unknown): string {
           <tr
             v-for="row in rows"
             :key="getRowId(row)"
-            class="border-b border-border last:border-0 hover:bg-subtle transition-colors cursor-pointer"
+            class="border-b border-border last:border-0 hover:bg-subtle transition-colors"
+            :class="hasRowClickListener ? 'cursor-pointer' : ''"
+            :tabindex="hasRowClickListener ? 0 : undefined"
             role="row"
-            tabindex="0"
             :aria-label="getRowLabel(row)"
-            @click="emit('rowClick', row)"
-            @keydown.enter="emit('rowClick', row)"
-            @keydown.space.prevent="emit('rowClick', row)"
+            @click="handleRowClick(row)"
+            @keydown.enter="handleRowClick(row)"
+            @keydown.space.prevent="handleRowClick(row)"
           >
             <td v-if="selectable" class="px-3 py-2.5" @click.stop>
               <input
                 type="checkbox"
                 class="rounded border-border"
                 :checked="localSelected.has(getRowId(row))"
-                :aria-label="`选择行`"
+                :aria-label="`选择第 ${rows.indexOf(row) + 1} 行`"
                 @change="toggleRow(getRowId(row))"
               />
             </td>
@@ -144,7 +157,9 @@ function getRowLabel(row: unknown): string {
               class="px-3 py-2.5 text-primary whitespace-nowrap"
               role="cell"
             >
-              {{ renderCell(col, row) }}
+              <slot :name="`cell-${col.key}`" :row="row" :column="col">
+                {{ renderCell(col, row) }}
+              </slot>
             </td>
           </tr>
         </template>

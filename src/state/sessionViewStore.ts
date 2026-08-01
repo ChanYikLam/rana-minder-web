@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SessionInfo, User, ProfileGate } from '@/types/domain'
-import { identityApi } from '@/services'
+import { getSession, logout as logoutAuth } from '@/services/auth'
 
 export const useSessionViewStore = defineStore('sessionView', () => {
   const user = ref<User | null>(null)
@@ -15,21 +15,23 @@ export const useSessionViewStore = defineStore('sessionView', () => {
   const isProfileComplete = computed(() => profileGate.value.complete && profileGate.value.emailVerified)
   const needsProfileGate = computed(() => isAuthenticated.value && !isProfileComplete.value)
 
-  async function loadSession(mockUser?: string) {
+  async function loadSession() {
     loading.value = true
-    const result = await identityApi.getSession(mockUser)
-    loading.value = false
+    try {
+      const result = await getSession()
 
-    if (result.kind === 'completed') {
-      const data = result.data as SessionInfo
-      user.value = data.user
-      profileGate.value = data.profileGate
-      degraded.value = data.degraded
-      permissions.value = data.permissions
-      lastLoadedAt.value = Date.now()
-    } else {
-      user.value = null
-      permissions.value = []
+      if (result.kind === 'completed') {
+        const data: SessionInfo = result.data
+        user.value = data.user
+        profileGate.value = data.profileGate
+        degraded.value = data.degraded
+        permissions.value = data.permissions
+        lastLoadedAt.value = Date.now()
+      } else {
+        clearSession()
+      }
+    } finally {
+      loading.value = false
     }
   }
 
@@ -43,7 +45,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
 
   async function logout() {
     try {
-      await identityApi.logout()
+      await logoutAuth()
     } finally {
       clearSession()
     }

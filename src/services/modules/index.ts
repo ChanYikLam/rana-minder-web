@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { get, getValidated, post, put } from '../client'
+import { del, get, getValidated, post, put } from '../client'
 import type { ApiResult, PaginatedResult } from '@/types/contracts'
 import type { SessionInfo, User, WorkspaceContext } from '@/types/domain'
 
@@ -34,13 +34,13 @@ const workspaceContextSchema = z.object({
 export const identityApi = {
   getSession: (mockUser?: string): Promise<ApiResult<SessionInfo>> =>
     getValidated('/auth/session', sessionSchema, mockUser ? { _mock_user: mockUser } : undefined),
+  logout: (): Promise<ApiResult<void>> => del('/auth/logout'),
   getProfile: (): Promise<ApiResult<User>> => get('/auth/profile'),
   updateProfile: (input: Partial<User>): Promise<ApiResult<User>> => put('/auth/profile', input),
   resolveSyncConflict: (input: { field: string; chosenValue: string }): Promise<ApiResult<User>> =>
     post('/auth/profile/sync-conflict', input),
   reauthenticate: (): Promise<ApiResult<{ proof: string; expiresAt: string }>> =>
     post('/auth/reauth', {}),
-  logout: (): Promise<ApiResult<void>> => post('/auth/logout', {}),
 }
 
 export const exploreApi = {

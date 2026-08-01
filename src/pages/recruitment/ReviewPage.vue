@@ -126,16 +126,14 @@ onMounted(loadReviews)
           empty-title="暂无申请人"
           @row-click="handleRowClick"
         >
-          <template #default="{ row }">
-            <td class="px-3 py-2.5 text-sm">{{ (row as ReviewItem).applicantName }}</td>
-            <td class="px-3 py-2.5 text-sm">{{ (row as ReviewItem).departmentName }}</td>
-            <td class="px-3 py-2.5"><StateTag :status="(row as ReviewItem).status" /></td>
-            <td class="px-3 py-2.5 text-sm">
-              <span v-if="(row as ReviewItem).rating" class="flex items-center gap-1">
-                <Star :size="14" class="text-warning fill-warning" /> {{ (row as ReviewItem).rating }}
-              </span>
-              <span v-else class="text-text-secondary">-</span>
-            </td>
+          <template #cell-status="{ row }">
+            <StateTag :status="(row as ReviewItem).status" />
+          </template>
+          <template #cell-rating="{ row }">
+            <span v-if="(row as ReviewItem).rating" class="flex items-center gap-1">
+              <Star :size="14" class="text-warning fill-warning" /> {{ (row as ReviewItem).rating }}
+            </span>
+            <span v-else class="text-text-secondary">-</span>
           </template>
         </DataTable>
 

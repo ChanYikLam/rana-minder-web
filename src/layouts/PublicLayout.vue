@@ -9,6 +9,12 @@ const notifications = useNotificationViewStore()
 
 <template>
   <div class="min-h-screen flex flex-col bg-background">
+    <a
+      href="#public-main"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-elevated focus:px-4 focus:py-2 focus:text-sm focus:text-primary focus:shadow-md"
+    >
+      跳到主内容
+    </a>
     <!-- Top Nav (simplified for public pages) -->
     <header
       class="sticky top-0 z-50 flex items-center justify-between h-14 px-4 border-b bg-elevated shadow-sm"
@@ -60,7 +66,7 @@ const notifications = useNotificationViewStore()
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 overflow-y-auto" role="main" tabindex="-1">
+    <main id="public-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
       <div class="mx-auto max-w-[1400px] p-4 md:p-6">
         <slot />
       </div>

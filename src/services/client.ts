@@ -100,6 +100,7 @@ async function request<T>(path: string, options: RequestOptions<T> = {}): Promis
       method,
       headers,
       body: requestBody,
+      credentials: 'include',
       signal,
     })
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PageStateBoundary, Card } from '@/components/common'
+import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
@@ -24,6 +24,22 @@ const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
 const savingDraft = ref(false)
+
+function getFieldDescriptionId(fieldId: string): string {
+  return `field-${fieldId}-description`
+}
+
+function getFieldErrorId(fieldId: string): string {
+  return `field-${fieldId}-error`
+}
+
+function getFieldDescribedBy(field: FormField): string | undefined {
+  const ids = [
+    field.description ? getFieldDescriptionId(field.id) : undefined,
+    formErrors.value[field.id] ? getFieldErrorId(field.id) : undefined,
+  ].filter((id): id is string => Boolean(id))
+  return ids.length > 0 ? ids.join(' ') : undefined
+}
 
 async function loadData() {
   state.value = 'loading'
@@ -169,7 +185,9 @@ onMounted(loadData)
               {{ field.label }}
               <span v-if="field.required" class="text-danger">*</span>
             </label>
-            <p v-if="field.description" class="text-xs text-text-secondary mb-1.5">{{ field.description }}</p>
+            <p v-if="field.description" :id="getFieldDescriptionId(field.id)" class="text-xs text-text-secondary mb-1.5">
+              {{ field.description }}
+            </p>
 
             <input
               v-if="field.type === 'text'"
@@ -178,6 +196,8 @@ onMounted(loadData)
               type="text"
               class="w-full h-10 px-3 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
               :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
+              :aria-invalid="Boolean(formErrors[field.id])"
+              :aria-describedby="getFieldDescribedBy(field)"
               @input="formData[field.id] = ($event.target as HTMLInputElement).value"
             />
 
@@ -188,6 +208,8 @@ onMounted(loadData)
               rows="4"
               class="w-full px-3 py-2 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
               :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
+              :aria-invalid="Boolean(formErrors[field.id])"
+              :aria-describedby="getFieldDescribedBy(field)"
               @input="formData[field.id] = ($event.target as HTMLTextAreaElement).value"
             />
 
@@ -197,6 +219,8 @@ onMounted(loadData)
               :value="formData[field.id] || ''"
               class="w-full h-10 px-3 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
               :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
+              :aria-invalid="Boolean(formErrors[field.id])"
+              :aria-describedby="getFieldDescribedBy(field)"
               @change="formData[field.id] = ($event.target as HTMLSelectElement).value"
             >
               <option value="">请选择</option>
@@ -207,12 +231,16 @@ onMounted(loadData)
               v-else-if="field.type === 'file'"
               :id="field.id"
               class="w-full h-24 rounded-md border border-dashed border-border flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+              :aria-invalid="Boolean(formErrors[field.id])"
+              :aria-describedby="getFieldDescribedBy(field)"
             >
               <Upload :size="20" />
               <span class="text-xs">点击上传文件</span>
             </button>
 
-            <p v-if="formErrors[field.id]" class="mt-1 text-xs text-danger" role="alert">{{ formErrors[field.id] }}</p>
+            <p v-if="formErrors[field.id]" :id="getFieldErrorId(field.id)" class="mt-1 text-xs text-danger" role="alert">
+              {{ formErrors[field.id] }}
+            </p>
           </div>
         </div>
       </Card>
@@ -222,22 +250,14 @@ onMounted(loadData)
       <p v-if="savedDraft" class="text-sm text-success mb-4" role="status">草稿已保存</p>
 
       <!-- 操作区 -->
-      <div class="sticky bottom-0 md:static bg-elevated md:bg-transparent border-t md:border-0 p-4 md:p-0 pt-4 flex gap-3">
-        <button
-          class="flex items-center gap-1.5 px-4 h-11 rounded-md border border-border text-text-primary hover:bg-subtle transition-colors disabled:opacity-60"
-          :disabled="savingDraft"
-          @click="handleSaveDraft"
-        >
+      <ResponsiveActionRegion page-family="form">
+        <Button variant="outline" :loading="savingDraft" @click="handleSaveDraft">
           <Save :size="16" /> {{ savingDraft ? '保存中...' : '保存草稿' }}
-        </button>
-        <button
-          class="flex-1 md:flex-none flex items-center justify-center gap-1.5 px-8 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
-          :disabled="submitting"
-          @click="handleSubmit"
-        >
+        </Button>
+        <Button class="flex-1 md:flex-none" :loading="submitting" @click="handleSubmit">
           <Send :size="16" /> {{ submitting ? '提交中...' : '提交报名' }}
-        </button>
-      </div>
+        </Button>
+      </ResponsiveActionRegion>
     </div>
   </PageStateBoundary>
 </template>
