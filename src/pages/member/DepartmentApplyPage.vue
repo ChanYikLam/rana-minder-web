@@ -73,28 +73,34 @@ function resetForm() {
 
 async function handleCreate() {
   creating.value = true
-  const result = await post(`/org/${clubId()}/members/department-apply`, form.value)
-  creating.value = false
-  if (result.kind === 'completed') {
-    toast.success('部门关系申请已提交')
-    showForm.value = false
-    resetForm()
-    await loadData()
-  } else {
-    toast.error(errorMessage(result))
+  try {
+    const result = await post(`/org/${clubId()}/members/department-apply`, form.value)
+    if (result.kind === 'completed') {
+      toast.success('部门关系申请已提交')
+      showForm.value = false
+      resetForm()
+      await loadData()
+    } else {
+      toast.error(errorMessage(result))
+    }
+  } finally {
+    creating.value = false
   }
 }
 
 async function handleWithdraw(item: DeptApply) {
   actingId.value = item.id
-  const result = await post(`/org/${clubId()}/members/department-apply/${item.id}/withdraw`)
-  actingId.value = null
-  if (result.kind === 'completed') {
-    toast.success('申请已撤回')
-  } else {
-    toast.error(errorMessage(result))
+  try {
+    const result = await post(`/org/${clubId()}/members/department-apply/${item.id}/withdraw`)
+    if (result.kind === 'completed') {
+      toast.success('申请已撤回')
+    } else {
+      toast.error(errorMessage(result))
+    }
+    await loadData()
+  } finally {
+    actingId.value = null
   }
-  await loadData()
 }
 
 function startReject(id: string) {
@@ -112,31 +118,36 @@ async function handleReject() {
   if (!rejectingId.value) return
 
   actingId.value = rejectingId.value
-  const result = await post(`/org/${clubId()}/members/department-apply/${rejectingId.value}/decide`, {
-    decision: 'reject',
-    reason: rejectReason.value.trim(),
-  })
-  actingId.value = null
-  if (result.kind === 'completed') {
-    toast.success('申请已驳回')
-    rejectingId.value = null
+  try {
+    const result = await post(`/org/${clubId()}/members/department-apply/${rejectingId.value}/decide`, {
+      decision: 'reject',
+      reason: rejectReason.value.trim(),
+    })
+    if (result.kind === 'completed') {
+      toast.success('申请已驳回')
+      rejectingId.value = null
+    } else {
+      rejectError.value = errorMessage(result)
+    }
     await loadData()
-  } else {
-    rejectError.value = errorMessage(result)
-    await loadData()
+  } finally {
+    actingId.value = null
   }
 }
 
 async function handleApprove(item: DeptApply) {
   actingId.value = item.id
-  const result = await post(`/org/${clubId()}/members/department-apply/${item.id}/decide`, { decision: 'approve' })
-  actingId.value = null
-  if (result.kind === 'completed') {
-    toast.success('申请已批准')
-  } else {
-    toast.error(errorMessage(result))
+  try {
+    const result = await post(`/org/${clubId()}/members/department-apply/${item.id}/decide`, { decision: 'approve' })
+    if (result.kind === 'completed') {
+      toast.success('申请已批准')
+    } else {
+      toast.error(errorMessage(result))
+    }
+    await loadData()
+  } finally {
+    actingId.value = null
   }
-  await loadData()
 }
 
 onMounted(loadData)

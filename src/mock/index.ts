@@ -808,7 +808,7 @@ const departmentApplications: DepartmentApplyRecord[] = [
   },
 ]
 
-function departmentApplyError(code: 'IFC-ERR-004' | 'IFC-ERR-006' | 'IFC-ERR-007' | 'IFC-ERR-008') {
+function departmentApplyError(code: 'IFC-ERR-003' | 'IFC-ERR-004' | 'IFC-ERR-006' | 'IFC-ERR-007' | 'IFC-ERR-008') {
   return { statusCode: MOCK_ERROR_HTTP[code], body: mockErrorBody(code) }
 }
 
@@ -925,6 +925,12 @@ const memberHandlers: MockMethod[] = [
         return departmentApplyError('IFC-ERR-004')
       }
       const user = resolveMockUser(url)
+      const clubId = query.clubId || ''
+      const permissions = getPermissions(user, clubId)
+      // 仅具备成员管理权限的角色可审批部门关系申请，防止普通成员越权
+      if (!permissions.includes('club:member:manage')) {
+        return departmentApplyError('IFC-ERR-003')
+      }
       if (application.applicantId === user.id) {
         return departmentApplyError('IFC-ERR-008')
       }
