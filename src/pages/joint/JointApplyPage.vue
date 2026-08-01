@@ -16,7 +16,9 @@ const submitting = ref(false)
 
 async function loadData() {
   state.value = 'loading'
-  const result = await get<{ title: string; description: string; participants: { clubName: string }[]; clubName: string }>(`/org/club-001/joint/${route.params.jointId}`)
+  const jointId = typeof route.params.jointId === 'string' ? route.params.jointId : null
+  if (!jointId) { state.value = 'error'; return }
+  const result = await get<{ title: string; description: string; participants: { clubName: string }[]; clubName: string }>(`/explore/joint/${jointId}`)
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'

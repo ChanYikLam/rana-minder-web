@@ -6,21 +6,21 @@
 /** 16 类逻辑错误码 */
 export const MOCK_ERROR_CODES = [
   'IFC-ERR-001', // 未认证
-  'IFC-ERR-002', // 认证已过期
+  'IFC-ERR-002', // 高风险操作需要重新认证
   'IFC-ERR-003', // 无权限
-  'IFC-ERR-004', // 资源不存在
-  'IFC-ERR-005', // 版本冲突
-  'IFC-ERR-006', // 非法状态转换
-  'IFC-ERR-007', // 字段校验失败
-  'IFC-ERR-008', // 业务规则拒绝
-  'IFC-ERR-009', // 幂等重复
-  'IFC-ERR-010', // 请求频率超限
-  'IFC-ERR-011', // 依赖服务不可用
-  'IFC-ERR-012', // 外部服务超时
+  'IFC-ERR-004', // 作用域越界
+  'IFC-ERR-005', // 输入不合法
+  'IFC-ERR-006', // 前置条件不满足
+  'IFC-ERR-007', // 状态冲突
+  'IFC-ERR-008', // 版本或影响预览冲突
+  'IFC-ERR-009', // 幂等键冲突
+  'IFC-ERR-010', // 资源竞争
+  'IFC-ERR-011', // 安全限制
+  'IFC-ERR-012', // 依赖服务不可用
   'IFC-ERR-013', // 外部结果不确定
   'IFC-ERR-014', // 结果处理中
-  'IFC-ERR-015', // 数据脱敏拒绝
-  'IFC-ERR-016', // 系统内部错误
+  'IFC-ERR-015', // 不存在或不可见
+  'IFC-ERR-016', // 安全提交失败
 ] as const
 
 export type MockErrorCode = (typeof MOCK_ERROR_CODES)[number]
@@ -28,21 +28,21 @@ export type MockErrorCode = (typeof MOCK_ERROR_CODES)[number]
 /** 错误码对应的安全文案（脱敏，不暴露内部信息） */
 export const MOCK_ERROR_MESSAGES: Record<MockErrorCode, string> = {
   'IFC-ERR-001': '请先登录后再进行操作',
-  'IFC-ERR-002': '登录已过期，请重新登录',
+  'IFC-ERR-002': '当前认证已不足以执行此操作，请重新验证身份',
   'IFC-ERR-003': '您没有执行此操作的权限',
-  'IFC-ERR-004': '请求的内容不存在或已被移除',
-  'IFC-ERR-005': '数据已被他人修改，请刷新后重试',
-  'IFC-ERR-006': '当前状态不允许此操作',
-  'IFC-ERR-007': '提交的信息不符合要求，请检查后重试',
-  'IFC-ERR-008': '操作不符合业务规则',
-  'IFC-ERR-009': '请勿重复提交',
-  'IFC-ERR-010': '操作过于频繁，请稍后再试',
-  'IFC-ERR-011': '依赖的服务暂时不可用，请稍后再试',
-  'IFC-ERR-012': '外部服务响应超时，请稍后再试',
+  'IFC-ERR-004': '当前请求不属于可访问的作用域',
+  'IFC-ERR-005': '提交的信息不符合要求，请检查后重试',
+  'IFC-ERR-006': '当前业务条件不允许此操作',
+  'IFC-ERR-007': '对象状态已变化，请刷新后重新选择操作',
+  'IFC-ERR-008': '数据版本或影响预览已变化，请刷新后重试',
+  'IFC-ERR-009': '相同操作标识对应了不同内容，请勿重复提交',
+  'IFC-ERR-010': '当前资源发生竞争，请刷新后重试',
+  'IFC-ERR-011': '当前查询或操作受到安全限制',
+  'IFC-ERR-012': '依赖的服务暂时不可用，请稍后再试',
   'IFC-ERR-013': '操作结果暂时无法确认，请勿重复提交',
   'IFC-ERR-014': '操作正在处理中，请勿重复提交',
-  'IFC-ERR-015': '请求的内容涉及敏感信息，无法展示',
-  'IFC-ERR-016': '系统出现未知错误，请稍后再试',
+  'IFC-ERR-015': '请求的内容不存在或当前不可见',
+  'IFC-ERR-016': '操作未能安全提交，请稍后重试',
 }
 
 /** 错误码到 HTTP 状态码的映射（mock 层用） */
@@ -50,18 +50,18 @@ export const MOCK_ERROR_HTTP: Record<MockErrorCode, number> = {
   'IFC-ERR-001': 401,
   'IFC-ERR-002': 401,
   'IFC-ERR-003': 403,
-  'IFC-ERR-004': 404,
-  'IFC-ERR-005': 409,
+  'IFC-ERR-004': 403,
+  'IFC-ERR-005': 422,
   'IFC-ERR-006': 422,
-  'IFC-ERR-007': 422,
-  'IFC-ERR-008': 422,
+  'IFC-ERR-007': 409,
+  'IFC-ERR-008': 409,
   'IFC-ERR-009': 409,
-  'IFC-ERR-010': 429,
-  'IFC-ERR-011': 503,
-  'IFC-ERR-012': 504,
+  'IFC-ERR-010': 409,
+  'IFC-ERR-011': 403,
+  'IFC-ERR-012': 503,
   'IFC-ERR-013': 202,
   'IFC-ERR-014': 202,
-  'IFC-ERR-015': 403,
+  'IFC-ERR-015': 404,
   'IFC-ERR-016': 500,
 }
 

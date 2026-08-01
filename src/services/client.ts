@@ -3,14 +3,20 @@ import { httpStatusToResult } from './error-map'
 
 const BASE_URL = '/api'
 
-let idempotencyCounter = 0
+const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000
+const pendingIdempotencyKeys = new Map<string, { key: string; expiresAt: number }>()
 
 function generateIdempotencyKey(): string {
-  idempotencyCounter += 1
-  return `idem-${Date.now()}-${idempotencyCounter}`
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `idem-${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join('-')}`
 }
 
-interface RequestOptions {
+export interface RuntimeSchema<T> {
+  safeParse: (value: unknown) => { success: true; data: T } | { success: false }
+}
+
+interface RequestOptions<T = unknown> {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   params?: Record<string, string | number | boolean | undefined | null>
   body?: unknown
@@ -19,6 +25,7 @@ interface RequestOptions {
   expectedVersion?: number
   idempotencyKey?: string
   signal?: AbortSignal
+  schema?: RuntimeSchema<T>
 }
 
 function buildUrl(path: string, params?: RequestOptions['params']): string {
@@ -33,7 +40,29 @@ function buildUrl(path: string, params?: RequestOptions['params']): string {
   return url.pathname + url.search
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
+function getIdempotencyKey(fingerprint: string): string {
+  const now = Date.now()
+  const existing = pendingIdempotencyKeys.get(fingerprint)
+  if (existing && existing.expiresAt > now) return existing.key
+  const key = generateIdempotencyKey()
+  pendingIdempotencyKeys.set(fingerprint, { key, expiresAt: now + IDEMPOTENCY_TTL_MS })
+  return key
+}
+
+function completedData<T>(body: unknown, schema?: RuntimeSchema<T>): ApiResult<T> {
+  if (!body || typeof body !== 'object' || !Object.prototype.hasOwnProperty.call(body, 'data')) {
+    return { kind: 'rejected', error: { code: 'IFC-ERR-016', message: '响应缺少必要数据' } }
+  }
+  const rawData = (body as { data: unknown }).data
+  if (!schema) return { kind: 'completed', data: rawData as T }
+
+  const parsed = schema.safeParse(rawData)
+  return parsed.success
+    ? { kind: 'completed', data: parsed.data }
+    : { kind: 'rejected', error: { code: 'IFC-ERR-016', message: '响应数据格式不符合契约' } }
+}
+
+async function request<T>(path: string, options: RequestOptions<T> = {}): Promise<ApiResult<T>> {
   const {
     method = 'GET',
     params,
@@ -43,6 +72,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
     expectedVersion,
     idempotencyKey,
     signal,
+    schema,
   } = options
 
   const headers: Record<string, string> = {
@@ -50,14 +80,17 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
   }
 
   let requestBody: string | undefined
+  let intentFingerprint: string | null = null
 
-  if (body !== undefined && method !== 'GET') {
+  if (method !== 'GET') {
+    const input = body === undefined ? {} : body
+    intentFingerprint = JSON.stringify({ method, path, action, targetId, expectedVersion, input })
     const apiRequest: ApiRequest = {
       action,
       targetId,
       expectedVersion,
-      idempotencyKey: idempotencyKey || generateIdempotencyKey(),
-      input: body as Record<string, unknown>,
+      idempotencyKey: idempotencyKey || getIdempotencyKey(intentFingerprint),
+      input: input as Record<string, unknown>,
     }
     requestBody = JSON.stringify(apiRequest)
   }
@@ -67,21 +100,28 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
       method,
       headers,
       body: requestBody,
+      credentials: 'include',
       signal,
     })
 
     if (response.status === 204) {
+      if (intentFingerprint) pendingIdempotencyKeys.delete(intentFingerprint)
       return { kind: 'completed', data: undefined as T }
     }
 
     const responseBody = await response.json().catch(() => ({}))
 
+    if (response.status === 202) {
+      return httpStatusToResult<T>(response.status, responseBody)
+    }
+
     if (!response.ok) {
       return httpStatusToResult<T>(response.status, responseBody)
     }
 
-    const data = (responseBody as { data: T }).data ?? (responseBody as T)
-    return { kind: 'completed', data }
+    const result = completedData(responseBody, schema)
+    if (result.kind === 'completed' && intentFingerprint) pendingIdempotencyKeys.delete(intentFingerprint)
+    return result
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw err
@@ -100,19 +140,23 @@ export async function get<T>(path: string, params?: RequestOptions['params'], si
   return request<T>(path, { method: 'GET', params, signal })
 }
 
-export async function post<T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
+export async function getValidated<T>(path: string, schema: RuntimeSchema<T>, params?: RequestOptions['params'], signal?: AbortSignal): Promise<ApiResult<T>> {
+  return request<T>(path, { method: 'GET', params, signal, schema })
+}
+
+export async function post<T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
   return request<T>(path, { ...options, method: 'POST', body })
 }
 
-export async function put<T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
+export async function put<T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
   return request<T>(path, { ...options, method: 'PUT', body })
 }
 
-export async function patch<T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
+export async function patch<T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
   return request<T>(path, { ...options, method: 'PATCH', body })
 }
 
-export async function del<T>(path: string, options?: Omit<RequestOptions, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
+export async function del<T>(path: string, options?: Omit<RequestOptions<T>, 'method' | 'params' | 'body'>): Promise<ApiResult<T>> {
   return request<T>(path, { ...options, method: 'DELETE' })
 }
 

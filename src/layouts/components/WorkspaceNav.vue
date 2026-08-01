@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useId } from 'vue'
 import { useRoute } from 'vue-router'
 import { ChevronDown } from '@lucide/vue'
 
@@ -18,11 +18,15 @@ interface NavGroup {
 const props = defineProps<{ groups: NavGroup[] }>()
 
 const route = useRoute()
-
+const instanceId = useId()
 const expandedGroups = ref<Set<string>>(new Set())
 
 function getGroupKey(group: NavGroup): string {
   return group.prefix
+}
+
+function getGroupPanelId(index: number): string {
+  return `workspace-nav-${instanceId}-group-${index}`
 }
 
 function isGroupActive(group: NavGroup): boolean {
@@ -50,10 +54,12 @@ function isItemActive(path: string): boolean {
 
 <template>
   <nav class="flex-1 p-2" role="navigation" aria-label="工作空间">
-    <div v-for="group in props.groups" :key="group.prefix" class="mb-0.5">
+    <div v-for="(group, index) in props.groups" :key="group.prefix" class="mb-0.5">
       <button
         class="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors"
         :class="isGroupActive(group) ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+        :aria-controls="getGroupPanelId(index)"
+        :aria-expanded="isGroupExpanded(group)"
         @click="toggleGroup(group)"
       >
         <component :is="group.icon" :size="16" />
@@ -64,7 +70,11 @@ function isItemActive(path: string): boolean {
           :class="isGroupExpanded(group) ? '' : '-rotate-90'"
         />
       </button>
-      <div v-if="isGroupExpanded(group)" class="ml-4 mt-0.5 space-y-0.5 border-l border-border pl-2">
+      <div
+        v-if="isGroupExpanded(group)"
+        :id="getGroupPanelId(index)"
+        class="ml-4 mt-0.5 space-y-0.5 border-l border-border pl-2"
+      >
         <router-link
           v-for="item in group.items"
           :key="item.path"

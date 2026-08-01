@@ -1,6 +1,25 @@
-import type { MockMethod } from 'vite-plugin-mock'
-import { resolveMockUser, getPermissions } from './auth'
+import type { MockMethod } from './types'
+import { clearMockSession, getActiveMockUser, resolveMockSessionUser, resolveMockUser, getPermissions } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
+
+const REAUTH_TTL_MS = 10 * 60 * 1000
+const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
+
+function issueReauthProof(userId: string): { proof: string; expiresAt: string } {
+  const proof = `reauth-${userId}-${Date.now()}`
+  const expiresAt = Date.now() + REAUTH_TTL_MS
+  reauthProofs.set(proof, { userId, expiresAt })
+  return { proof, expiresAt: new Date(expiresAt).toISOString() }
+}
+
+function consumeReauthProof(proof: unknown): boolean {
+  if (typeof proof !== 'string') return false
+  const user = getActiveMockUser()
+  const record = reauthProofs.get(proof)
+  if (!user || !record || record.userId !== user.id || record.expiresAt <= Date.now()) return false
+  reauthProofs.delete(proof)
+  return true
+}
 
 /** 会话处理器 */
 const identityHandlers: MockMethod[] = [
@@ -12,7 +31,10 @@ const identityHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      const user = resolveMockUser(url)
+      const user = resolveMockSessionUser(url)
+      if (!user) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-001', message: '请先登录' } }
+      }
       return {
         code: 0,
         data: {
@@ -21,7 +43,10 @@ const identityHandlers: MockMethod[] = [
             studentId: user.studentId,
             name: user.name,
             email: user.email,
+            phone: user.phone,
             avatar: user.avatar,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
           },
           profileGate: {
             complete: user.profileComplete,
@@ -31,6 +56,23 @@ const identityHandlers: MockMethod[] = [
           permissions: getPermissions(user, user.currentClubId || ''),
         },
       }
+    },
+  },
+  {
+    url: '/api/auth/logout',
+    method: 'post',
+    response: () => {
+      clearMockSession()
+      return { code: 0, data: null }
+    },
+  },
+  {
+    url: '/api/auth/reauth',
+    method: 'post',
+    response: () => {
+      const user = getActiveMockUser()
+      if (!user) return { statusCode: 401, body: { code: 'IFC-ERR-001', message: '请先登录' } }
+      return { code: 0, data: issueReauthProof(user.id) }
     },
   },
   {
@@ -207,6 +249,26 @@ const publicHandlers: MockMethod[] = [
 
 /** 社团工作空间处理器 */
 const organizationHandlers: MockMethod[] = [
+  {
+    url: '/api/org/:clubId/context',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const membership = user.roles.find((role) => role.clubId === query.clubId)
+      if (!membership) {
+        return { statusCode: 403, body: { code: 'IFC-ERR-004', message: '工作空间不可访问' } }
+      }
+      return {
+        code: 0,
+        data: {
+          clubId: membership.clubId,
+          clubName: membership.clubName,
+          role: membership.role,
+          permissions: membership.permissions,
+        },
+      }
+    },
+  },
   {
     url: '/api/org/:clubId/dashboard',
     method: 'get',
@@ -392,6 +454,36 @@ const recruitmentHandlers: MockMethod[] = [
       return { code: 0, data }
     },
   },
+  {
+    url: '/api/explore/activities/:id/form',
+    method: 'get',
+    response: () => ({
+      code: 0,
+      data: {
+        versions: [{
+          fields: [
+            { id: 'field-001', type: 'textarea', label: '个人简介', description: null, required: true, readonly: false, permission: 'applicant', options: null },
+            { id: 'field-002', type: 'text', label: '相关经验', description: null, required: false, readonly: false, permission: 'applicant', options: null },
+          ],
+        }],
+      },
+    }),
+  },
+  {
+    url: '/api/explore/joint/:id',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => ({
+      code: 0,
+      data: {
+        id: query.id || 'jnt-001', clubId: 'joint', clubName: '计算机协会、电子设计协会',
+        title: '计算机+电子联合招新', type: 'joint', status: 'published', channelStatus: 'open',
+        deadline: '2025-09-20T23:59:00+08:00', description: '两家社团联合举办的技术方向招新活动。',
+        participants: [{ clubName: '计算机协会' }, { clubName: '电子设计协会' }],
+        departments: [{ id: 'joint-tech', name: '联合技术方向' }, { id: 'joint-ops', name: '联合运营方向' }],
+        formId: 'joint-form-001',
+      },
+    }),
+  },
   // 社团活动列表（管理视角）
   {
     url: '/api/org/:clubId/recruitment',
@@ -524,6 +616,14 @@ const recruitmentHandlers: MockMethod[] = [
       }
     },
   },
+  {
+    url: '/api/me/interviews/recruitment/:interviewId/book',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { slotId: string } } }) => ({
+      code: 0,
+      data: { id: query.interviewId, slotId: body.input.slotId, status: 'booked' },
+    }),
+  },
   // 评价列表
   {
     url: '/api/org/:clubId/recruitment/:activityId/reviews',
@@ -533,14 +633,24 @@ const recruitmentHandlers: MockMethod[] = [
         code: 0,
         data: {
           items: [
-            { id: 'rv-001', applicantId: 'u-003', applicantName: '王梓涵', departmentName: '技术部', status: 'concluded', rating: 4, comment: '技术基础扎实，沟通能力好', concludedAt: '2025-08-04T11:00:00+08:00', concludedBy: '李思颖' },
-            { id: 'rv-002', applicantId: 'u-002', applicantName: '陈雨桐', departmentName: '运营部', status: 'evaluating', rating: null, comment: '', concludedAt: null, concludedBy: null },
-            { id: 'rv-003', applicantId: 'u-001', applicantName: '刘子豪', departmentName: '技术部', status: 'pending', rating: null, comment: '', concludedAt: null, concludedBy: null },
+            { id: 'rv-001', applicantId: 'u-003', applicantName: '王梓涵', departmentName: '技术部', status: 'concluded', rating: 4, comment: '技术基础扎实，沟通能力好', concludedAt: '2025-08-04T11:00:00+08:00', concludedBy: '李思颖', myRating: 4, myComment: '技术基础扎实，沟通能力好' },
+            { id: 'rv-002', applicantId: 'u-002', applicantName: '陈雨桐', departmentName: '运营部', status: 'evaluating', rating: null, comment: '', concludedAt: null, concludedBy: null, myRating: null, myComment: null },
+            { id: 'rv-003', applicantId: 'u-001', applicantName: '刘子豪', departmentName: '技术部', status: 'pending', rating: null, comment: '', concludedAt: null, concludedBy: null, myRating: null, myComment: null },
           ],
           nextCursor: null,
         },
       }
     },
+  },
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => ({ code: 0, data: { id: query.reviewId, status: 'concluded', ...body.input } }),
+  },
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/reviews/publish',
+    method: 'post',
+    response: () => ({ code: 0, data: { status: 'published', publishedAt: new Date().toISOString() } }),
   },
   // 邀请列表
   {
@@ -633,6 +743,26 @@ const recruitmentHandlers: MockMethod[] = [
 
 /** 联合活动处理器 */
 const jointHandlers: MockMethod[] = [
+  {
+    url: '/api/me/invitations/joint/:invitationId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => ({
+      code: 0,
+      data: {
+        id: query.invitationId || 'jinv-001', jointTitle: '计算机+电子联合招新', status: 'pending_acceptance',
+        sentAt: '2025-08-01T10:00:00+08:00', expiredAt: '2025-08-08T23:59:00+08:00',
+        offers: [
+          { clubId: 'club-001', clubName: '计算机协会', departmentName: '技术部' },
+          { clubId: 'club-002', clubName: '电子设计协会', departmentName: '嵌入式组' },
+        ],
+      },
+    }),
+  },
+  {
+    url: '/api/me/invitations/joint/:invitationId/respond',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { action: string } } }) => ({ code: 0, data: { id: query.invitationId, status: body.input.action === 'accept' ? 'accepted' : 'rejected' } }),
+  },
   {
     url: '/api/org/:clubId/joint',
     method: 'get',
@@ -824,6 +954,23 @@ function departmentApplyError(code: 'IFC-ERR-003' | 'IFC-ERR-004' | 'IFC-ERR-006
 
 /** 成员生命周期处理器 */
 const memberHandlers: MockMethod[] = [
+  {
+    url: '/api/me/invitations/membership/:invitationId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => ({
+      code: 0,
+      data: {
+        id: query.invitationId || 'minv-001', candidateName: '当前用户', candidateStudentId: '20240001',
+        departmentName: '技术部', status: 'pending_acceptance', sentAt: '2025-08-01T10:00:00+08:00',
+        acceptedAt: null, expiredAt: '2025-08-08T23:59:00+08:00',
+      },
+    }),
+  },
+  {
+    url: '/api/me/invitations/membership/:invitationId/respond',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { action: string } } }) => ({ code: 0, data: { id: query.invitationId, status: body.input.action === 'accept' ? 'accepted' : 'rejected' } }),
+  },
   // 成员列表（静态路由必须排在动态 :memberId 之前）
   {
     url: '/api/org/:clubId/members',
@@ -1042,6 +1189,7 @@ const memberHandlers: MockMethod[] = [
             { id: 'mem-001', name: '陈雨桐', currentTitle: '干事', proposedTitle: '副部长', department: '技术部' },
           ],
           canExecute: true,
+          version: 3,
         },
       }
     },
@@ -1118,7 +1266,13 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/transition',
     method: 'post',
-    response: () => {
+    response: ({ body }: { body: { input: { reauthProof?: string }; expectedVersion?: number } }) => {
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      if (body.expectedVersion !== 3) {
+        return { statusCode: 409, body: { code: 'IFC-ERR-008', message: '换届方案版本已变化' } }
+      }
       return {
         code: 0,
         data: {
@@ -1326,6 +1480,7 @@ const platformHandlers: MockMethod[] = [
             { id: 'act-003', label: '2025 春季补录', type: '活动', recordCount: 3, memberCount: 0 },
           ],
           totalRecords: 15, totalMembers: 5, warning: '删除后不可恢复，相关数据将被永久清除',
+          previewVersion: 4,
         },
       }
     },
@@ -1360,7 +1515,19 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/admin/delete/execute',
     method: 'post',
-    response: ({ body }: { body: { input: { targetIds: string[] } } }) => {
+    response: ({ body }: { body: { input: { targetIds: string[]; reason?: string; reauthProof?: string; previewVersion?: number } } }) => {
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      if (body.input?.previewVersion !== 4) {
+        return { statusCode: 409, body: { code: 'IFC-ERR-008', message: '删除影响预览已变化' } }
+      }
+      if (!body.input?.reason?.trim()) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '必须填写删除原因' } }
+      }
+      if ((body.input?.targetIds || []).includes('club-004')) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '目标仍存在活跃关系' } }
+      }
       return {
         code: 0,
         data: {
@@ -1414,6 +1581,19 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
+  {
+    url: '/api/org/:clubId/exports',
+    method: 'post',
+    response: ({ body }: { body: { input: { type?: string } } }) => ({
+      code: 0,
+      data: { id: `exp-${Date.now()}`, type: body.input.type || '成员名单', status: 'generating', createdAt: new Date().toISOString() },
+    }),
+  },
+  {
+    url: '/api/org/:clubId/exports/:exportId/download',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => ({ code: 0, data: { downloadUrl: `/mock-files/${query.exportId}.csv` } }),
+  },
   // 平台配置
   {
     url: '/api/org/:clubId/config',
@@ -1428,6 +1608,113 @@ const platformHandlers: MockMethod[] = [
         },
       }
     },
+  },
+  // 本人纠错
+  {
+    url: '/api/me/corrections',
+    method: 'get',
+    response: () => ({ code: 0, data: { items: [{ id: 'cor-self-001', targetType: '个人资料', targetId: 'self', reason: '资料需要更正', evidence: '', status: 'submitted', submittedAt: '2025-08-01T10:00:00+08:00', submitterName: '当前用户' }] } }),
+  },
+  {
+    url: '/api/me/corrections',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => ({ code: 0, data: { id: `cor-${Date.now()}`, status: 'submitted', submittedAt: new Date().toISOString(), ...body.input } }),
+  },
+  {
+    url: '/api/me/corrections/:correctionId/withdraw',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => ({ code: 0, data: { id: query.correctionId, status: 'withdrawn' } }),
+  },
+  // 平台作用域端点
+  {
+    url: '/api/admin/notifications/email-config',
+    method: 'get',
+    response: () => ({ code: 0, data: { smtpHost: 'smtp.example.edu.cn', smtpPort: 465, smtpUser: 'platform@example.edu.cn', fromName: 'RanaMinder', encryption: 'ssl', verified: true } }),
+  },
+  {
+    url: '/api/admin/notifications/email-config',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => ({ code: 0, data: { ...body.input, verified: true } }),
+  },
+  {
+    url: '/api/admin/notifications/email-config/test',
+    method: 'post',
+    response: () => ({ code: 0, data: { status: 'sent' } }),
+  },
+  {
+    url: '/api/admin/stats',
+    method: 'get',
+    response: () => ({ code: 0, data: { summary: [{ label: '社团总数', value: 12, trend: 'up', trendValue: 1 }, { label: '成员总数', value: 1024, trend: 'up', trendValue: 42 }], departmentDistribution: [{ name: '全平台', count: 1024 }] } }),
+  },
+  {
+    url: '/api/admin/exports',
+    method: 'get',
+    response: () => ({ code: 0, data: { items: [{ id: 'pexp-001', type: '平台汇总', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:01:00+08:00', expiredAt: '2025-08-08T10:00:00+08:00', downloadUrl: '/mock-files/pexp-001.csv', fileSize: 4096 }] } }),
+  },
+  {
+    url: '/api/admin/exports',
+    method: 'post',
+    response: () => ({ code: 0, data: { id: `pexp-${Date.now()}`, status: 'generating', createdAt: new Date().toISOString() } }),
+  },
+  {
+    url: '/api/admin/exports/:exportId/download',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => ({ code: 0, data: { downloadUrl: `/mock-files/${query.exportId}.csv` } }),
+  },
+  {
+    url: '/api/admin/config',
+    method: 'get',
+    response: () => ({ code: 0, data: { clubName: 'RanaMinder 平台', clubDescription: '平台级配置', requireEmailVerification: true, requireProfileComplete: true, maxMembers: 10000, allowSelfExit: true, academicYearStart: 9 } }),
+  },
+  {
+    url: '/api/admin/config',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => ({ code: 0, data: body.input }),
+  },
+  {
+    url: '/api/admin/audit/logs',
+    method: 'get',
+    response: () => ({ code: 0, data: { items: [{ id: 'plog-001', actorName: '平台管理员', action: '审核社团', targetType: '社团', targetId: 'club-001', detail: '平台操作', createdAt: '2025-08-01T10:00:00+08:00' }] } }),
+  },
+  {
+    url: '/api/admin/audit/corrections',
+    method: 'get',
+    response: () => ({ code: 0, data: { items: [{ id: 'pcor-001', targetType: '社团', targetId: 'club-001', reason: '平台纠错', evidence: '', status: 'submitted', submittedAt: '2025-08-01T10:00:00+08:00', submitterName: '张三' }] } }),
+  },
+  {
+    url: '/api/admin/audit/corrections',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => ({ code: 0, data: { id: `pcor-${Date.now()}`, status: 'submitted', ...body.input } }),
+  },
+  {
+    url: '/api/admin/audit/corrections/:correctionId/decide',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => ({ code: 0, data: { id: query.correctionId, status: body.input.decision === 'approve' ? 'approved' : 'rejected' } }),
+  },
+  {
+    url: '/api/admin/forms/designer/:formId',
+    method: 'get',
+    response: () => ({ code: 0, data: { title: '平台通用报名表', fields: [] } }),
+  },
+  {
+    url: '/api/admin/forms/:formId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => ({ code: 0, data: { id: query.formId, title: '平台通用报名表', versions: [{ version: 1, status: 'draft', publishedAt: null, fields: [] }] } }),
+  },
+  {
+    url: '/api/admin/forms/designer/:formId/save',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => ({ code: 0, data: { id: query.formId, status: 'draft' } }),
+  },
+  {
+    url: '/api/admin/joint/:jointId/close',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => ({ code: 0, data: { id: query.jointId, title: '平台强制结束联合活动', status: 'published', participants: [], totalApplicants: 28, totalConcluded: 9, totalInvited: 5, canClose: true } }),
+  },
+  {
+    url: '/api/admin/joint/:jointId/close',
+    method: 'post',
+    response: () => ({ code: 0, data: { status: 'closed', closedAt: new Date().toISOString() } }),
   },
   // 权限模板
   {
@@ -1585,7 +1872,76 @@ const listHandlers: MockMethod[] = [
   },
 ]
 
-export default [
+function requiredClubPermission(url: string): string | null {
+  if (url.includes('/dashboard')) return 'club:dashboard:view'
+  if (url.includes('/batch')) return 'club:batch:execute'
+  if (url.includes('/recruitment')) return 'club:recruitment:manage'
+  if (url.includes('/joint')) return 'club:joint:manage'
+  if (url.includes('/members')) return 'club:member:manage'
+  if (url.includes('/forms')) return 'club:form:design'
+  if (url.includes('/stats')) return 'club:stats:view'
+  if (url.includes('/exports')) return 'club:export:execute'
+  if (url.includes('/audit')) return 'club:audit:view'
+  if (url.includes('/config') || url.includes('/notifications')) return 'club:config:manage'
+  return null
+}
+
+function requiredPlatformPermission(url: string): string | null {
+  if (url.includes('/forms')) return 'platform:form:design'
+  if (url.includes('/delete')) return 'platform:delete:execute'
+  if (url.includes('/retention')) return 'platform:delete:execute'
+  if (url.includes('/audit')) return 'platform:audit:view'
+  if (url.includes('/exports') || url.includes('/stats')) return 'platform:export:execute'
+  if (url.includes('/ops-status')) return 'platform:ops:view'
+  if (url.includes('/config') || url.includes('/notifications')) return 'platform:config:manage'
+  if (url.includes('/clubs') || url.includes('/joint')) return 'platform:club:manage'
+  return null
+}
+
+function secureHandler(handler: MockMethod): MockMethod {
+  if (typeof handler.response !== 'function') return handler
+  const originalResponse = handler.response
+  const protectedPath = handler.url.startsWith('/api/me/')
+    || handler.url.startsWith('/api/org/')
+    || handler.url.startsWith('/api/admin/')
+    || handler.url.startsWith('/api/files/')
+    || handler.url.startsWith('/api/notifications')
+    || handler.url.startsWith('/api/auth/profile')
+    || handler.url === '/api/auth/reauth'
+    || (handler.url.startsWith('/api/activity/') && handler.method === 'post')
+  if (!protectedPath) return handler
+
+  return {
+    ...handler,
+    response: (options) => {
+      const user = getActiveMockUser()
+      if (!user) return { statusCode: 401, body: { code: 'IFC-ERR-001', message: '请先登录' } }
+
+      if (handler.url.startsWith('/api/org/')) {
+        const clubId = String(options.query?.clubId || '')
+        const permissions = getPermissions(user, clubId)
+        const requiredPermission = requiredClubPermission(handler.url)
+        const hasMembership = user.roles.some((role) => role.clubId === clubId)
+        const isContextRequest = handler.url.endsWith('/context')
+        if (!clubId || !hasMembership || (!isContextRequest && (!requiredPermission || !permissions.includes(requiredPermission)))) {
+          return { statusCode: 403, body: { code: 'IFC-ERR-003', message: '当前社团操作无权访问' } }
+        }
+      }
+
+      if (handler.url.startsWith('/api/admin/')) {
+        const permissions = getPermissions(user, '')
+        const requiredPermission = requiredPlatformPermission(handler.url)
+        if (!requiredPermission || !permissions.includes(requiredPermission)) {
+          return { statusCode: 403, body: { code: 'IFC-ERR-003', message: '平台操作无权访问' } }
+        }
+      }
+
+      return originalResponse(options)
+    },
+  }
+}
+
+const handlers: MockMethod[] = [
   ...identityHandlers,
   ...publicHandlers,
   ...organizationHandlers,
@@ -1596,4 +1952,6 @@ export default [
   ...memberHandlers,
   ...platformHandlers,
   ...listHandlers,
-] as MockMethod[]
+]
+
+export default handlers.map(secureHandler)

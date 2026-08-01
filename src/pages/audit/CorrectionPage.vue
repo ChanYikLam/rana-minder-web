@@ -7,6 +7,7 @@ import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Plus, FileSearch } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 interface Correction { id: string; targetType: string; targetId: string; reason: string; evidence: string; status: string; submittedAt: string; submitterName: string }
 
@@ -19,10 +20,17 @@ const form = ref({ targetType: '', targetId: '', reason: '', evidence: '' })
 const creating = ref(false)
 const actingId = ref<string | null>(null)
 
+function correctionsPrefix(): string | null {
+  if (view.value === 'self') return '/me/corrections'
+  const apiScope = resolveApiScope(route)
+  return apiScope ? `${apiScope.prefix}/audit/corrections` : null
+}
+
 async function loadData() {
   state.value = 'loading'
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await get<{ items: Correction[] }>(`/org/${clubId}/audit/corrections`)
+  const prefix = correctionsPrefix()
+  if (!prefix) { state.value = 'error'; return }
+  const result = await get<{ items: Correction[] }>(prefix)
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: Correction[] } }).data.items
     state.value = 'normal'
@@ -31,8 +39,9 @@ async function loadData() {
 
 async function handleCreate() {
   creating.value = true
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await post(`/org/${clubId}/audit/corrections`, { ...form.value })
+  const prefix = correctionsPrefix()
+  if (!prefix) { creating.value = false; return }
+  const result = await post(prefix, { ...form.value })
   creating.value = false
   if (result.kind === 'completed') {
     toast.success('纠错申请已提交')
@@ -46,8 +55,9 @@ async function handleCreate() {
 
 async function handleDecide(item: Correction, decision: 'approve' | 'reject') {
   actingId.value = item.id
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await post(`/org/${clubId}/audit/corrections/${item.id}/decide`, { decision })
+  const prefix = correctionsPrefix()
+  if (!prefix) { actingId.value = null; return }
+  const result = await post(`${prefix}/${item.id}/decide`, { decision })
   actingId.value = null
   if (result.kind === 'completed') {
     toast.success(decision === 'approve' ? '已批准纠错' : '已拒绝纠错')
@@ -59,8 +69,9 @@ async function handleDecide(item: Correction, decision: 'approve' | 'reject') {
 
 async function handleWithdraw(item: Correction) {
   actingId.value = item.id
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await post(`/org/${clubId}/audit/corrections/${item.id}/withdraw`)
+  const prefix = correctionsPrefix()
+  if (!prefix) { actingId.value = null; return }
+  const result = await post(`${prefix}/${item.id}/withdraw`, {})
   actingId.value = null
   if (result.kind === 'completed') {
     toast.success('纠错申请已撤回')

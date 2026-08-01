@@ -5,6 +5,7 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { TrendingUp, TrendingDown, Minus, Users, UserPlus, ClipboardList, Mail } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -15,8 +16,9 @@ const icons: Record<string, typeof Users> = { 总成员数: Users, 本月新增:
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await get<{ summary: typeof summary.value; departmentDistribution: typeof deptDist.value }>(`/org/${clubId}/stats`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<{ summary: typeof summary.value; departmentDistribution: typeof deptDist.value }>(`${apiScope.prefix}/stats`)
   if (result.kind === 'completed') {
     summary.value = result.data.summary
     deptDist.value = result.data.departmentDistribution
