@@ -782,7 +782,10 @@ interface DepartmentApplyRecord {
   rejectReason?: string
 }
 
-const departmentApplications: DepartmentApplyRecord[] = [
+const departmentApplications = new Map<string, DepartmentApplyRecord[]>()
+
+// 默认社团初始数据
+departmentApplications.set('club-001', [
   {
     id: 'dap-001',
     applicantId: 'user-member-001',
@@ -806,7 +809,14 @@ const departmentApplications: DepartmentApplyRecord[] = [
     submittedAt: '2025-07-20T10:00:00+08:00',
     decidedAt: '2025-07-21T10:00:00+08:00',
   },
-]
+])
+
+function getDeptApps(clubId: string): DepartmentApplyRecord[] {
+  if (!departmentApplications.has(clubId)) {
+    departmentApplications.set(clubId, [])
+  }
+  return departmentApplications.get(clubId)!
+}
 
 function departmentApplyError(code: 'IFC-ERR-003' | 'IFC-ERR-004' | 'IFC-ERR-006' | 'IFC-ERR-007' | 'IFC-ERR-008') {
   return { statusCode: MOCK_ERROR_HTTP[code], body: mockErrorBody(code) }
@@ -837,23 +847,25 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/department-apply',
     method: 'get',
-    response: ({ url }: { url: string }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const error = resolveMockError(url)
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      return { code: 0, data: { items: [...departmentApplications], nextCursor: null } }
+      const list = getDeptApps(query.clubId || 'club-001')
+      return { code: 0, data: { items: [...list], nextCursor: null } }
     },
   },
   {
     url: '/api/org/:clubId/members/department-apply',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input?: Partial<Pick<DepartmentApplyRecord, 'operation' | 'currentDept' | 'targetDept' | 'reason'>> } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: Partial<Pick<DepartmentApplyRecord, 'operation' | 'currentDept' | 'targetDept' | 'reason'>> } }) => {
       const error = resolveMockError(url)
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const user = resolveMockUser(url)
+      const list = getDeptApps(query.clubId || 'club-001')
       const input = body.input || {}
       const operation = input.operation
       const currentDept = input.currentDept?.trim() || ''
@@ -863,7 +875,7 @@ const memberHandlers: MockMethod[] = [
         return departmentApplyError('IFC-ERR-007')
       }
       // 同一申请人对同一目标关系已有待审批申请时拒绝重复创建
-      const duplicate = departmentApplications.find(
+      const duplicate = list.find(
         (item) =>
           item.applicantId === user.id &&
           item.status === 'under_review' &&
@@ -885,7 +897,7 @@ const memberHandlers: MockMethod[] = [
         status: 'under_review',
         submittedAt: new Date().toISOString(),
       }
-      departmentApplications.unshift(application)
+      list.unshift(application)
       return { code: 0, data: application }
     },
   },
@@ -897,7 +909,8 @@ const memberHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      const application = departmentApplications.find((item) => item.id === query.applicationId)
+      const list = getDeptApps(query.clubId || 'club-001')
+      const application = list.find((item) => item.id === query.applicationId)
       if (!application) {
         return departmentApplyError('IFC-ERR-004')
       }
@@ -920,7 +933,8 @@ const memberHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      const application = departmentApplications.find((item) => item.id === query.applicationId)
+      const list = getDeptApps(query.clubId || 'club-001')
+      const application = list.find((item) => item.id === query.applicationId)
       if (!application) {
         return departmentApplyError('IFC-ERR-004')
       }

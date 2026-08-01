@@ -56,7 +56,7 @@ function formatDate(iso: string): string {
 }
 
 function canApprove(item: DeptApply): boolean {
-  return item.applicantId !== session.user?.id
+  return item.applicantId !== session.user?.id && session.hasPermission('club:member:manage')
 }
 
 function canWithdraw(item: DeptApply): boolean {
