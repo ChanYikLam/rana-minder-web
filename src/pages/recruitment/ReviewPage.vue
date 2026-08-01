@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
@@ -108,13 +109,15 @@ onMounted(loadReviews)
     <div>
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">评价与结论</h1>
-        <button
-          class="flex items-center gap-1.5 px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
-          :disabled="submitting || !reviews.some((r) => r.status === 'concluded')"
-          @click="handlePublishAll"
-        >
-          <Send :size="16" /> 统一发布结论
-        </button>
+        <PermissionGuard permission="club:recruitment:manage">
+          <button
+            class="flex items-center gap-1.5 px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
+            :disabled="submitting || !reviews.some((r) => r.status === 'concluded')"
+            @click="handlePublishAll"
+          >
+            <Send :size="16" /> 统一发布结论
+          </button>
+        </PermissionGuard>
       </div>
 
       <div class="grid lg:grid-cols-[1fr_400px] gap-4">
@@ -196,13 +199,15 @@ onMounted(loadReviews)
                 placeholder="填写评价内容..."
               />
             </div>
-            <button
-              class="w-full h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
-              :disabled="submitting || rating === 0"
-              @click="handleSubmitReview"
-            >
-              <CheckCircle2 :size="16" /> {{ submitting ? '提交中...' : '提交评价' }}
-            </button>
+            <PermissionGuard permission="club:interview:evaluate" fallback="disable" disable-reason="无面试评价权限">
+              <button
+                class="w-full h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
+                :disabled="submitting || rating === 0"
+                @click="handleSubmitReview"
+              >
+                <CheckCircle2 :size="16" /> {{ submitting ? '提交中...' : '提交评价' }}
+              </button>
+            </PermissionGuard>
           </div>
         </Card>
 

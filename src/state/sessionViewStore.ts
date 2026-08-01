@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { SessionInfo, User, ProfileGate } from '@/types/domain'
+import type { SessionInfo, User, ProfileGate, WorkspaceInfo } from '@/types/domain'
 import { getSession, logout as logoutAuth } from '@/services/auth'
 
 export const useSessionViewStore = defineStore('sessionView', () => {
@@ -8,6 +8,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
   const profileGate = ref<ProfileGate>({ complete: false, emailVerified: false })
   const degraded = ref(false)
   const permissions = ref<string[]>([])
+  const workspace = ref<WorkspaceInfo | null>(null)
   const loading = ref(false)
   const lastLoadedAt = ref<number | null>(null)
 
@@ -26,6 +27,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
         profileGate.value = data.profileGate
         degraded.value = data.degraded
         permissions.value = data.permissions
+        workspace.value = data.workspace
         lastLoadedAt.value = Date.now()
       } else {
         clearSession()
@@ -40,6 +42,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     profileGate.value = { complete: false, emailVerified: false }
     degraded.value = false
     permissions.value = []
+    workspace.value = null
     lastLoadedAt.value = null
   }
 
@@ -60,6 +63,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     profileGate,
     degraded,
     permissions,
+    workspace,
     loading,
     lastLoadedAt,
     isAuthenticated,

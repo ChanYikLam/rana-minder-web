@@ -2,6 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
@@ -15,6 +17,8 @@ interface ExportTask { id: string; type: string; status: string; createdAt: stri
 const route = useRoute()
 const state = ref<PageState>('loading')
 const items = ref<ExportTask[]>([])
+const confirmOpen = ref(false)
+const executing = ref(false)
 
 async function loadData() {
   state.value = 'loading'
@@ -41,8 +45,13 @@ function formatTime(iso: string): string {
 async function handleCreate() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
+  executing.value = true
   const result = await post(`${apiScope.prefix}/exports`, { type: '成员名单' })
-  if (result.kind === 'completed') await loadData()
+  executing.value = false
+  if (result.kind === 'completed') {
+    confirmOpen.value = false
+    await loadData()
+  }
 }
 
 async function handleDownload(task: ExportTask) {
@@ -61,12 +70,22 @@ onMounted(loadData)
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">导出管理</h1>
-        <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleCreate">
-          <Plus :size="16" /> 新建导出
-        </button>
+        <PermissionGuard permission="club:member:manage">
+          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleCreate">
+            <Plus :size="16" /> 新建导出
+          </button>
+        </PermissionGuard>
       </div>
 
-      <EmptyState v-if="items.length === 0" type="no_data" title="暂无导出任务" action-label="新建导出" @action="handleCreate" />
+      <EmptyState v-if="items.length === 0" type="no_data" title="暂无导出任务">
+        <template #action>
+          <PermissionGuard permission="club:member:manage">
+            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleCreate">
+              <Plus :size="16" /> 新建导出
+            </button>
+          </PermissionGuard>
+        </template>
+      </EmptyState>
 
       <!-- EXP-002: 导出配置提示 -->
       <Card v-if="items.length > 0" class="mb-4 border-warning">
@@ -115,5 +134,16 @@ onMounted(loadData)
         </Card>
       </div>
     </div>
+
+    <HighRiskConfirm
+      v-model:open="confirmOpen"
+      title="创建成员名单导出"
+      description="导出将生成包含社团成员信息的文件，请确认导出范围与安全规则。"
+      :targets="[{ id: 'members', label: '本社团全部成员', detail: '仅基础字段，不含敏感列' }]"
+      impact-summary="导出任务生成后 7 天内可下载，过期自动失效；每次下载实时校验权限。"
+      confirm-label="开始导出"
+      :executing="executing"
+      @confirm="handleCreate"
+    />
   </PageStateBoundary>
 </template>

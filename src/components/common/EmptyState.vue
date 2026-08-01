@@ -39,5 +39,8 @@ const iconMap: Record<string, LucideIcon> = {
     >
       {{ actionLabel }}
     </button>
+    <div v-if="$slots.action" class="mt-4">
+      <slot name="action" />
+    </div>
   </div>
 </template>

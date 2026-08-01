@@ -6,7 +6,7 @@ import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import {
   Search, Bell, User, Settings, LogOut, ChevronDown, Menu, X,
-  Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Megaphone,
+  Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Megaphone, Flag,
 } from '@lucide/vue'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -115,6 +115,12 @@ const adminNavGroups: NavGroup[] = [
     label: '联合活动', icon: Users, prefix: '/admin/joint',
     items: [
       { label: '活动列表', path: '/admin/joint' },
+    ],
+  },
+  {
+    label: '招新活动', icon: Flag, prefix: '/admin/recruitment',
+    items: [
+      { label: '活动列表', path: '/admin/recruitment' },
     ],
   },
   {

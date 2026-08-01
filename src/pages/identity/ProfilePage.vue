@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
+import { identityApi } from '@/services/modules'
 import type { PageState } from '@/types/machine'
-import { MailCheck, ShieldCheck, RefreshCw, CheckCircle2 } from '@lucide/vue'
+import { MailCheck, ShieldCheck, RefreshCw, CheckCircle2, AlertTriangle, Scale } from '@lucide/vue'
 
 interface Profile {
   studentId: string
@@ -14,6 +16,10 @@ interface Profile {
   emailVerified: boolean
   profileComplete: boolean
 }
+
+const route = useRoute()
+const router = useRouter()
+const isSyncConflict = computed(() => route.meta.mode === 'sync-conflict')
 
 const state = ref<PageState>('loading')
 const error = ref<{ code: string; message: string } | null>(null)
@@ -139,7 +145,58 @@ const readonlyFields = computed(() =>
     : []
 )
 
-onMounted(loadProfile)
+// 同步冲突解决（sync-conflict 模式）
+interface ConflictField { field: string; label: string; localValue: string; remoteValue: string; chosen: 'local' | 'remote' }
+const conflictFields = ref<ConflictField[]>([])
+const conflictSubmitting = ref(false)
+const conflictError = ref('')
+const conflictDone = ref(false)
+
+function buildConflicts(p: Profile) {
+  conflictFields.value = [
+    { field: 'name', label: '姓名', localValue: p.name, remoteValue: p.name + '（学校侧已更新）', chosen: 'remote' },
+    { field: 'studentId', label: '学号', localValue: p.studentId, remoteValue: p.studentId, chosen: 'remote' },
+    { field: 'email', label: '邮箱', localValue: p.email, remoteValue: p.email, chosen: 'local' },
+    { field: 'phone', label: '手机号', localValue: p.phone, remoteValue: p.phone, chosen: 'local' },
+  ]
+}
+
+onMounted(() => {
+  if (!isSyncConflict.value) {
+    loadProfile()
+    return
+  }
+  // sync-conflict 模式：展示冲突并引导解决
+  state.value = 'normal'
+  const placeholder: Profile = {
+    studentId: '2024110101', name: '陈小明', email: 'chenxiaoming@stu.gdmu.edu.cn',
+    phone: '13800000000', emailVerified: true, profileComplete: true,
+  }
+  profile.value = placeholder
+  buildConflicts(placeholder)
+})
+
+async function handleResolveConflicts() {
+  if (!profile.value || conflictSubmitting.value) return
+  conflictSubmitting.value = true
+  conflictError.value = ''
+  const resolved: { field: string; chosenValue: string }[] = []
+  for (const f of conflictFields.value) {
+    const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
+    resolved.push({ field: f.field, chosenValue })
+    const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
+    if (r.kind === 'rejected' && r.error) {
+      conflictSubmitting.value = false
+      conflictError.value = (r.error as { message?: string }).message || '冲突解决失败'
+      return
+    }
+  }
+  conflictSubmitting.value = false
+  conflictDone.value = true
+  profile.value = { ...profile.value }
+  buildConflicts(profile.value)
+  setTimeout(() => router.push('/me/profile'), 1200)
+}
 </script>
 
 <template>
@@ -151,6 +208,61 @@ onMounted(loadProfile)
     @retry="loadProfile"
   >
     <div class="max-w-2xl mx-auto" v-if="profile">
+      <!-- 同步冲突解决模式 -->
+      <template v-if="isSyncConflict">
+        <div class="flex items-center gap-2 mb-1">
+          <AlertTriangle :size="20" class="text-warning" />
+          <h1 class="text-2xl font-bold text-text-primary">资料同步冲突</h1>
+        </div>
+        <p class="text-sm text-text-secondary mb-6">本地档案与统一身份认证存在不一致，请选择保留哪一侧的值</p>
+
+        <div class="rounded-lg border border-border bg-elevated mb-4 overflow-hidden">
+          <div class="px-4 py-3 border-b border-border flex items-center gap-2">
+            <Scale :size="16" class="text-warning" />
+            <span class="text-sm font-medium text-text-primary">冲突字段</span>
+          </div>
+          <div v-for="f in conflictFields" :key="f.field" class="px-4 py-3 border-b border-border last:border-b-0">
+            <p class="text-sm font-medium text-text-primary mb-2">{{ f.label }}</p>
+            <div class="flex gap-3">
+              <label class="flex-1 rounded-md border p-3 cursor-pointer" :class="f.chosen === 'local' ? 'border-primary bg-primary-subtle' : 'border-border'" @click="f.chosen = 'local'">
+                <input type="radio" class="sr-only" :checked="f.chosen === 'local'" />
+                <p class="text-xs text-text-secondary mb-1">本地档案</p>
+                <p class="text-sm text-text-primary font-medium">{{ f.localValue }}</p>
+              </label>
+              <label class="flex-1 rounded-md border p-3 cursor-pointer" :class="f.chosen === 'remote' ? 'border-primary bg-primary-subtle' : 'border-border'" @click="f.chosen = 'remote'">
+                <input type="radio" class="sr-only" :checked="f.chosen === 'remote'" />
+                <p class="text-xs text-text-secondary mb-1">统一身份认证</p>
+                <p class="text-sm text-text-primary font-medium">{{ f.remoteValue }}</p>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="conflictError" class="text-sm text-danger mb-3" role="alert">{{ conflictError }}</p>
+
+        <div v-if="conflictDone" class="flex items-center gap-2 text-sm text-success mb-4">
+          <CheckCircle2 :size="16" /> 冲突已解决，即将返回个人资料
+        </div>
+
+        <div class="flex gap-3">
+          <button
+            class="flex-1 h-11 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+            @click="router.push('/me/profile')"
+          >
+            暂不处理
+          </button>
+          <button
+            class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
+            :disabled="conflictSubmitting"
+            @click="handleResolveConflicts"
+          >
+            {{ conflictSubmitting ? '提交中...' : '解决冲突' }}
+          </button>
+        </div>
+      </template>
+
+      <!-- 正常模式 -->
+      <template v-else>
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-primary">个人资料</h1>
         <button
@@ -320,6 +432,7 @@ onMounted(loadProfile)
           </button>
         </div>
       </div>
+      </template>
     </div>
   </PageStateBoundary>
 </template>

@@ -2,12 +2,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
-import { get } from '@/services/client'
+import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Calendar, Clock, ChevronRight, ClipboardList, Hourglass, History } from '@lucide/vue'
+import { Calendar, Clock, ChevronRight, ClipboardList, Hourglass, History, XCircle } from '@lucide/vue'
 
 interface TodoItem { id: string; type: string; title: string; description: string; deadline: string; link: string }
-interface OngoingItem { id: string; type: string; title: string; description: string; submittedAt: string; link: string }
+interface OngoingItem { id: string; type: string; title: string; description: string; submittedAt: string; link: string; activityId?: string; status?: string }
 interface HistoryItem { id: string; type: string; title: string; result: string; completedAt: string }
 interface ScheduleItem { id: string; title: string; activityTitle: string; time: string; location: string; interviewerName: string; status: string }
 
@@ -30,6 +31,9 @@ const todos = ref<TodoItem[]>([])
 const ongoing = ref<OngoingItem[]>([])
 const history = ref<HistoryItem[]>([])
 const schedule = ref<ScheduleItem[]>([])
+const confirmingId = ref<string | null>(null)
+const withdrawing = ref(false)
+const withdrawError = ref('')
 
 async function loadData() {
   state.value = 'loading'
@@ -49,6 +53,25 @@ async function loadData() {
     state.value = 'normal'
   } else {
     state.value = 'error'
+  }
+}
+
+async function handleWithdraw(item: OngoingItem) {
+  if (!item.activityId || withdrawing.value) return
+  if (confirmingId.value !== item.id) {
+    confirmingId.value = item.id
+    return
+  }
+  withdrawing.value = true
+  withdrawError.value = ''
+  const result = await post(`/activity/recruitment/${item.activityId}/withdraw`, { confirm: true })
+  withdrawing.value = false
+  confirmingId.value = null
+  if (result.kind === 'completed') {
+    toast.success('已退出招新')
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    withdrawError.value = (result.error as { message?: string }).message || '退出失败'
   }
 }
 
@@ -133,11 +156,33 @@ onMounted(loadData)
         />
         <div v-else class="space-y-3">
           <Card v-for="item in ongoing" :key="item.id">
-            <p class="text-sm font-medium text-primary">{{ item.title }}</p>
-            <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
-            <p class="text-xs text-muted-foreground mt-1">提交于 {{ formatTime(item.submittedAt) }}</p>
+            <div class="flex items-start justify-between">
+              <div class="cursor-pointer" @click="router.push(item.link)">
+                <p class="text-sm font-medium text-primary">{{ item.title }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
+                <p class="text-xs text-muted-foreground mt-1">提交于 {{ formatTime(item.submittedAt) }}</p>
+              </div>
+              <div class="flex flex-col items-end gap-2">
+                <button
+                  v-if="item.type === 'application' && item.status !== 'accepted' && item.activityId"
+                  class="flex items-center gap-1 px-3 h-8 rounded-md text-xs font-medium border transition-colors"
+                  :class="confirmingId === item.id
+                    ? 'border-danger bg-danger-subtle text-danger'
+                    : 'border-border text-text-secondary hover:border-danger hover:text-danger'"
+                  :disabled="withdrawing"
+                  @click="handleWithdraw(item)"
+                >
+                  <XCircle :size="13" />
+                  {{ confirmingId === item.id ? (withdrawing ? '处理中...' : '再点一次确认退出') : '退出招新' }}
+                </button>
+                <p v-else-if="item.type === 'application' && item.status === 'accepted'" class="text-xs text-warning">
+                  已接受录取，请走成员退出流程
+                </p>
+              </div>
+            </div>
           </Card>
         </div>
+        <p v-if="withdrawError" class="mt-3 text-xs text-danger">{{ withdrawError }}</p>
       </div>
 
       <!-- 历史记录 -->

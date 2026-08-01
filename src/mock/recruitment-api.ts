@@ -1,0 +1,1453 @@
+/**
+ * 招新（REC）+ 联合（JNT）+ 邀请（INV）API 处理器注册层
+ * 数据源与业务规则：src/mock/db-recruitment.ts（有状态，状态机由 db 层 assertTransition 把关）
+ * 权限边界：社团管理操作需 club:recruitment:manage / club:joint:manage；
+ *          面试官操作需 club:interview:view|evaluate；平台强制操作需 platform:delete:execute
+ * 响应约定：vite-plugin-mock 不会把返回对象里的 statusCode 转为 HTTP 状态码，
+ *          故统一用 rawResponse 直出：错误信封 { statusCode, body } → 真实 HTTP 状态 + 标准错误体
+ */
+import type { MockMethod } from './types'
+// Node HTTP types via any (mock layer, no @types/node in remote baseline)
+type RawReq = any
+type RawRes = any
+import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP } from './auth'
+import * as rdb from './db-recruitment'
+
+/** 错误信封类型 */
+interface ErrorEnvelope {
+  statusCode: number
+  body: Record<string, unknown>
+}
+
+function isErrorEnvelope(v: unknown): v is ErrorEnvelope {
+  return !!v && typeof v === 'object' && 'statusCode' in v && typeof (v as ErrorEnvelope).statusCode === 'number'
+}
+
+/** 读取请求体（rawResponse 下自行解析） */
+async function readBody(req: RawReq): Promise<unknown> {
+  const chunks: any[] = []
+  for await (const chunk of req) chunks.push(chunk)
+  const buf = (globalThis as any).Buffer
+  const text = buf ? buf.concat(chunks).toString('utf8') : new TextDecoder().decode(new Uint8Array(chunks.flatMap((c: any) => Array.from(c))))
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {}
+  }
+}
+
+/** 从 URL 提取路径参数与查询参数（rawResponse 下自行合并） */
+function splitParams(url: string): { query: Record<string, string>; pathname: string } {
+  try {
+    const u = new URL(url, 'http://localhost')
+    const query: Record<string, string> = {}
+    u.searchParams.forEach((v, k) => (query[k] = v))
+    return { query, pathname: u.pathname }
+  } catch {
+    return { query: {}, pathname: url }
+  }
+}
+
+function pathParamsFrom(pathname: string, pattern: string): Record<string, string> {
+  const pathSegs = pathname.split('/').filter(Boolean)
+  const pattSegs = pattern.split('/').filter(Boolean)
+  const out: Record<string, string> = {}
+  pattSegs.forEach((s, i) => {
+    if (s.startsWith(':')) out[s.slice(1)] = pathSegs[i] ?? ''
+  })
+  return out
+}
+
+/**
+ * 把 response 风格 handler 包装为 rawResponse：
+ * - 合并路径参数与查询参数到 query（兼容 GET/POST 两种丢参场景）
+ * - 返回错误信封时直出真实 HTTP 状态码 + 标准错误体
+ */
+export function withStatus(handler: MockMethod): MockMethod {
+  const original = handler.response
+  return {
+    ...handler,
+    rawResponse: async (req: RawReq, res: RawRes) => {
+      try {
+        const { query: rawQuery, pathname } = splitParams(req.url || '')
+        const query = { ...pathParamsFrom(pathname, handler.url), ...rawQuery }
+        const body = await readBody(req)
+        const headers = (req.headers || {}) as Record<string, string>
+        const out = (original as (r: unknown) => unknown)({ url: req.url, query, body, headers })
+        res.setHeader('Content-Type', 'application/json')
+        if (isErrorEnvelope(out)) {
+          res.statusCode = out.statusCode
+          res.end(JSON.stringify(out.body))
+          return
+        }
+        res.statusCode = 200
+        res.end(JSON.stringify(out ?? { code: 0, data: null }))
+      } catch {
+        res.statusCode = 500
+        res.end(
+          JSON.stringify({
+            code: 'IFC-ERR-016',
+            message: '系统出现未知错误，请稍后再试',
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          }),
+        )
+      }
+    },
+  }
+}
+
+/** 业务规则拒绝（HTTP 422 + IFC-ERR-008） */
+function businessError(message: string) {
+  return {
+    statusCode: 422,
+    body: { code: 'IFC-ERR-008', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+  }
+}
+
+/** 无权限（HTTP 403 + IFC-ERR-003） */
+function forbidden() {
+  return {
+    statusCode: 403,
+    body: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+  }
+}
+
+/** 资源不存在（HTTP 404 + IFC-ERR-004） */
+function notFound(message = '请求的内容不存在或已被移除') {
+  return {
+    statusCode: 404,
+    body: { code: 'IFC-ERR-004', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+  }
+}
+
+const ok = (data: unknown) => ({ code: 0, data })
+
+/** mock 用户 id → 候选人 id 映射（申请人视角操作者） */
+const USER_APPLICANT_MAP: Record<string, string> = {
+  'user-applicant-001': 'u-001',
+  'user-applicant-002': 'u-002',
+  'user-applicant-003': 'u-006',
+  'user-candidate-001': 'u-003',
+}
+
+function actorApplicantId(user: { id: string }): string | null {
+  return USER_APPLICANT_MAP[user.id] || null
+}
+
+/** 社团招新管理权限 */
+function canManageRec(url: string, clubId: string): boolean {
+  return getPermissions(resolveMockUser(url), clubId).includes('club:recruitment:manage')
+}
+
+/** 社团联合活动管理权限 */
+function canManageJoint(url: string, clubId: string): boolean {
+  return getPermissions(resolveMockUser(url), clubId).includes('club:joint:manage')
+}
+
+/** 面试官权限（查看或评价） */
+function canInterview(url: string, clubId: string): boolean {
+  const perms = getPermissions(resolveMockUser(url), clubId)
+  return perms.includes('club:interview:view') || perms.includes('club:interview:evaluate') || perms.includes('club:recruitment:manage')
+}
+
+/** 平台强制操作权限 */
+function isPlatformAdmin(url: string): boolean {
+  return getPermissions(resolveMockUser(url), '').includes('platform:delete:execute')
+}
+
+/** 兼容两种请求体约定：{ input: ... } 或平铺 */
+function unwrap(body: unknown): Record<string, unknown> {
+  const b = (body || {}) as Record<string, unknown>
+  return (b.input && typeof b.input === 'object' ? b.input : b) as Record<string, unknown>
+}
+
+/** 统一业务函数结果响应（ok → code 0；error → 422） */
+function result(r: { ok: boolean; error?: string; data?: unknown }) {
+  return r.ok ? ok(r.data) : businessError(r.error || '操作不符合业务规则')
+}
+
+/** 查询候选人所用 applicantId */
+function applicantIdOf(url: string): string | null {
+  return actorApplicantId(resolveMockUser(url))
+}
+
+/** 当前操作者成员信息（用于评价人、确认人等署名） */
+function actorInfo(url: string): { memberId: string | null; name: string; role: string } {
+  const user = resolveMockUser(url)
+  const ws = getWorkspace(user)
+  return { memberId: USER_MEMBER_MAP[user.id] || null, name: user.name, role: ws?.role || 'member' }
+}
+
+/** 面试详情行（管理视角） */
+function interviewRow(it: rdb.RecInterview) {
+  const a = rdb.findAnyActivity(it.activityId)
+  const app = rdb.recruitmentApplications.find((x) => x.id === it.applicantId) || rdb.recruitmentApplications.find((x) => x.applicantId === it.applicantId)
+  const round = a?.rounds.find((r) => r.id === it.roundId)
+  return {
+    id: it.id, activityId: it.activityId, activityTitle: a?.title || '', roundId: it.roundId, roundName: round?.name || '',
+    applicantId: it.applicantId, applicantName: app?.applicantName || it.applicantName, studentId: app?.studentId || '',
+    status: it.status, slotId: it.slotId, scheduledTime: it.startAt, endTime: it.endAt,
+    attendance: it.attendance,
+    invalidReason: it.invalidReason, skipReason: it.skipReason, version: it.version,
+  }
+}
+
+// ================= 招新活动 =================
+
+const recHandlers: MockMethod[] = [
+  // 活动详情（公开）
+  {
+    url: '/api/explore/activities/:id',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const a = rdb.findAnyActivity(query.id || 'act-001')
+      if (!a) return notFound('活动不存在')
+      if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动不存在或未开放')
+      return ok({
+        id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, type: 'recruitment',
+        status: a.status === 'in_progress' ? 'published' : a.status, channelStatus: a.channelStatus,
+        deadline: a.deadline, description: a.description, departments: a.departments, formId: a.formId,
+        eligibility: a.eligibility, volunteerRules: a.volunteerRules,
+      })
+    },
+  },
+  // 活动列表（管理视角）
+  {
+    url: '/api/org/:clubId/recruitment',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const items = rdb.listActivities(query.clubId).map((a) => ({
+        id: a.id, clubId: a.clubId, title: a.title, status: a.status, channelStatus: a.channelStatus,
+        deadline: a.deadline, applicantCount: a.applicantIds.length, createdAt: a.createdAt,
+      }))
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 创建活动
+  {
+    url: '/api/org/:clubId/recruitment',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { title: string; description?: string }
+      if (!input.title?.trim()) return businessError('活动名称不能为空')
+      const clubName = resolveMockUser(url).roles.find((r) => r.clubId === query.clubId)?.clubName || query.clubId
+      const r = rdb.createActivity(query.clubId, clubName, { title: input.title, description: input.description })
+      return result(r)
+    },
+  },
+  // 活动详情（管理视角）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const a = rdb.findActivity(query.clubId, query.activityId)
+      if (!a) return notFound('活动不存在')
+      return ok({
+        id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, description: a.description,
+        status: a.status, channelStatus: a.channelStatus, deadline: a.deadline, deadlineVersion: a.deadlineVersion,
+        window: a.window, formId: a.formId, formVersion: a.formVersion, departments: a.departments,
+        eligibility: a.eligibility, volunteerRules: a.volunteerRules, allowAdjustmentDefault: a.allowAdjustmentDefault,
+        conclusionMode: a.conclusionMode, applicantCount: a.applicantIds.length,
+        interviewCount: rdb.recruitmentInterviews.filter((i) => i.activityId === a.id).length,
+        invitationCount: rdb.recruitmentInvitations.filter((i) => i.activityId === a.id).length,
+        publishedAt: a.publishedAt, completedAt: a.completedAt, cancelledAt: a.cancelledAt,
+        createdAt: a.createdAt, version: a.version,
+      })
+    },
+  },
+  // 更新活动
+  {
+    url: '/api/org/:clubId/recruitment/:activityId',
+    method: 'put',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as unknown as rdb.RecActivity
+      const r = rdb.updateActivity(query.activityId, input)
+      return result(r)
+    },
+  },
+  // 发布活动
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/publish',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.publishActivity(query.activityId))
+    },
+  },
+  // 暂停活动
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/pause',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      return result(rdb.pauseActivity(query.activityId, input.reason ?? ''))
+    },
+  },
+  // 恢复活动
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/resume',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.resumeActivity(query.activityId))
+    },
+  },
+  // 结束活动
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/complete',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.completeActivity(query.activityId))
+    },
+  },
+  // 取消活动（含已接受同步任务二次确认）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/cancel',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { reason?: string; confirmAcceptedSync?: boolean }
+      if (!input.reason?.trim()) return businessError('取消活动必须填写原因')
+      return result(rdb.cancelActivity(query.activityId, input.reason, !!input.confirmAcceptedSync))
+    },
+  },
+  // 强制结束（平台）
+  {
+    url: '/api/admin/recruitment/:activityId/force-complete',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      if (!input.reason?.trim()) return businessError('强制结束必须填写原因')
+      return result(rdb.forceCompleteActivity(query.activityId, input.reason))
+    },
+  },
+  // 报名通道操作（open/close/pause/resume/reopen）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/channel',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { action: string; reason?: string; newDeadline?: string }
+      const activityId = query.activityId
+      switch (input.action) {
+        case 'open':
+          return result(rdb.reopenChannel(activityId, input.newDeadline || ''))
+        case 'close':
+          return result(rdb.closeChannel(activityId, input.reason ?? ''))
+        case 'pause':
+          return result(rdb.pauseChannel(activityId))
+        case 'resume':
+          return result(rdb.resumeChannel(activityId, input.newDeadline || ''))
+        case 'reopen':
+          return result(rdb.reopenChannel(activityId, input.newDeadline || ''))
+        default:
+          return businessError('不支持的通道操作')
+      }
+    },
+  },
+  // 轮次列表
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/rounds',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const a = rdb.findActivity(query.clubId, query.activityId)
+      if (!a) return notFound('活动不存在')
+      return ok({
+        items: a.rounds.map((r) => ({
+          id: r.id, name: r.name, status: r.status, mode: r.mode, selectDeadline: r.selectDeadline,
+          slots: r.slots.map((s) => ({ ...s, available: Math.max(0, s.capacity - s.taken) })),
+          bookedCount: r.slots.reduce((n, s) => n + s.taken, 0),
+        })),
+        nextCursor: null,
+      })
+    },
+  },
+  // 创建轮次
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/rounds',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as unknown as rdb.RecRound
+      return result(rdb.createRound(query.activityId, input))
+    },
+  },
+  // 更新轮次
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/rounds/:roundId',
+    method: 'put',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { name?: string; selectDeadline?: string }
+      return result(rdb.updateRound(query.activityId, query.roundId, input))
+    },
+  },
+  // 取消轮次
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/rounds/:roundId/cancel',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      if (!input.reason?.trim()) return businessError('取消轮次必须填写原因')
+      return result(rdb.cancelRound(query.activityId, query.roundId, input.reason))
+    },
+  },
+  // 报名申请列表
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      let items = rdb.recruitmentApplications
+        .filter((a) => a.activityId === query.activityId)
+        .map((a) => ({
+          id: a.id, activityId: a.activityId, applicantId: a.applicantId, applicantName: a.applicantName,
+          applicantStudentId: a.studentId, status: a.status,
+          preferences: a.preferences, allowAdjustment: a.allowAdjustment,
+          submittedAt: a.submittedAt, withdrawnAt: a.withdrawnAt, formVersion: a.formVersion,
+          identityAnomalyAt: a.identityAnomalyAt, recoveryWindowDeadline: a.recoveryWindowDeadline,
+        }))
+      const status = query.status
+      if (status && status !== 'all') items = items.filter((a) => a.status === status)
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 提交报名申请
+  {
+    url: '/api/activity/recruitment/:activityId/apply',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { preferences: { departmentId: string }[]; allowAdjustment: boolean; answers?: Record<string, unknown> }
+      const r = rdb.submitApplication(query.activityId, applicantId, input)
+      return result(r)
+    },
+  },
+  // 保存报名草稿
+  {
+    url: '/api/activity/recruitment/:activityId/draft',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { answers?: Record<string, unknown> }
+      const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers })
+      if (!r.ok) return businessError(r.error || '保存失败')
+      return ok({ activityId: query.activityId, status: 'draft', savedAt: new Date().toISOString(), ...r.data })
+    },
+  },
+  // 我的申请（申请人视角）
+  {
+    url: '/api/activity/recruitment/:activityId/apply',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const app = rdb.findApplication(query.activityId, applicantId)
+      if (!app) return notFound('尚未提交申请')
+      return ok({
+        id: app.id, activityId: app.activityId, status: app.status, preferences: app.preferences,
+        allowAdjustment: app.allowAdjustment, answers: app.answers, formVersion: app.formVersion,
+        submittedAt: app.submittedAt, withdrawnAt: app.withdrawnAt, identityAnomalyAt: app.identityAnomalyAt,
+        recoveryWindowDeadline: app.recoveryWindowDeadline, paths: app.paths, version: app.version,
+      })
+    },
+  },
+  // 退出招新（二次确认）
+  {
+    url: '/api/activity/recruitment/:activityId/withdraw',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { confirm?: boolean }
+      return result(rdb.withdrawApplication(query.activityId, applicantId, !!input.confirm))
+    },
+  },
+  // 恢复报名窗口（逾期/误退）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/recovery-window',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { deadline?: string }
+      if (!input.deadline) return businessError('必须指定恢复窗口截止时间')
+      return result(rdb.createRecoveryWindow(query.activityId, query.applicantId, input.deadline))
+    },
+  },
+  // 要求补充材料
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/supplement',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { requirement?: string; deadline?: string }
+      if (!input.requirement?.trim()) return businessError('必须填写补充要求')
+      return result(rdb.requestSupplement(query.activityId, query.applicantId, input.requirement, input.deadline || ''))
+    },
+  },
+  // 标记身份异常
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/identity-anomaly',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.markIdentityAnomaly(query.activityId, query.applicantId))
+    },
+  },
+  // 恢复身份异常
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/identity-anomaly/recover',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.recoverIdentityAnomaly(query.activityId, query.applicantId))
+    },
+  },
+  // 公布不通过
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/not-qualified',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      if (!input.reason?.trim()) return businessError('公布不通过必须填写原因')
+      return result(rdb.publishNotQualified(query.activityId, query.applicantId, input.reason))
+    },
+  },
+  // 部门意向标记（部门负责人）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/paths/:departmentId/label',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { label?: boolean }
+      const me = actorInfo(url)
+      return result(rdb.setDeptLabel(query.activityId, query.applicantId, query.departmentId, !!input.label, me.memberId || '', me.name, me.role, true))
+    },
+  },
+  // 部门路径决策（admit / not_admit / hold）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/paths/:departmentId/decision',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { decision: 'admit' | 'not_admit' | 'hold'; holdDeadline?: string }
+      return result(rdb.decidePath(query.activityId, query.applicantId, query.departmentId, input.decision, input.holdDeadline))
+    },
+  },
+  // 候补名单
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/paths/:departmentId/waitlist',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { on?: boolean }
+      return result(rdb.setWaitlist(query.activityId, query.applicantId, query.departmentId, !!input.on))
+    },
+  },
+  // 发布部门结论
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/paths/:departmentId/publish',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const me = actorInfo(url)
+      return result(rdb.publishDepartmentResult(query.activityId, query.applicantId, query.departmentId, me.name))
+    },
+  },
+  // 面试列表（管理视角）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const items = rdb.recruitmentInterviews
+        .filter((i) => i.activityId === query.activityId)
+        .map(interviewRow)
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 管理代预约面试
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews/book',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { applicantId?: string; roundId?: string; slotId?: string }
+      if (!input.applicantId || !input.slotId) return businessError('必须指定申请人与面试时段')
+      const a = rdb.findActivity(query.clubId, query.activityId)
+      const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === input.slotId)
+      if (!slot) return notFound('面试时段不存在')
+      const r = rdb.bookInterview(query.activityId, input.applicantId, slot.roundId, input.slotId, '', true)
+      return result(r)
+    },
+  },
+  // 面试详情（本人视角，含可选时段）
+  {
+    url: '/api/me/interviews/recruitment/:interviewId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId)
+      if (!it) return notFound('面试不存在')
+      const a = rdb.findAnyActivity(it.activityId)
+      const round = a?.rounds.find((r) => r.id === it.roundId)
+      const app = rdb.recruitmentApplications.find((x) => x.applicantId === it.applicantId)
+      const availableSlots = (round?.slots || [])
+        .filter((s) => s.id === it.slotId || s.taken < s.capacity)
+        .map((s) => ({
+          id: s.id, time: s.startAt, endAt: s.endAt, capacity: s.capacity, booked: s.taken,
+        }))
+      return ok({
+        id: it.id, activityId: it.activityId, activityTitle: a?.title || '', roundId: it.roundId, roundName: round?.name || '',
+        applicantName: app?.applicantName || it.applicantName, status: it.status,
+        scheduledTime: it.startAt, endTime: it.endAt,
+        interviewers: [], attendance: it.attendance, invalidReason: it.invalidReason, version: it.version,
+        availableSlots,
+      })
+    },
+  },
+  // 预约/改期面试（本人）
+  {
+    url: '/api/me/interviews/recruitment/:interviewId/book',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId)
+      if (!it) return notFound('面试不存在')
+      if (it.applicantId !== applicantId) return forbidden()
+      const input = unwrap(body) as { slotId?: string }
+      if (!input.slotId) return businessError('必须选择面试时段')
+      const a = rdb.findAnyActivity(it.activityId)
+      const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === input.slotId)
+      if (!slot) return notFound('面试时段不存在')
+      const r = rdb.bookInterview(it.activityId, applicantId, slot.roundId, input.slotId, '', false)
+      return result(r)
+    },
+  },
+  // 出席登记（迟到/请假/缺席）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews/:interviewId/attendance',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { event: 'leave' | 'late' | 'absent' }
+      return result(rdb.markAttendance(query.interviewId, input.event, canManageRec(url, query.clubId)))
+    },
+  },
+  // 开始面试
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews/:interviewId/start',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      return result(rdb.startInterview(query.interviewId))
+    },
+  },
+  // 完成面试
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews/:interviewId/complete',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      return result(rdb.completeInterview(query.interviewId))
+    },
+  },
+  // 作废面试（须填原因）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews/:interviewId/invalidate',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      if (!input.reason?.trim()) return businessError('作废面试必须填写原因')
+      return result(rdb.invalidateInterview(query.interviewId, input.reason))
+    },
+  },
+  // 跳轮/免试
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/rounds/:roundId/skip',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { applicantId?: string; reason?: string }
+      if (!input.applicantId) return businessError('必须指定申请人')
+      if (!input.reason?.trim()) return businessError('跳轮/免试必须填写原因')
+      return result(rdb.skipRoundInterview(query.activityId, input.applicantId, query.roundId, input.reason))
+    },
+  },
+  // 评价列表（按申请人派生）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/reviews',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const items = rdb.recruitmentApplications
+        .filter((a) => a.activityId === query.activityId && a.status !== 'draft')
+        .map((app) => {
+          const review = rdb.recruitmentReviews.find((r) => r.activityId === query.activityId && r.applicantId === app.applicantId)
+          const paths = Object.values(app.paths || {})
+          const anyPublished = paths.some((p) => p.publishedAt)
+          const anyEvaluating = paths.some((p) => p.status === 'evaluating')
+          const rating = reviewRating(query.activityId, app.applicantId)
+          let status = 'pending'
+          if (anyPublished) status = 'published'
+          else if (review || rating) status = 'concluded'
+          else if (anyEvaluating) status = 'evaluating'
+          return {
+            id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
+            departmentName: app.preferences[0]?.departmentName || '', status,
+            rating: rating || null, comment: review?.comment || '',
+            concludedAt: review?.updatedAt || null, concludedBy: review?.authorName || null,
+          }
+        })
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 提交评价（单个申请人）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { rating?: number; comment?: string }
+      const app = rdb.recruitmentApplications.find((a) => a.id === query.reviewId && a.activityId === query.activityId)
+      if (!app) return notFound('申请人不存在')
+      const me = actorInfo(url)
+      const r = rdb.submitReview(query.activityId, app.applicantId, {
+        comment: input.comment || '',
+        authorId: me.memberId || '', authorName: me.name, authorRole: me.role,
+      })
+      if (!r.ok) return businessError(r.error || '提交失败')
+      setReviewRating(query.activityId, app.applicantId, Number(input.rating) || 0)
+      return ok({ id: query.reviewId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
+    },
+  },
+  // 统一发布结论
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/reviews/publish',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const me = actorInfo(url)
+      const apps = rdb.recruitmentApplications.filter(
+        (a) => a.activityId === query.activityId && a.status !== 'draft' && reviewRating(query.activityId, a.applicantId)
+      )
+      if (!apps.length) return businessError('没有可发布的结论')
+      const published: string[] = []
+      for (const app of apps) {
+        const first = Object.values(app.paths || {})[0]
+        if (!first) continue
+        const r = rdb.publishDepartmentResult(query.activityId, app.applicantId, first.departmentId, me.name)
+        if (r.ok) published.push(app.applicantId)
+      }
+      if (!published.length) return businessError('没有可发布的结论')
+      return ok({ publishedCount: published.length })
+    },
+  },
+  // 邀请列表
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/invitations',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const items = rdb.recruitmentInvitations
+        .filter((i) => i.activityId === query.activityId)
+        .map((i) => ({
+          id: i.id, activityId: i.activityId, applicantId: i.applicantId, applicantName: i.applicantName,
+          departmentId: i.departmentId, departmentName: i.departmentName, status: i.status,
+          sentAt: i.sentAt, acceptedAt: i.acceptedAt, expiredAt: i.expiredAt, casdoorSync: i.casdoorSync, version: i.version,
+        }))
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 创建邀请
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/invitations',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { applicantId?: string; departmentId?: string; expireDays?: number }
+      if (!input.applicantId || !input.departmentId) return businessError('必须指定申请人与录取部门')
+      const me = actorInfo(url)
+      return result(rdb.createRecInvitation(query.activityId, input.applicantId, input.departmentId, Number(input.expireDays) || 7, me.name))
+    },
+  },
+  // 撤回邀请
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/invitations/:invitationId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.withdrawRecInvitation(query.invitationId))
+    },
+  },
+  // 重新发送邀请
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/invitations/:invitationId/reissue',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { expireDays?: number }
+      return result(rdb.reissueRecInvitation(query.invitationId, Number(input.expireDays) || 7))
+    },
+  },
+  // 确认邀请生效（Casdoor 同步确认）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/invitations/:invitationId/sync',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      return result(rdb.confirmRecInvitationSync(query.invitationId))
+    },
+  },
+  // 邀请详情（本人视角）
+  {
+    url: '/api/me/invitations/recruitment/:invitationId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const inv = rdb.findInvitation(query.invitationId)
+      if (!inv) return notFound('邀请不存在')
+      const applicantId = applicantIdOf(url)
+      if (applicantId && inv.applicantId !== applicantId) return forbidden()
+      const a = rdb.findAnyActivity(inv.activityId)
+      return ok({
+        id: inv.id, activityId: inv.activityId, activityTitle: a?.title || '', clubName: a?.clubName || '',
+        applicantName: inv.applicantName, status: inv.status, sentAt: inv.sentAt, acceptedAt: inv.acceptedAt,
+        expiredAt: inv.expiredAt, departmentName: inv.departmentName, casdoorSync: inv.casdoorSync,
+      })
+    },
+  },
+  // 接受/拒绝邀请（本人）
+  {
+    url: '/api/me/invitations/recruitment/:invitationId/respond',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { action: 'accept' | 'reject' }
+      if (!['accept', 'reject'].includes(input.action)) return businessError('不支持的响应动作')
+      const inv = rdb.recruitmentInvitations.find((i) => i.id === query.invitationId)
+      if (inv && inv.applicantId !== applicantId) return forbidden()
+      const r = rdb.respondRecInvitation(query.invitationId, input.action, applicantId)
+      return result(r)
+    },
+  },
+  // 动态表单定义（报名表）
+  {
+    url: '/api/org/:clubId/forms/:formId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      if (query.formId === 'form-002') {
+        return ok({
+          id: 'form-002', clubId: query.clubId, title: '面试评价表', status: 'published',
+          versions: [{
+            version: 1, status: 'published', publishedAt: '2025-07-20T10:00:00+08:00',
+            fields: [
+              { id: 'f1', type: 'rating', label: '综合评分', description: null, required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+              { id: 'f2', type: 'textarea', label: '评语', description: null, required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            ],
+          }],
+        })
+      }
+      return ok({
+        id: 'form-001', clubId: query.clubId, title: '招新报名表', status: 'published',
+        versions: [{
+          version: 1, status: 'published', publishedAt: '2025-08-01T10:00:00+08:00',
+          fields: [
+            { id: 'f1', type: 'text', label: '自我介绍', description: '简要介绍自己的特长和兴趣', required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            { id: 'f2', type: 'select', label: '意向部门', description: null, required: true, readonly: false, permission: 'read_write', options: ['技术部', '运营部', '设计部'], conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            { id: 'f3', type: 'textarea', label: '相关经历', description: '如有相关项目或活动经历请填写', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            { id: 'f4', type: 'file', label: '作品附件', description: '可选，上传作品集或简历', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+          ],
+        }],
+      })
+    },
+  },
+  // 文件预览
+  {
+    url: '/api/files/:fileId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return ok({
+        id: query.fileId || 'file-001', name: '作品集.pdf', size: 1048576,
+        mimeType: 'application/pdf', status: 'approved',
+        uploadedAt: '2025-08-01T14:00:00+08:00', checkedAt: '2025-08-01T14:01:00+08:00', downloadUrl: null,
+      })
+    },
+  },
+]
+
+// 评价评分辅助存储（页面级展示，不进入状态机）
+const reviewRatings = new Map<string, number>()
+
+function reviewKey(activityId: string, applicantId: string): string {
+  return activityId + ':' + applicantId
+}
+
+function reviewRating(activityId: string, applicantId: string): number | undefined {
+  return reviewRatings.get(reviewKey(activityId, applicantId))
+}
+
+function setReviewRating(activityId: string, applicantId: string, rating: number): void {
+  if (rating > 0) reviewRatings.set(reviewKey(activityId, applicantId), rating)
+}
+
+// ================= 联合活动 =================
+
+/** 联合活动行（管理视角） */
+function jointRow(ja: rdb.JointActivity, clubId?: string) {
+  return {
+    id: ja.id, title: ja.title, status: ja.status, channelStatus: ja.channelStatus,
+    deadline: ja.deadline, participantClubs: ja.clubs.map((c) => c.clubName),
+    applicantCount: ja.applicantIds.length, confirmRound: ja.confirmRound, confirmDeadline: ja.confirmDeadline,
+    createdAt: ja.createdAt, version: ja.version,
+    myClubStatus: clubId ? ja.clubs.find((c) => c.clubId === clubId)?.status || null : null,
+  }
+}
+
+/** 申请人 × 参与社团 派生结论行 */
+function jointConclusionRows(jointId: string, clubId?: string) {
+  const ja = rdb.findJoint(jointId)
+  if (!ja) return []
+  const rows: Record<string, unknown>[] = []
+  for (const app of rdb.jointApplications.filter((a) => a.jointId === jointId && a.status !== 'draft')) {
+    for (const c of ja.clubs) {
+      if (clubId && c.clubId !== clubId) continue
+      const con = rdb.jointConclusions.find((x) => x.jointId === jointId && x.applicantId === app.applicantId && x.clubId === c.clubId)
+      const extra = jointReviewExtras.get(jointId + ':' + app.applicantId + ':' + c.clubId)
+      const status = con?.status === 'invite_pending' || con?.status === 'accepted_locked' ? con.status : extra ? 'concluded' : con?.status || 'pending'
+      rows.push({
+        id: con?.id || `${jointId}-${app.applicantId}-${c.clubId}`,
+        applicantId: app.applicantId, applicantName: app.applicantName,
+        clubId: c.clubId, clubName: c.clubName, status,
+        conclusion: con?.conclusion || null, reviewFlag: con?.reviewFlag || false,
+        rating: extra?.rating || null, comment: extra?.comment || '',
+        concludedAt: extra?.concludedAt || null, version: con?.version || 1,
+      })
+    }
+  }
+  return rows
+}
+
+/** 联合结论评价辅助存储 */
+const jointReviewExtras = new Map<string, { rating: number; comment: string; concludedAt: string }>()
+
+const jointHandlers: MockMethod[] = [
+  // 联合活动列表
+  {
+    url: '/api/org/:clubId/joint',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return ok({
+        items: rdb.jointActivities.filter((j) => j.clubs.some((c) => c.clubId === query.clubId)).map((j) => jointRow(j, query.clubId)),
+        nextCursor: null,
+      })
+    },
+  },
+  // 创建联合活动
+  {
+    url: '/api/org/:clubId/joint',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const user = resolveMockUser(url)
+      const clubName = user.roles.find((r) => r.clubId === query.clubId)?.clubName || query.clubId
+      const input = unwrap(body) as { title?: string; description?: string; clubIds?: string[]; confirmDeadline?: string; sharedAgreement?: string }
+      const r = rdb.createJointActivity(query.clubId, clubName, user.name, {
+        title: input.title || '', description: input.description, clubIds: input.clubIds || [],
+        confirmDeadline: input.confirmDeadline || '', sharedAgreement: input.sharedAgreement,
+      })
+      return result(r)
+    },
+  },
+  // 联合活动详情
+  {
+    url: '/api/org/:clubId/joint/:jointId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      return ok({
+        ...jointRow(ja, query.clubId),
+        description: ja.description,
+        sharedAgreement: ja.sharedAgreement,
+        participants: ja.clubs.map((c) => ({ clubId: c.clubId, clubName: c.clubName, status: c.status, confirmedAt: c.confirmedAt, confirmedBy: c.confirmedBy })),
+        cancelConfirmRound: ja.cancelConfirmRound, cancelConfirmDeadline: ja.cancelConfirmDeadline,
+        endConfirmRound: ja.endConfirmRound, endConfirmDeadline: ja.endConfirmDeadline,
+        publishedAt: ja.publishedAt, firstInviteAt: ja.firstInviteAt, closedAt: ja.closedAt, forceClosedAt: ja.forceClosedAt,
+      })
+    },
+  },
+  // 确认参与联合活动
+  {
+    url: '/api/org/:clubId/joint/:jointId/confirm',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const actingClub = query._mock_club || query.clubId
+      return result(rdb.confirmJointParticipation(query.jointId, actingClub, resolveMockUser(url).name))
+    },
+  },
+  // 调整参与社团名单
+  {
+    url: '/api/org/:clubId/joint/:jointId/clubs',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { clubIds?: string[]; newDeadline?: string }
+      if (!Array.isArray(input.clubIds) || input.clubIds.length < 2) return businessError('联合活动至少需要两个参与社团')
+      return result(rdb.adjustJointClubList(query.jointId, input.clubIds, input.newDeadline || ''))
+    },
+  },
+  // 退出联合活动（发起方/参与方）
+  {
+    url: '/api/org/:clubId/joint/:jointId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.withdrawJointParticipation(query.jointId, query._mock_club || query.clubId))
+    },
+  },
+  // 发布联合活动
+  {
+    url: '/api/org/:clubId/joint/:jointId/publish',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.publishJointActivity(query.jointId))
+    },
+  },
+  // 联合报名通道（open/pause/resume/extend/close/reopen）
+  {
+    url: '/api/org/:clubId/joint/:jointId/channel',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { action: string; deadline?: string; reason?: string }
+      const jointId = query.jointId
+      switch (input.action) {
+        case 'open': {
+          const ja = rdb.findJoint(jointId)
+          if (ja && ja.channelStatus === 'closed') return result(rdb.reopenJointChannel(jointId, input.deadline || ''))
+          return result(rdb.openJointChannel(jointId, input.deadline || ''))
+        }
+        case 'pause':
+          return result(rdb.pauseJointChannel(jointId))
+        case 'resume':
+          return result(rdb.resumeJointChannel(jointId, input.deadline || ''))
+        case 'extend':
+          return result(rdb.extendJointDeadline(jointId, input.deadline || ''))
+        case 'close':
+          return result(rdb.closeJointChannel(jointId, input.reason ?? ''))
+        case 'reopen':
+          return result(rdb.reopenJointChannel(jointId, input.deadline || ''))
+        default:
+          return businessError('不支持的通道操作')
+      }
+    },
+  },
+  // 取消联合活动
+  {
+    url: '/api/org/:clubId/joint/:jointId/cancel',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { confirm?: boolean; reason?: string }
+      const actingClub = query._mock_club || query.clubId
+      const r = rdb.cancelJointActivity(query.jointId, actingClub, resolveMockUser(url).name)
+      if (r.error && !r.ok && r.error.includes('二次确认') && !input.confirm) {
+        return { code: 0, data: { needConfirm: true, message: r.error } }
+      }
+      return result(r)
+    },
+  },
+  // 结束信息
+  {
+    url: '/api/org/:clubId/joint/:jointId/close',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      return ok({
+        id: ja.id, title: ja.title, status: ja.status,
+        participants: ja.clubs.map((c) => ({
+          clubId: c.clubId, clubName: c.clubName, status: c.status,
+          concludedCount: rdb.jointConclusions.filter((x) => x.jointId === ja.id && x.clubId === c.clubId && x.conclusion).length,
+          invitationSent: rdb.jointInvitations.filter((x) => x.jointId === ja.id && x.clubId === c.clubId && x.status !== 'withdrawn').length,
+          endConfirmed: !!ja.endConfirmations[c.clubId],
+        })),
+        totalApplicants: ja.applicantIds.length,
+        endConfirmRound: ja.endConfirmRound, endConfirmDeadline: ja.endConfirmDeadline,
+        canClose: ja.status === 'published' || ja.status === 'invite_phase',
+      })
+    },
+  },
+  // 进入结束确认（全部邀请终态后）
+  {
+    url: '/api/org/:clubId/joint/:jointId/close/start',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.startJointEndConfirm(query.jointId, query._mock_club || query.clubId, resolveMockUser(url).name))
+    },
+  },
+  // 提交结束确认
+  {
+    url: '/api/org/:clubId/joint/:jointId/close',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.submitJointEndConfirm(query.jointId, query._mock_club || query.clubId, resolveMockUser(url).name))
+    },
+  },
+  // 平台强制关闭
+  {
+    url: '/api/admin/joint/:jointId/force-close',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      if (!input.reason?.trim()) return businessError('强制关闭必须填写原因')
+      return result(rdb.forceCloseJointActivity(query.jointId, input.reason))
+    },
+  },
+  // 平台强制停用社团
+  {
+    url: '/api/admin/joint/:jointId/clubs/:clubId/force-suspend',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return result(rdb.forceSuspendJointClub(query.jointId, query.clubId))
+    },
+  },
+  // 平台恢复停用社团
+  {
+    url: '/api/admin/joint/:jointId/clubs/:clubId/re-enable',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return result(rdb.reEnableJointClub(query.jointId, query.clubId))
+    },
+  },
+  // 联合申请列表
+  {
+    url: '/api/org/:clubId/joint/:jointId/applications',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const items = rdb.jointApplications
+        .filter((a) => a.jointId === query.jointId)
+        .map((a) => ({
+          id: a.id, jointId: a.jointId, applicantId: a.applicantId, applicantName: a.applicantName,
+          applicantStudentId: a.studentId, status: a.status, consented: a.consented,
+          consentAt: a.consentAt, agreementVersion: a.agreementVersion, allowJointAdjustment: a.allowJointAdjustment,
+          submittedAt: a.submittedAt, version: a.version,
+        }))
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 提交联合报名
+  {
+    url: '/api/activity/joint/:jointId/apply',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; answers?: Record<string, unknown> }
+      const r = rdb.submitJointApplication(query.jointId, applicantId, input)
+      return result(r)
+    },
+  },
+  // 保存联合报名草稿
+  {
+    url: '/api/activity/joint/:jointId/draft',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const me = resolveMockUser(url)
+      const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId)
+      return result(r)
+    },
+  },
+  // 我的联合申请
+  {
+    url: '/api/activity/joint/:jointId/apply',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const app = rdb.findJointApplication(query.jointId, applicantId)
+      if (!app) return notFound('尚未提交联合申请')
+      return ok(app)
+    },
+  },
+  // 联合面试列表
+  {
+    url: '/api/org/:clubId/joint/:jointId/interviews',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const items = rdb.jointInterviews
+        .filter((i) => i.jointId === query.jointId)
+        .map((i) => ({
+          id: i.id, jointId: i.jointId, applicantId: i.applicantId, applicantName: i.applicantName,
+          status: i.status, slotId: i.slotId, scheduledTime: i.startAt, endTime: i.endAt,
+          attendance: i.attendance, invalidReason: i.invalidReason, attempt: i.attempt, version: i.version,
+        }))
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 联合面试时段列表（管理端）
+  {
+    url: '/api/org/:clubId/joint/:jointId/slots',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return ok({
+        items: rdb.jointSlots
+          .filter((s) => s.jointId === query.jointId)
+          .map((s) => ({ id: s.id, startAt: s.startAt, endAt: s.endAt, capacity: s.capacity, available: Math.max(0, s.capacity - s.taken) })),
+        nextCursor: null,
+      })
+    },
+  },
+  // 管理代预约联合面试
+  {
+    url: '/api/org/:clubId/joint/:jointId/interviews/book',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { applicantId?: string; slotId?: string }
+      if (!input.applicantId || !input.slotId) return businessError('必须指定申请人与面试时段')
+      return result(rdb.bookJointInterview(query.jointId, input.applicantId, input.slotId, true))
+    },
+  },
+  // 联合面试出席登记
+  {
+    url: '/api/org/:clubId/joint/:jointId/interviews/:applicantId/attendance',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { event: 'leave' | 'late' | 'absent' }
+      return result(rdb.markJointAttendance(query.jointId, query.applicantId, input.event))
+    },
+  },
+  // 开始联合面试
+  {
+    url: '/api/org/:clubId/joint/:jointId/interviews/:applicantId/start',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.startJointInterview(query.jointId, query.applicantId))
+    },
+  },
+  // 完成联合面试
+  {
+    url: '/api/org/:clubId/joint/:jointId/interviews/:applicantId/complete',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.completeJointInterview(query.jointId, query.applicantId))
+    },
+  },
+  // 作废联合面试
+  {
+    url: '/api/org/:clubId/joint/:jointId/interviews/:applicantId/invalidate',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { reason?: string }
+      if (!input.reason?.trim()) return businessError('作废联合面试必须填写原因')
+      return result(rdb.invalidateJointInterview(query.jointId, query.applicantId, input.reason))
+    },
+  },
+  // 我的联合面试详情（含可选时段）
+  {
+    url: '/api/me/interviews/joint/:jointId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const it = rdb.jointInterviews.find((i) => i.jointId === query.jointId && i.applicantId === applicantId)
+      if (!it) return notFound('联合面试不存在')
+      const ja = rdb.findJoint(query.jointId)
+      const slots = (rdb.jointSlots.filter((s) => s.jointId === query.jointId))
+      const availableSlots = slots
+        .filter((s) => s.id === it.slotId || s.taken < s.capacity)
+        .map((s) => ({ id: s.id, time: s.startAt, endAt: s.endAt, capacity: s.capacity, booked: s.taken, available: Math.max(0, s.capacity - s.taken) }))
+      return ok({
+        id: it.id, jointId: it.jointId, jointTitle: ja?.title || '', applicantName: it.applicantName,
+        status: it.status, scheduledTime: it.startAt, endTime: it.endAt, attendance: it.attendance,
+        invalidReason: it.invalidReason, attempt: it.attempt, version: it.version, availableSlots,
+      })
+    },
+  },
+  // 预约/改期联合面试（本人）
+  {
+    url: '/api/me/interviews/joint/:jointId/book',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { slotId?: string }
+      if (!input.slotId) return businessError('必须选择面试时段')
+      return result(rdb.bookJointInterview(query.jointId, applicantId, input.slotId, false))
+    },
+  },
+  // 联合结论列表
+  {
+    url: '/api/org/:clubId/joint/:jointId/conclusions',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return ok({ items: jointConclusionRows(query.jointId, query._mock_club || query.clubId), nextCursor: null })
+    },
+  },
+  // 设置联合结论（admit / not_admit）
+  {
+    url: '/api/org/:clubId/joint/:jointId/conclusions/:applicantId/set',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { conclusion: 'admit' | 'not_admit' }
+      if (!['admit', 'not_admit'].includes(input.conclusion)) return businessError('不支持的结论')
+      const me = actorInfo(url)
+      return result(rdb.setJointConclusion(query.jointId, query.applicantId, query._mock_club || query.clubId, input.conclusion, me.name, me.role))
+    },
+  },
+  // 复核结论（keep / modify）
+  {
+    url: '/api/org/:clubId/joint/:jointId/conclusions/:applicantId/review',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { action: 'keep' | 'modify'; newConclusion?: 'admit' | 'not_admit' }
+      if (!['keep', 'modify'].includes(input.action)) return businessError('不支持的复核动作')
+      const me = actorInfo(url)
+      return result(rdb.reviewJointConclusion(query.jointId, query.applicantId, query._mock_club || query.clubId, input.action, me.name, me.role, input.newConclusion))
+    },
+  },
+  // 联合评价提交（页面级：评分+评语）
+  {
+    url: '/api/org/:clubId/joint/:jointId/conclusions/:conclusionId/evaluate',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { rating?: number; comment?: string }
+      const actingClub = query._mock_club || query.clubId
+      const con = rdb.jointConclusions.find((c) => c.id === query.conclusionId)
+      if (!con) return notFound('联合结论不存在')
+      if (con.status === 'accepted_locked' || con.status === 'archived') return businessError('结论已锁定，不可再评价')
+      jointReviewExtras.set(query.jointId + ':' + con.applicantId + ':' + actingClub, {
+        rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString(),
+      })
+      return ok({ id: query.conclusionId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
+    },
+  },
+  // 联合邀请列表
+  {
+    url: '/api/org/:clubId/joint/:jointId/invitations',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const ja = rdb.findJoint(query.jointId)
+      const applicantNameOf = (applicantId: string) =>
+        rdb.jointApplications.find((a) => a.jointId === query.jointId && a.applicantId === applicantId)?.applicantName || applicantId
+      const items = rdb.jointInvitations
+        .filter((inv) => inv.jointId === query.jointId)
+        .map((inv) => ({
+          id: inv.id, jointId: inv.jointId, applicantId: inv.applicantId, applicantName: applicantNameOf(inv.applicantId),
+          clubId: inv.clubId, clubName: ja?.clubs.find((c) => c.clubId === inv.clubId)?.clubName || '', type: inv.type,
+          status: inv.status, sentAt: inv.sentAt, acceptedAt: inv.acceptedAt, expiredAt: inv.expiredAt,
+          reviewFlag: inv.reviewFlag, casdoorSync: inv.casdoorSync, version: inv.version,
+        }))
+      return ok({ items, nextCursor: null })
+    },
+  },
+  // 创建联合邀请
+  {
+    url: '/api/org/:clubId/joint/:jointId/invitations',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { applicantId?: string; clubId?: string; expireDays?: number }
+      if (!input.applicantId) return businessError('必须指定申请人')
+      return result(rdb.createJointInvitation(query.jointId, input.applicantId, input.clubId || query._mock_club || query.clubId, Number(input.expireDays) || 7))
+    },
+  },
+  // 撤回联合邀请
+  {
+    url: '/api/org/:clubId/joint/:jointId/invitations/:invitationId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.withdrawJointInvitation(query.invitationId))
+    },
+  },
+  // 确认联合邀请生效
+  {
+    url: '/api/org/:clubId/joint/:jointId/invitations/:invitationId/sync',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      return result(rdb.confirmJointInvitationSync(query.invitationId))
+    },
+  },
+  // 联合邀请详情（本人视角）
+  {
+    url: '/api/me/invitations/joint/:invitationId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const inv = rdb.findJointInvitation(query.invitationId)
+      if (!inv) return notFound('邀请不存在')
+      const applicantId = applicantIdOf(url)
+      if (applicantId && inv.applicantId !== applicantId) return forbidden()
+      const ja = rdb.findJoint(inv.jointId)
+      const applicantName = rdb.jointApplications.find((a) => a.jointId === inv.jointId && a.applicantId === inv.applicantId)?.applicantName || inv.applicantId
+      return ok({
+        id: inv.id, jointId: inv.jointId, jointTitle: ja?.title || '',
+        clubName: ja?.clubs.find((c) => c.clubId === inv.clubId)?.clubName || '', applicantName,
+        type: inv.type, status: inv.status, sentAt: inv.sentAt, acceptedAt: inv.acceptedAt, expiredAt: inv.expiredAt,
+        reviewFlag: inv.reviewFlag, casdoorSync: inv.casdoorSync,
+      })
+    },
+  },
+  // 接受/拒绝联合邀请（本人）
+  {
+    url: '/api/me/invitations/joint/:invitationId/respond',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const input = unwrap(body) as { action: 'accept' | 'reject' }
+      if (!['accept', 'reject'].includes(input.action)) return businessError('不支持的响应动作')
+      const inv = rdb.jointInvitations.find((i) => i.id === query.invitationId)
+      if (inv && inv.applicantId !== applicantId) return forbidden()
+      return result(rdb.respondJointInvitation(query.invitationId, input.action, applicantId))
+    },
+  },
+]
+
+export const recruitmentApiHandlers: MockMethod[] = [...recHandlers, ...jointHandlers].map(withStatus)
+
+export { rdb }
+export function applicantIdOfUrl(url: string): string | null {
+  return applicantIdOf(url)
+}
