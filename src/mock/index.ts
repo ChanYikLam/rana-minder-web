@@ -572,7 +572,6 @@ const memberHandlers: MockMethod[] = [
       }
     },
   },
-  // 部门关系申请列表
   {
     url: '/api/org/:clubId/members/department-apply',
     method: 'get',

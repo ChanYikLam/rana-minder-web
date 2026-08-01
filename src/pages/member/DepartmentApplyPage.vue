@@ -56,9 +56,9 @@ function formatDate(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
-// 自审拦截：申请人不能审批自己的申请
+// 自审拦截：申请人不能审批自己的申请 + 前端权限校验
 function canApprove(item: DeptApply): boolean {
-  return item.applicantId !== session.workspace?.memberId
+  return item.applicantId !== session.workspace?.memberId && session.hasPermission('club:member:manage')
 }
 
 function startReject(id: string) {
