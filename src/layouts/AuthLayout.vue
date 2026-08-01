@@ -4,6 +4,12 @@ import { Building2 } from '@lucide/vue'
 
 <template>
   <div class="min-h-screen flex items-center justify-center bg-background p-4">
+    <a
+      href="#auth-main"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-elevated focus:px-4 focus:py-2 focus:text-sm focus:text-primary focus:shadow-md"
+    >
+      跳到主内容
+    </a>
     <!-- 背景几何装饰（非渐变，墨青色系线条） -->
     <div class="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
       <svg class="absolute top-0 left-0 w-full h-full opacity-[0.03]" xmlns="http://www.w3.org/2000/svg">
@@ -25,7 +31,9 @@ import { Building2 } from '@lucide/vue'
         <p class="text-sm text-text-secondary mt-1">高校学生社团人员管理系统</p>
       </div>
 
-      <slot />
+      <main id="auth-main" tabindex="-1">
+        <slot />
+      </main>
     </div>
   </div>
 </template>

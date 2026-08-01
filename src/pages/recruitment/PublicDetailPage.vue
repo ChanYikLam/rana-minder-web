@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { PageStateBoundary, Card } from '@/components/common'
+import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
@@ -56,9 +56,9 @@ onMounted(loadDetail)
         <div class="flex items-start justify-between mb-3">
           <div>
             <h1 class="text-2xl font-bold text-text-primary mb-1">{{ detail.title }}</h1>
-            <button class="flex items-center gap-1.5 text-sm text-text-secondary hover:text-primary">
+            <p class="flex items-center gap-1.5 text-sm text-text-secondary">
               <Building2 :size="16" /> {{ detail.clubName }}
-            </button>
+            </p>
           </div>
           <StateTag :status="detail.channelStatus" />
         </div>
@@ -96,15 +96,17 @@ onMounted(loadDetail)
       </Card>
 
       <!-- 操作区 -->
-      <div class="sticky bottom-0 md:static bg-elevated md:bg-transparent border-t md:border-0 p-4 md:p-0 pt-4">
-        <button
-          class="w-full md:w-auto h-12 px-8 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors"
+      <ResponsiveActionRegion page-family="detail">
+        <Button
+          class="w-full md:w-auto"
+          size="lg"
           :disabled="detail.channelStatus !== 'open'"
+          :disabled-reason="detail.channelStatus !== 'open' ? '当前活动的报名通道未开放。' : undefined"
           @click="router.push(`/activity/recruitment/${detail.id}/apply`)"
         >
           {{ detail.channelStatus === 'open' ? '立即报名' : '报名已截止' }}
-        </button>
-      </div>
+        </Button>
+      </ResponsiveActionRegion>
     </div>
   </PageStateBoundary>
 </template>

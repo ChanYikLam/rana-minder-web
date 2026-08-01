@@ -1,10 +1,11 @@
-import { get, post, put } from '../client'
+import { del, get, post, put } from '../client'
 import type { ApiResult, PaginatedResult } from '@/types/contracts'
 import type { SessionInfo, User } from '@/types/domain'
 
 export const identityApi = {
   getSession: (mockUser?: string): Promise<ApiResult<SessionInfo>> =>
     get('/auth/session', mockUser ? { _mock_user: mockUser } : undefined),
+  logout: (): Promise<ApiResult<void>> => del('/auth/logout'),
   getProfile: (): Promise<ApiResult<User>> => get('/auth/profile'),
   updateProfile: (input: Partial<User>): Promise<ApiResult<User>> => put('/auth/profile', input),
   resolveSyncConflict: (input: { field: string; chosenValue: string }): Promise<ApiResult<User>> =>

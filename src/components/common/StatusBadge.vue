@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { AlertTriangle, Check, Circle, Info, ShieldCheck, X } from '@lucide/vue'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
@@ -35,11 +36,19 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const classes = computed(() => cn(badgeVariant({ variant: props.variant })))
+const defaultIcon = computed(() => ({
+  success: Check,
+  danger: X,
+  warning: AlertTriangle,
+  info: Info,
+  neutral: Circle,
+  selected: ShieldCheck,
+}[props.variant ?? 'neutral']))
 </script>
 
 <template>
   <span :class="classes" role="status">
-    <component v-if="icon" :is="icon" :size="12" aria-hidden="true" />
+    <component :is="icon || defaultIcon" :size="12" aria-hidden="true" />
     <span>{{ label }}</span>
   </span>
 </template>

@@ -67,6 +67,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
       method,
       headers,
       body: requestBody,
+      credentials: 'include',
       signal,
     })
 
