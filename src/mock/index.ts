@@ -105,7 +105,10 @@ const identityHandlers: MockMethod[] = [
             studentId: user.studentId,
             name: user.name,
             email: user.email,
+            phone: user.phone,
             avatar: user.avatar,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
           },
           profileGate: {
             complete: user.profileComplete,
