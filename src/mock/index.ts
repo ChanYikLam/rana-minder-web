@@ -842,7 +842,7 @@ const memberHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      return { code: 0, data: { items: departmentApplications, nextCursor: null } }
+      return { code: 0, data: { items: [...departmentApplications], nextCursor: null } }
     },
   },
   {
@@ -861,6 +861,18 @@ const memberHandlers: MockMethod[] = [
       const reason = input.reason?.trim() || ''
       if ((operation !== 'join' && operation !== 'leave' && operation !== 'transfer') || !reason || (operation !== 'join' && !currentDept) || (operation !== 'leave' && !targetDept) || (operation === 'transfer' && currentDept === targetDept)) {
         return departmentApplyError('IFC-ERR-007')
+      }
+      // 同一申请人对同一目标关系已有待审批申请时拒绝重复创建
+      const duplicate = departmentApplications.find(
+        (item) =>
+          item.applicantId === user.id &&
+          item.status === 'under_review' &&
+          item.operation === operation &&
+          item.currentDept === currentDept &&
+          item.targetDept === targetDept,
+      )
+      if (duplicate) {
+        return departmentApplyError('IFC-ERR-008')
       }
       const application: DepartmentApplyRecord = {
         id: `dap-${Date.now()}`,

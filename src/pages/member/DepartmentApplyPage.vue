@@ -63,6 +63,10 @@ function canWithdraw(item: DeptApply): boolean {
   return item.applicantId === session.user?.id && item.status === 'under_review'
 }
 
+function errorMessage(result: { kind: string; error?: { message?: string } }): string {
+  return (result as { error: { message: string } }).error?.message || '操作失败，请刷新后重试'
+}
+
 function resetForm() {
   form.value = { operation: 'transfer', currentDept: '', targetDept: '', reason: '' }
 }
@@ -77,7 +81,7 @@ async function handleCreate() {
     resetForm()
     await loadData()
   } else {
-    toast.error('提交失败，请重试')
+    toast.error(errorMessage(result))
   }
 }
 
@@ -88,12 +92,13 @@ async function handleWithdraw(item: DeptApply) {
   if (result.kind === 'completed') {
     toast.success('申请已撤回')
   } else {
-    toast.error('撤回失败，请刷新后重试')
+    toast.error(errorMessage(result))
   }
   await loadData()
 }
 
 function startReject(id: string) {
+  if (actingId.value !== null) return
   rejectingId.value = id
   rejectReason.value = ''
   rejectError.value = ''
@@ -117,7 +122,7 @@ async function handleReject() {
     rejectingId.value = null
     await loadData()
   } else {
-    rejectError.value = '驳回失败，请刷新后重试'
+    rejectError.value = errorMessage(result)
     await loadData()
   }
 }
@@ -129,7 +134,7 @@ async function handleApprove(item: DeptApply) {
   if (result.kind === 'completed') {
     toast.success('申请已批准')
   } else {
-    toast.error('批准失败，请刷新后重试')
+    toast.error(errorMessage(result))
   }
   await loadData()
 }
@@ -188,19 +193,19 @@ onMounted(loadData)
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无部门关系申请" description="可通过发起申请办理加入、退出或跨部门调动" />
 
       <div v-else class="space-y-3">
-        <Card v-for="item in items" :key="item.id">
+        <Card v-for="item in items" :key="item.id" role="region" :aria-label="`${item.applicantName} 的部门关系申请`">
           <div class="flex items-center justify-between mb-2">
             <div>
               <p class="text-sm font-medium text-text-primary">{{ item.applicantName }}</p>
               <p v-if="!canApprove(item)" class="text-xs text-warning mt-0.5 flex items-center gap-1">
-                <AlertTriangle :size="12" /> 不能审批自己的申请
+                <AlertTriangle :size="12" aria-hidden="true" /> 不能审批自己的申请
               </p>
             </div>
             <StateTag :status="item.status" />
           </div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-2">
             <span>{{ item.currentDept || '未加入部门' }}</span>
-            <ArrowRightLeft :size="14" />
+            <ArrowRightLeft :size="14" aria-hidden="true" />
             <span class="text-primary">{{ item.targetDept || '退出部门' }}</span>
           </div>
           <p class="text-xs text-text-secondary">原因：{{ item.reason }}</p>
@@ -208,14 +213,14 @@ onMounted(loadData)
           <p class="text-xs text-text-secondary mt-1">提交于 {{ formatDate(item.submittedAt) }}</p>
 
           <div v-if="item.status === 'under_review'" class="mt-3 flex gap-2">
-            <button v-if="canWithdraw(item)" class="px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle disabled:opacity-60" :disabled="actingId !== null" @click="handleWithdraw(item)">
+            <button v-if="canWithdraw(item)" class="px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle disabled:opacity-60" :disabled="actingId !== null" aria-label="撤回申请" @click="handleWithdraw(item)">
               {{ actingId === item.id ? '撤回中...' : '撤回申请' }}
             </button>
             <template v-if="canApprove(item)">
-              <button class="px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60" :disabled="actingId !== null" @click="handleApprove(item)">
+              <button class="px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60" :disabled="actingId !== null" aria-label="批准申请" @click="handleApprove(item)">
                 {{ actingId === item.id ? '处理中...' : '批准' }}
               </button>
-              <button class="px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle disabled:opacity-60" :disabled="actingId !== null" @click="startReject(item.id)">
+              <button class="px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle disabled:opacity-60" :disabled="actingId !== null" aria-label="驳回申请" @click="startReject(item.id)">
                 驳回
               </button>
             </template>
