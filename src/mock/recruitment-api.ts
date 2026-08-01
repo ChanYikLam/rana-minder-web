@@ -83,7 +83,7 @@ export function withStatus(handler: MockMethod): MockMethod {
         }
         res.statusCode = 200
         res.end(JSON.stringify(out ?? { code: 0, data: null }))
-      } catch (err) {
+      } catch {
         res.statusCode = 500
         res.end(
           JSON.stringify({
