@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
@@ -18,11 +18,13 @@ const router = useRouter()
 
 const state = ref<PageState>('loading')
 const detail = ref<ActivityDetail | null>(null)
+const variant = computed(() => route.meta.variant === 'joint' ? 'joint' : 'recruitment')
 
 async function loadDetail() {
   state.value = 'loading'
-  const id = route.params.activityId as string
-  const result = await get<ActivityDetail>(`/explore/activities/${id}`)
+  const id = (variant.value === 'joint' ? route.params.jointId : route.params.activityId) as string
+  const path = variant.value === 'joint' ? `/explore/joint/${id}` : `/explore/activities/${id}`
+  const result = await get<ActivityDetail>(path)
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'
@@ -100,7 +102,7 @@ onMounted(loadDetail)
         <button
           class="w-full md:w-auto h-12 px-8 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors"
           :disabled="detail.channelStatus !== 'open'"
-          @click="router.push(`/activity/recruitment/${detail.id}/apply`)"
+          @click="router.push(`/activity/${variant}/${detail.id}/apply`)"
         >
           {{ detail.channelStatus === 'open' ? '立即报名' : '报名已截止' }}
         </button>

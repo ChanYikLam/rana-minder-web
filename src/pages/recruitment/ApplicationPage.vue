@@ -30,7 +30,7 @@ async function loadData() {
   const id = route.params.activityId as string
   const [actRes, formRes] = await Promise.all([
     get<ActivityDetail>(`/explore/activities/${id}`),
-    get<{ versions: { fields: FormField[] }[] }>(`/org/club-001/forms/form-001`),
+    get<{ versions: { fields: FormField[] }[] }>(`/explore/activities/${id}/form`),
   ])
   if (actRes.kind === 'completed' && formRes.kind === 'completed') {
     activity.value = actRes.data

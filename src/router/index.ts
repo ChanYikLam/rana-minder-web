@@ -1,5 +1,46 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
+
+const WORKSPACE_PERMISSIONS: Record<string, string> = {
+  'P-ORG-02': 'club:dashboard:view',
+  'P-ORG-03': 'club:batch:execute',
+  'P-REC': 'club:recruitment:manage',
+  'P-JNT': 'club:joint:manage',
+  'P-MEM': 'club:member:manage',
+  'P-FORM': 'club:form:design',
+  'P-STAT': 'club:stats:view',
+  'P-EXP': 'club:export:execute',
+  'P-NTF': 'club:config:manage',
+  'P-AUD': 'club:audit:view',
+  'P-CFG': 'club:config:manage',
+}
+
+const ADMIN_PERMISSIONS: Record<string, string> = {
+  'P-FORM-admin-list': 'platform:form:design',
+  'P-FORM-01-admin': 'platform:form:design',
+  'P-FORM-02-admin': 'platform:form:design',
+  'P-JNT-admin-list': 'platform:club:manage',
+  'P-JNT-05-admin': 'platform:club:manage',
+  'P-ORG-01': 'platform:club:manage',
+  'P-NTF-02-platform': 'platform:config:manage',
+  'P-AUD-01-admin': 'platform:audit:view',
+  'P-AUD-02-admin': 'platform:audit:view',
+  'P-STAT-01-admin': 'platform:export:execute',
+  'P-EXP-01-admin': 'platform:export:execute',
+  'P-AUD-03': 'platform:delete:execute',
+  'P-AUD-04': 'platform:delete:execute',
+  'P-CFG-01-admin': 'platform:config:manage',
+  'P-CFG-02': 'platform:config:manage',
+  'P-OPS-01': 'platform:ops:view',
+}
+
+export function workspacePermissionForRoute(routeName: string): string | null {
+  const exact = WORKSPACE_PERMISSIONS[routeName]
+  if (exact) return exact
+  const prefix = Object.keys(WORKSPACE_PERMISSIONS).find((key) => routeName.startsWith(`${key}-`) || routeName === `${key}-list`)
+  return prefix ? WORKSPACE_PERMISSIONS[prefix] : null
+}
 
 const routes: RouteRecordRaw[] = [
   // ========== A. 公开路由（7条） ==========
@@ -134,7 +175,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/me/invitations/joint/:invitationId',
     name: 'P-JNT-04-self',
-    component: () => import('@/pages/joint/JointConclusionPage.vue'),
+    component: () => import('@/pages/joint/JointInvitationPage.vue'),
     meta: { layout: 'default', requiresAuth: true, view: 'self' },
   },
   {
@@ -227,7 +268,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/org/:clubId/recruitment/:activityId/invitations',
     name: 'P-REC-06-manage',
-    component: () => import('@/pages/recruitment/InvitationPage.vue'),
+    component: () => import('@/pages/recruitment/RecruitmentInvitationManagePage.vue'),
     meta: { layout: 'default', requiresAuth: true, requiresWorkspace: true, view: 'manage' },
   },
   {
@@ -480,6 +521,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const session = useSessionViewStore()
+  const workspace = useWorkspaceContextStore()
 
   const isPublic = to.meta.public === true
 
@@ -497,9 +539,20 @@ router.beforeEach(async (to) => {
     }
 
     if (to.meta.requiresAdmin === true) {
-      if (!session.hasPermission('platform:club:manage')) {
+      const permission = ADMIN_PERMISSIONS[String(to.name)]
+      if (!permission || !session.hasPermission(permission)) {
         return { name: 'P-GEN-02' }
       }
+    }
+
+    if (to.meta.requiresWorkspace === true) {
+      const clubId = typeof to.params.clubId === 'string' ? to.params.clubId : null
+      const permission = workspacePermissionForRoute(String(to.name))
+      if (!clubId || !permission || !(await workspace.loadWorkspace(clubId)) || !workspace.hasPermission(permission)) {
+        return { name: 'P-GEN-02' }
+      }
+    } else {
+      workspace.clearWorkspace()
     }
   }
 

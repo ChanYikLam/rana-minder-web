@@ -18,6 +18,8 @@ export interface ClubMembership {
   permissions: string[]
 }
 
+export type WorkspaceContext = ClubMembership
+
 export interface DashboardData {
   club: Pick<Club, 'id' | 'name'>
   role: ClubRole

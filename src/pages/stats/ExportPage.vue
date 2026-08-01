@@ -6,6 +6,9 @@ import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Download, Plus, FileText, Clock, CheckCircle2 } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
+import { openAuthorizedDownload } from '@/services/download'
+import { toast } from 'vue-sonner'
 
 interface ExportTask { id: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number }
 
@@ -15,8 +18,9 @@ const items = ref<ExportTask[]>([])
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const result = await get<{ items: ExportTask[] }>(`/org/${clubId}/exports`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<{ items: ExportTask[] }>(`${apiScope.prefix}/exports`)
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: ExportTask[] } }).data.items
     state.value = 'normal'
@@ -35,9 +39,18 @@ function formatTime(iso: string): string {
 }
 
 async function handleCreate() {
-  const clubId = route.params.clubId as string
-  await post(`/org/${clubId}/exports`, { type: '成员名单' })
-  loadData()
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
+  const result = await post(`${apiScope.prefix}/exports`, { type: '成员名单' })
+  if (result.kind === 'completed') await loadData()
+}
+
+async function handleDownload(task: ExportTask) {
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
+  const result = await post<{ downloadUrl: string }>(`${apiScope.prefix}/exports/${task.id}/download`, {})
+  if (result.kind === 'completed' && openAuthorizedDownload(result.data.downloadUrl)) return
+  toast.error('下载地址无效或已过期')
 }
 
 onMounted(loadData)
@@ -69,7 +82,7 @@ onMounted(loadData)
         </div>
       </Card>
 
-      <div v-else class="space-y-3">
+      <div v-if="items.length > 0" class="space-y-3">
         <Card v-for="task in items" :key="task.id">
           <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
@@ -93,6 +106,7 @@ onMounted(loadData)
             <button
               v-if="task.status === 'completed' && task.downloadUrl"
               class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover"
+              @click="handleDownload(task)"
             >
               <Download :size="14" /> 下载
             </button>

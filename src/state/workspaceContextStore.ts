@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ClubRole } from '@/types/domain'
+import { organizationApi } from '@/services'
 
 export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
   const currentClubId = ref<string | null>(null)
@@ -16,6 +17,27 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     currentClubName.value = clubName
     currentRole.value = role
     currentPermissions.value = permissions
+  }
+
+  async function loadWorkspace(clubId: string): Promise<boolean> {
+    if (currentClubId.value === clubId && currentRole.value) return true
+
+    loading.value = true
+    const result = await organizationApi.getContext(clubId)
+    loading.value = false
+
+    if (result.kind !== 'completed') {
+      clearWorkspace()
+      return false
+    }
+
+    setWorkspace(
+      result.data.clubId,
+      result.data.clubName,
+      result.data.role,
+      result.data.permissions,
+    )
+    return true
   }
 
   function clearWorkspace() {
@@ -37,6 +59,7 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     loading,
     hasWorkspace,
     setWorkspace,
+    loadWorkspace,
     clearWorkspace,
     hasPermission,
   }

@@ -168,8 +168,8 @@ function closeMobileNav() {
   mobileNavOpen.value = false
 }
 
-function handleLogout() {
-  session.clearSession()
+async function handleLogout() {
+  await session.logout()
   workspace.clearWorkspace()
   closeMobileNav()
   router.push('/login')

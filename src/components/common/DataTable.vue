@@ -48,6 +48,14 @@ function toggleRow(id: string) {
   emit('update:selectedIds', [...localSelected.value])
 }
 
+function toggleAll() {
+  const allIds = props.rows.map(getRowId).filter(Boolean)
+  localSelected.value = localSelected.value.size === allIds.length
+    ? new Set()
+    : new Set(allIds)
+  emit('update:selectedIds', [...localSelected.value])
+}
+
 function getRowId(row: unknown): string {
   return String((row as Record<string, unknown>)[props.rowKey] || '')
 }
@@ -55,6 +63,11 @@ function getRowId(row: unknown): string {
 function renderCell(col: Column<unknown>, row: unknown): string {
   if (col.render) return col.render(row)
   return String((row as Record<string, unknown>)[col.key] ?? '')
+}
+
+function getRowLabel(row: unknown): string {
+  const firstColumn = props.columns[0]
+  return firstColumn ? `打开 ${renderCell(firstColumn, row)}` : '打开该行'
 }
 </script>
 
@@ -67,7 +80,10 @@ function renderCell(col: Column<unknown>, row: unknown): string {
             <input
               type="checkbox"
               class="rounded border-border"
+              :checked="localSelected.size === rows.length && rows.length > 0"
+              :indeterminate="localSelected.size > 0 && localSelected.size < rows.length"
               :aria-label="localSelected.size === rows.length && rows.length > 0 ? '取消全选' : '全选'"
+              @change="toggleAll"
             />
           </th>
           <th
@@ -107,7 +123,11 @@ function renderCell(col: Column<unknown>, row: unknown): string {
             :key="getRowId(row)"
             class="border-b border-border last:border-0 hover:bg-subtle transition-colors cursor-pointer"
             role="row"
+            tabindex="0"
+            :aria-label="getRowLabel(row)"
             @click="emit('rowClick', row)"
+            @keydown.enter="emit('rowClick', row)"
+            @keydown.space.prevent="emit('rowClick', row)"
           >
             <td v-if="selectable" class="px-3 py-2.5" @click.stop>
               <input

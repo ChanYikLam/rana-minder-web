@@ -62,7 +62,11 @@ function applyResults(list: { memberId: string; success: boolean; message: strin
 }
 
 async function runBatch(memberIds: string[]) {
-  const clubId = (route.params.clubId as string) || 'club-001'
+  const clubId = typeof route.params.clubId === 'string' ? route.params.clubId : null
+  if (!clubId) {
+    toast.error('工作空间参数无效')
+    return false
+  }
   const result = await post<{ results: { memberId: string; success: boolean; message: string }[] }>(`/org/${clubId}/batch/execute`, {
     action: selectedType.value,
     memberIds,

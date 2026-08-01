@@ -44,11 +44,17 @@ const columns = [
   { key: 'rating', label: '评分' },
 ]
 
+function routeScope(): { clubId: string; activityId: string } | null {
+  const clubId = typeof route.params.clubId === 'string' ? route.params.clubId : null
+  const activityId = typeof route.params.activityId === 'string' ? route.params.activityId : null
+  return clubId && activityId ? { clubId, activityId } : null
+}
+
 async function loadReviews() {
   state.value = 'loading'
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const actId = (route.params.activityId as string) || 'act-001'
-  const result = await get<{ items: ReviewItem[] }>(`/org/${clubId}/recruitment/${actId}/reviews`)
+  const scope = routeScope()
+  if (!scope) { state.value = 'error'; return }
+  const result = await get<{ items: ReviewItem[] }>(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews`)
   if (result.kind === 'completed') {
     reviews.value = (result as { kind: 'completed'; data: { items: ReviewItem[] } }).data.items
     state.value = 'normal'
@@ -68,9 +74,9 @@ function handleRowClick(row: unknown) {
 async function handleSubmitReview() {
   if (!selected.value || rating.value === 0) return
   submitting.value = true
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const actId = (route.params.activityId as string) || 'act-001'
-  const result = await post(`/org/${clubId}/recruitment/${actId}/reviews/${selected.value.id}/conclude`, {
+  const scope = routeScope()
+  if (!scope) { submitting.value = false; return }
+  const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/${selected.value.id}/conclude`, {
     rating: rating.value,
     comment: comment.value,
   })
@@ -85,9 +91,9 @@ async function handleSubmitReview() {
 
 async function handlePublishAll() {
   submitting.value = true
-  const clubId = (route.params.clubId as string) || 'club-001'
-  const actId = (route.params.activityId as string) || 'act-001'
-  const result = await post(`/org/${clubId}/recruitment/${actId}/reviews/publish`)
+  const scope = routeScope()
+  if (!scope) { submitting.value = false; return }
+  const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/publish`)
   submitting.value = false
   if (result.kind === 'completed') {
     reviews.value.forEach((r) => { if (r.status === 'concluded') r.status = 'published' })

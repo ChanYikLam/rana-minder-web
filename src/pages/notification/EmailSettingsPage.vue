@@ -6,6 +6,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { Save, Send, CheckCircle2 } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -25,8 +26,9 @@ const isConfig = computed(() => scope.value !== 'personal')
 async function loadData() {
   if (!isConfig.value) { state.value = 'normal'; return }
   state.value = 'loading'
-  const clubId = route.params.clubId as string
-  const result = await get<typeof config.value>(`/org/${clubId}/notifications/email-config`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get<typeof config.value>(`${apiScope.prefix}/notifications/email-config`)
   if (result.kind === 'completed') {
     config.value = result.data
     state.value = 'normal'
@@ -36,8 +38,9 @@ async function loadData() {
 async function handleTest() {
   testing.value = true
   testResult.value = null
-  const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/notifications/email-config/test`, {})
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { testing.value = false; return }
+  const result = await post(`${apiScope.prefix}/notifications/email-config/test`, {})
   testing.value = false
   if (result.kind === 'completed') {
     testResult.value = '测试邮件已发送至 ' + config.value.smtpUser + '，请查收'
@@ -48,8 +51,9 @@ async function handleTest() {
 
 async function handleSave() {
   saving.value = true
-  const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/notifications/email-config`, {
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { saving.value = false; return }
+  const result = await post(`${apiScope.prefix}/notifications/email-config`, {
     smtpHost: config.value.smtpHost,
     smtpPort: config.value.smtpPort,
     smtpUser: config.value.smtpUser,

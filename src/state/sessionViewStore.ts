@@ -41,6 +41,14 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     lastLoadedAt.value = null
   }
 
+  async function logout() {
+    try {
+      await identityApi.logout()
+    } finally {
+      clearSession()
+    }
+  }
+
   function hasPermission(permission: string): boolean {
     return permissions.value.includes(permission)
   }
@@ -57,6 +65,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     needsProfileGate,
     loadSession,
     clearSession,
+    logout,
     hasPermission,
   }
 })

@@ -6,6 +6,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { ShieldAlert, CheckCircle2, Users, Mail, ArrowLeft } from '@lucide/vue'
+import { resolveApiScope } from '@/services/route-scope'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,9 +20,10 @@ const detail = ref<{
 
 async function loadData() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
   const jointId = route.params.jointId as string
-  const result = await get(`/org/${clubId}/joint/${jointId}/close`)
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { state.value = 'error'; return }
+  const result = await get(`${apiScope.prefix}/joint/${jointId}/close`)
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value
     state.value = 'normal'
@@ -34,13 +36,14 @@ onMounted(loadData)
 
 async function handleClose() {
   closing.value = true
-  const clubId = route.params.clubId as string
   const jointId = route.params.jointId as string
-  const result = await post(`/org/${clubId}/joint/${jointId}/close`, {})
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { closing.value = false; return }
+  const result = await post(`${apiScope.prefix}/joint/${jointId}/close`, {})
   closing.value = false
   if (result.kind === 'completed') {
     toast.success('联合活动已结束')
-    router.push(`/org/${clubId}/joint`)
+    router.push(apiScope.kind === 'platform' ? '/admin/joint' : `${apiScope.prefix}/joint`)
   } else {
     toast.error('结束失败，请稍后重试')
   }
