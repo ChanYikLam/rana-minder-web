@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound } from '@lucide/vue'
 import {
   Dialog,
@@ -51,6 +51,18 @@ const reauthPassword = ref('')
 const reauthError = ref('')
 const reauthBusy = ref(false)
 
+// 重认证倒计时：从弹窗打开起计时，每秒刷新
+const openedAt = ref(Date.now())
+const now = ref(Date.now())
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+function stopCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+}
+
 watch(
   () => props.open,
   (open) => {
@@ -58,9 +70,22 @@ watch(
       step.value = 'preview'
       reauthPassword.value = ''
       reauthError.value = ''
+      openedAt.value = Date.now()
+      now.value = Date.now()
+      stopCountdown()
+      if (props.reauthRequired) {
+        countdownTimer = setInterval(() => {
+          now.value = Date.now()
+        }, 1000)
+      }
+    } else {
+      stopCountdown()
     }
-  }
+  },
+  { immediate: true }
 )
+
+onBeforeUnmount(stopCountdown)
 
 function handleNext() {
   if (step.value === 'preview') {
@@ -101,7 +126,8 @@ function handleCancel() {
 
 const remainingSeconds = computed(() => {
   if (!props.reauthRequired) return 0
-  return Math.ceil(props.reauthDeadline / 1000)
+  const elapsed = now.value - openedAt.value
+  return Math.max(0, Math.ceil((props.reauthDeadline - elapsed) / 1000))
 })
 </script>
 

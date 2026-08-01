@@ -167,7 +167,7 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, view: 'self' },
   },
   {
-    path: '/me/interviews/joint/:interviewId',
+    path: '/me/interviews/joint/:jointId',
     name: 'P-JNT-03-self',
     component: () => import('@/pages/joint/JointInterviewSchedulePage.vue'),
     meta: { layout: 'default', requiresAuth: true, view: 'self' },

@@ -265,7 +265,8 @@ export function getActiveMockUser(): MockUser | null {
 }
 
 /** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换） */
-export function resolveMockUser(url: string): MockUser {  try {
+export function resolveMockUser(url: string): MockUser {
+  try {
     const u = new URL(url, 'http://localhost')
     const key = u.searchParams.get('_mock_user') || activeMockUserKey || 'leader'
     return mockUsers[key] || mockUsers.leader

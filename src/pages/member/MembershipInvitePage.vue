@@ -56,6 +56,7 @@ async function loadData() {
 }
 
 function formatDate(iso: string): string {
+  if (!iso) return '-'
   const d = new Date(iso)
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }

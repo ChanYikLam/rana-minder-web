@@ -181,8 +181,9 @@ onMounted(async () => {
                       <Star :size="14" class="text-warning fill-warning" /> {{ c.rating }}
                     </span>
                     <StateTag status="concluded" />
-                    <button class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
-                    <div v-if="reviewingId === c.id" class="flex items-center gap-1.5">
+                    <!-- 复核仅对补面完成后标记了 reviewFlag 的结论开放，后台会拒绝无标志复核 -->
+                    <button v-if="c.reviewFlag" class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
+                    <div v-if="c.reviewFlag && reviewingId === c.id" class="flex items-center gap-1.5">
                       <button
                         class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
                         @click="handleReview(c, 'keep')"

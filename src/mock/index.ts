@@ -1,8 +1,28 @@
 import type { MockMethod } from './types'
-import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, type MockUser } from './auth'
+import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
+
+/** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
+const REAUTH_TTL_MS = 10 * 60 * 1000
+const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
+
+function issueReauthProof(userId: string): { proof: string; expiresAt: string } {
+  const proof = `reauth-${userId}-${Date.now()}`
+  const expiresAt = Date.now() + REAUTH_TTL_MS
+  reauthProofs.set(proof, { userId, expiresAt })
+  return { proof, expiresAt: new Date(expiresAt).toISOString() }
+}
+
+function consumeReauthProof(proof: unknown): boolean {
+  if (typeof proof !== 'string') return false
+  const user = getActiveMockUser()
+  const record = reauthProofs.get(proof)
+  if (!user || !record || record.userId !== user.id || record.expiresAt <= Date.now()) return false
+  reauthProofs.delete(proof)
+  return true
+}
 
 /** 业务规则拒绝（HTTP 422 + IFC-ERR-008） */
 function businessError(message: string) {
@@ -45,13 +65,6 @@ const exportTasks: ExportTask[] = [
   { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576 },
   { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 },
 ]
-
-/** 重认证有效期（校验通过后刷新，供高风险操作校验） */
-let reauthExpiresAt = Date.now()
-
-export function isReauthed(): boolean {
-  return Date.now() < reauthExpiresAt
-}
 
 /**
  * vite-plugin-mock 的 query 传递缺陷：
@@ -246,32 +259,15 @@ const identityHandlers: MockMethod[] = [
   {
     url: '/api/auth/reauth',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { password: string } } }) => {
+    response: ({ url }: { url: string }) => {
       const error = resolveMockError(url)
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      // mock 密码约定：任意非空密码通过
-      if (!body.input?.password) {
-        return {
-          statusCode: 422,
-          body: {
-            code: 'IFC-ERR-006',
-            message: '密码错误，请重试',
-            fieldErrors: { password: ['密码错误'] },
-            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
-          },
-        }
-      }
       const user = resolveMockUser(url)
-      reauthExpiresAt = Date.now() + 10 * 60 * 1000
       return {
         code: 0,
-        data: {
-          reauthed: true,
-          expiresAt: new Date(reauthExpiresAt).toISOString(),
-          identity: user.name,
-        },
+        data: issueReauthProof(user.id),
       }
     },
   },
@@ -1258,6 +1254,7 @@ const platformHandlers: MockMethod[] = [
             { id: 'act-003', label: '2025 春季补录', type: '活动', recordCount: 3, memberCount: 0 },
           ],
           totalRecords: 15, totalMembers: 5, warning: '删除后不可恢复，相关数据将被永久清除',
+          previewVersion: 4,
         },
       }
     },
@@ -1292,7 +1289,19 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/admin/delete/execute',
     method: 'post',
-    response: ({ body }: { body: { input: { targetIds: string[] } } }) => {
+    response: ({ body }: { body: { input: { targetIds: string[]; reason?: string; reauthProof?: string; previewVersion?: number } } }) => {
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      if (body.input?.previewVersion !== 4) {
+        return { statusCode: 409, body: { code: 'IFC-ERR-008', message: '删除影响预览已变化' } }
+      }
+      if (!body.input?.reason?.trim()) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '必须填写删除原因' } }
+      }
+      if ((body.input?.targetIds || []).includes('club-004')) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '目标仍存在活跃关系' } }
+      }
       return {
         code: 0,
         data: {

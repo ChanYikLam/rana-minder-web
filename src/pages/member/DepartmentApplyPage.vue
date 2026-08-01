@@ -191,7 +191,7 @@ onMounted(loadData)
             <StateTag :status="item.status" />
           </div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-2">
-            <span>{{ item.currentDept }}</span>
+            <span>{{ item.currentDept === '-' ? '未加入部门' : item.currentDept }}</span>
             <ArrowRightLeft :size="14" />
             <span class="text-primary">{{ item.type === 'leave' ? '退出' : item.targetDeptName }}</span>
           </div>

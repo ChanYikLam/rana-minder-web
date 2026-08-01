@@ -25,7 +25,7 @@ const bookError = ref<string | null>(null)
 
 async function loadDetail() {
   state.value = 'loading'
-  const jointId = route.params.interviewId as string
+  const jointId = route.params.jointId as string
   const result = await get<JointInterviewDetail>(`/me/interviews/joint/${jointId}`)
   if (result.kind === 'completed') {
     detail.value = result.data
