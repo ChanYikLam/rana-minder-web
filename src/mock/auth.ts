@@ -294,9 +294,9 @@ export const USER_MEMBER_MAP: Record<string, string> = {
 }
 
 /** 获取当前用户的默认工作空间（有社团归属时返回） */
-export function getWorkspace(user: MockUser): { clubId: string; clubName: string; role: MockRole['role']; memberId?: string } | null {
+export function getWorkspace(user: MockUser): { clubId: string; clubName: string; role: MockRole['role']; permissions: string[]; memberId?: string } | null {
   if (!user.currentClubId) return null
   const role = user.roles.find((r) => r.clubId === user.currentClubId)
   if (!role) return null
-  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, memberId: USER_MEMBER_MAP[user.id] }
+  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, permissions: role.permissions, memberId: USER_MEMBER_MAP[user.id] }
 }
