@@ -1,3 +1,4 @@
+export { default as Breadcrumbs } from './Breadcrumbs.vue'
 export { default as ClubSwitcher } from './ClubSwitcher.vue'
 export { default as DegradedBanner } from './DegradedBanner.vue'
 export { default as PermissionGuard } from './PermissionGuard.vue'

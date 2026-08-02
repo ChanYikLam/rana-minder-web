@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
-import { post } from '@/services/client'
+import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, ChevronRight } from '@lucide/vue'
 
 type BatchType = 'assign_interviewer' | 'schedule_interview' | 'publish_result' | 'send_invitation'
+
+interface BatchCandidate {
+  id: string
+  name: string
+  studentId: string
+  department: string
+  status: string
+}
 
 const route = useRoute()
 const step = ref<'select' | 'preview' | 'execute' | 'result'>('select')
@@ -15,6 +23,8 @@ const selectedType = ref<BatchType | null>(null)
 const selectedItems = ref<string[]>([])
 const executing = ref(false)
 const retrying = ref(false)
+const candidates = ref<BatchCandidate[]>([])
+const loadingCandidates = ref(false)
 
 const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'assign_interviewer', label: '批量分配面试官', desc: '为多个申请人分配同一面试官' },
@@ -23,16 +33,24 @@ const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'send_invitation', label: '批量发送邀请', desc: '向多个申请人发送同一类型邀请' },
 ]
 
-const mockApplicants = [
-  { id: 'app-001', name: '刘子豪', studentId: '20240001', department: '技术部', status: 'submitted' },
-  { id: 'app-002', name: '陈雨桐', studentId: '20240002', department: '运营部', status: 'under_review' },
-  { id: 'app-003', name: '王梓涵', studentId: '20240003', department: '技术部', status: 'accepted' },
-  { id: 'app-004', name: '张博文', studentId: '20240004', department: '运营部', status: 'rejected' },
-  { id: 'app-005', name: '李欣怡', studentId: '20240005', department: '设计部', status: 'submitted' },
-]
-
 interface BatchResult { id: string; name: string; success: boolean; message: string }
 const results = ref<BatchResult[]>([])
+
+const clubId = computed(() => (typeof route.params.clubId === 'string' ? route.params.clubId : null))
+
+async function loadCandidates() {
+  if (!clubId.value) return
+  loadingCandidates.value = true
+  try {
+    const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`)
+    if (res.kind === 'completed') candidates.value = res.data.items
+    else toast.error('候选人加载失败，请重试')
+  } finally {
+    loadingCandidates.value = false
+  }
+}
+
+onMounted(loadCandidates)
 
 function selectType(type: BatchType) {
   selectedType.value = type
@@ -48,7 +66,7 @@ function toggleItem(id: string) {
 
 function applyResults(list: { memberId: string; success: boolean; message: string }[]) {
   for (const item of list) {
-    const app = mockApplicants.find((a) => a.id === item.memberId)
+    const app = candidates.value.find((a) => a.id === item.memberId)
     const existing = results.value.findIndex((r) => r.id === item.memberId)
     const entry: BatchResult = {
       id: item.memberId,
@@ -62,12 +80,11 @@ function applyResults(list: { memberId: string; success: boolean; message: strin
 }
 
 async function runBatch(memberIds: string[]) {
-  const clubId = typeof route.params.clubId === 'string' ? route.params.clubId : null
-  if (!clubId) {
+  if (!clubId.value) {
     toast.error('工作空间参数无效')
     return false
   }
-  const result = await post<{ results: { memberId: string; success: boolean; message: string }[] }>(`/org/${clubId}/batch/execute`, {
+  const result = await post<{ results: { memberId: string; success: boolean; message: string }[] }>(`/org/${clubId.value}/batch/execute`, {
     action: selectedType.value,
     memberIds,
   })
@@ -157,14 +174,16 @@ const failCount = computed(() => results.value.filter((r) => !r.success).length)
           <p class="text-sm font-medium text-text-primary">选择对象（{{ selectedItems.length }}）</p>
           <button
             class="text-xs text-primary hover:underline"
-            @click="selectedItems.length === mockApplicants.length ? (selectedItems = []) : (selectedItems = mockApplicants.map((a) => a.id))"
+            @click="selectedItems.length === candidates.length ? (selectedItems = []) : (selectedItems = candidates.map((a) => a.id))"
           >
-            {{ selectedItems.length === mockApplicants.length ? '取消全选' : '全选' }}
+            {{ selectedItems.length === candidates.length ? '取消全选' : '全选' }}
           </button>
         </div>
-        <div class="space-y-2">
+        <p v-if="loadingCandidates" class="text-sm text-text-secondary py-6 text-center">正在加载候选人...</p>
+        <p v-else-if="candidates.length === 0" class="text-sm text-text-secondary py-6 text-center">暂无报名申请</p>
+        <div v-else class="space-y-2">
           <label
-            v-for="app in mockApplicants"
+            v-for="app in candidates"
             :key="app.id"
             class="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer hover:border-border-strong"
           >

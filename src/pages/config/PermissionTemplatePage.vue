@@ -25,6 +25,8 @@ async function loadData() {
   } else { state.value = 'error' }
 }
 
+const saving = ref(false)
+
 function startEdit() {
   if (!selected.value) return
   draft.value = {
@@ -34,8 +36,18 @@ function startEdit() {
   editing.value = true
 }
 
-function saveDraft() {
-  if (!selected.value) return
+async function saveDraft() {
+  if (!selected.value || saving.value) return
+  saving.value = true
+  const result = await post(`/admin/config/permission-templates/${selected.value.id}/save`, {
+    name: draft.value.name,
+    permissions: draft.value.permissions.split('\n').map((p) => p.trim()).filter(Boolean),
+  })
+  saving.value = false
+  if (result.kind !== 'completed') {
+    toast.error('草稿保存失败，请重试')
+    return
+  }
   selected.value.name = draft.value.name
   selected.value.permissions = draft.value.permissions.split('\n').map((p) => p.trim()).filter(Boolean)
   selected.value.version += 1
@@ -129,7 +141,7 @@ onMounted(loadData)
             </template>
             <template v-else>
               <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="editing = false">取消</button>
-              <button class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover" @click="saveDraft">保存草稿</button>
+              <button class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60" :disabled="saving" @click="saveDraft">{{ saving ? '保存中...' : '保存草稿' }}</button>
             </template>
           </div>
         </Card>

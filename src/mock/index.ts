@@ -1311,6 +1311,26 @@ const platformHandlers: MockMethod[] = [
   },
   // 批量操作执行
   {
+    url: '/api/org/:clubId/batch/candidates',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const apps = rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId)
+      return {
+        code: 0,
+        data: {
+          items: apps.map((a) => ({
+            id: a.id,
+            name: a.applicantName,
+            studentId: a.studentId,
+            department: a.preferences.filter((p) => p.order === 1)[0]?.departmentName || '-',
+            status: a.status,
+          })),
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  {
     url: '/api/org/:clubId/batch/execute',
     method: 'post',
     response: ({ body }: { body: { input: { memberIds: string[]; action: string } } }) => {
@@ -1578,6 +1598,24 @@ const platformHandlers: MockMethod[] = [
             { id: 'tpl-002', name: '人事模板', permissions: ['club:dashboard:view', 'club:recruitment:manage', 'club:member:manage', 'club:batch:execute'], version: 1, status: 'published' },
             { id: 'tpl-003', name: '面试官模板', permissions: ['club:interview:view', 'club:interview:evaluate'], version: 1, status: 'draft' },
           ],
+        },
+      }
+    },
+  },
+  // 保存权限模板草稿
+  {
+    url: '/api/admin/config/permission-templates/:templateId/save',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { name?: string; permissions?: string[] } } }) => {
+      return {
+        code: 0,
+        data: {
+          id: query.templateId,
+          name: body.input?.name,
+          permissions: body.input?.permissions || [],
+          version: 1,
+          status: 'draft',
+          savedAt: new Date().toISOString(),
         },
       }
     },
