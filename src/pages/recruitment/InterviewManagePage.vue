@@ -40,14 +40,22 @@ const cancelRoundId = ref<string | null>(null)
 const cancelRoundReason = ref('')
 const cancelRoundError = ref('')
 
-const clubId = computed(() => route.params.clubId as string)
-const actId = computed(() => route.params.activityId as string)
+const clubId = computed(() => (route.params.clubId as string) || '')
+const actId = computed(() => (route.params.activityId as string) || '')
 
 watch([clubId, actId], ([cid, aid]) => {
   if (!cid || !aid) {
     state.value = 'error'
   }
 }, { immediate: true })
+
+function validateParams(): boolean {
+  if (!clubId.value || !actId.value) {
+    state.value = 'error'
+    return false
+  }
+  return true
+}
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
@@ -58,6 +66,7 @@ const columns = [
 
 async function loadInterviews() {
   state.value = 'loading'
+  if (!validateParams()) return
   const result = await get<{ items: InterviewRow[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviews`)
   if (result.kind === 'completed') {
     items.value = result.data.items
@@ -71,6 +80,7 @@ async function loadInterviews() {
 }
 
 async function loadBookOptions() {
+  if (!validateParams()) return
   const [r, a] = await Promise.all([
     get<{ items: RoundItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/rounds`),
     get<{ items: AppItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/applications`),
@@ -94,6 +104,7 @@ function formatTime(iso: string): string {
 
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!selected.value || actionLoading.value) return
+  if (!validateParams()) return
   actionLoading.value = true
   actionError.value = ''
   const result = await post(
@@ -137,6 +148,7 @@ async function loadRounds() {
 }
 
 async function handleCreateRound() {
+  if (!validateParams()) return
   if (!roundForm.value.name || !roundForm.value.deadline || !roundForm.value.slotStart || !roundForm.value.slotEnd) {
     roundError.value = '请完整填写轮次名称、截止时间与面试时段'
     return
@@ -161,6 +173,7 @@ async function handleCreateRound() {
 }
 
 async function handleUpdateRound(roundId: string) {
+  if (!validateParams()) return
   if (!newRoundDeadline.value) return
   if (actionLoading.value) return
   actionLoading.value = true
@@ -179,6 +192,7 @@ async function handleUpdateRound(roundId: string) {
 }
 
 async function handleCancelRound(roundId: string) {
+  if (!validateParams()) return
   if (!cancelRoundReason.value.trim()) {
     cancelRoundError.value = '请填写取消原因'
     return
@@ -207,6 +221,7 @@ function openCancelRound(roundId: string) {
 }
 
 async function handleSkipRound() {
+  if (!validateParams()) return
   if (!skipForm.value.applicantId || !skipForm.value.reason.trim()) {
     roundError.value = '请选择申请人与填写跳轮原因'
     return
@@ -240,6 +255,14 @@ onMounted(async () => {
   await loadInterviews()
   await loadBookOptions()
 })
+
+watch(
+  () => [route.params.clubId, route.params.activityId],
+  () => {
+    validateParams()
+    if (state.value !== 'error') loadInterviews()
+  }
+)
 </script>
 
 <template>
