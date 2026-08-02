@@ -105,6 +105,7 @@ async function handleSend() {
     sendError.value = '请选择目标候选人'
     return
   }
+  sendError.value = ''
   sendSubmitting.value = true
   const clubId = route.params.clubId as string
   const r = await post(`/org/${clubId}/members/invite`, {
@@ -140,6 +141,7 @@ async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
   const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
   actingId.value = null
   if (r.kind === 'completed') {
+    acceptTarget.value = null
     toast.success(action === 'accept' ? '已整体接受邀请' : '已拒绝邀请')
     await loadData()
   } else {

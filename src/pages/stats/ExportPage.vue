@@ -64,8 +64,19 @@ async function handleDownload(task: ExportTask) {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
   const result = await post<{ downloadUrl: string }>(`${apiScope.prefix}/exports/${task.id}/download`, {})
-  if (result.kind === 'completed' && openAuthorizedDownload(result.data.downloadUrl)) return
-  toast.error('下载地址无效或已过期')
+  if (result.kind === 'completed') {
+    if (openAuthorizedDownload(result.data.downloadUrl)) {
+      toast.success('已开始下载')
+      return
+    }
+    toast.error('下载地址无效，请重新获取')
+    return
+  }
+  if (result.kind === 'accepted') {
+    toast.info('导出正在生成中，请稍后重试')
+    return
+  }
+  toast.error('下载失败，请稍后重试')
 }
 
 onMounted(loadData)

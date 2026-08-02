@@ -889,6 +889,14 @@ const memberHandlers: MockMethod[] = [
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status } }
     },
   },
+  // 个人通知偏好
+  {
+    url: '/api/me/notifications/preferences',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    },
+  },
   // 任命/调岗/免职：候选成员 + 预约命令列表
   {
     url: '/api/org/:clubId/members/appointments',

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { Download, FileText, ShieldCheck, ArrowLeft } from '@lucide/vue'
@@ -16,6 +17,7 @@ interface FileMeta {
 
 const route = useRoute()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const file = ref<FileMeta | null>(null)
 const downloading = ref(false)
 
@@ -26,8 +28,12 @@ async function loadFile() {
   if (result.kind === 'completed') {
     file.value = result.data
     state.value = 'normal'
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
   } else {
-    state.value = 'error'
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
   }
 }
 
@@ -53,6 +59,8 @@ async function handleDownload() {
     } else {
       toast.error('下载地址无效，请重新获取')
     }
+  } else if (result.kind === 'accepted') {
+    toast.info('文件正在处理中，请稍后重试')
   } else {
     toast.error('下载失败，请稍后重试')
   }
@@ -62,7 +70,7 @@ onMounted(loadFile)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="文件预览" @retry="loadFile">
+  <PageStateBoundary :state="state" title="文件预览" :error="pageError" @retry="loadFile">
     <div v-if="file" class="max-w-lg mx-auto">
       <button class="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-4" @click="$router.back()">
         <ArrowLeft :size="16" /> 返回
