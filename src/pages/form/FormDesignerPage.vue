@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
-import { get } from '@/services/client'
+import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
+import { toast } from 'vue-sonner'
 import { Type, AlignLeft, List, FileUp, Calendar, CheckSquare, Plus, X, GripVertical, Save, Eye } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
@@ -13,6 +14,8 @@ const route = useRoute()
 const state = ref<PageState>('loading')
 const formTitle = ref('')
 const fields = ref<Field[]>([])
+const selectedFieldId = ref<string | null>(null)
+const selectedField = computed(() => fields.value.find((f) => f.id === selectedFieldId.value) || null)
 
 const fieldTypes = [
   { type: 'text', label: '单行文本', icon: Type },
@@ -45,6 +48,19 @@ function addField(type: string) {
 
 function removeField(id: string) {
   fields.value = fields.value.filter((f) => f.id !== id)
+  if (selectedFieldId.value === id) selectedFieldId.value = null
+}
+
+async function handleSave() {
+  const formId = route.params.formId as string
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
+  const result = await post(`${apiScope.prefix}/forms/designer/${formId}`, { fields: fields.value })
+  if (result.kind === 'completed') {
+    toast.success('保存成功')
+  } else {
+    toast.error('保存失败，请稍后重试')
+  }
 }
 
 onMounted(loadData)
@@ -57,7 +73,7 @@ onMounted(loadData)
         <h1 class="text-2xl font-bold text-text-primary">{{ formTitle }}</h1>
         <div class="flex gap-2">
           <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"><Eye :size="16" /> 预览</button>
-          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover"><Save :size="16" /> 保存</button>
+          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleSave"><Save :size="16" /> 保存</button>
         </div>
       </div>
 
@@ -89,7 +105,9 @@ onMounted(loadData)
             <div
               v-for="(field, index) in fields"
               :key="field.id"
-              class="flex items-center gap-2 rounded-lg border border-border p-3 hover:border-border-strong"
+              class="flex items-center gap-2 rounded-lg border p-3 cursor-pointer"
+              :class="selectedFieldId === field.id ? 'border-primary bg-primary-subtle' : 'border-border hover:border-border-strong'"
+              @click="selectedFieldId = field.id"
             >
               <GripVertical :size="16" class="text-muted-foreground cursor-grab" />
               <span class="text-xs text-text-secondary w-6">{{ index + 1 }}</span>
@@ -97,7 +115,7 @@ onMounted(loadData)
                 <p class="text-sm text-text-primary">{{ field.label }}</p>
                 <p class="text-xs text-text-secondary">{{ fieldTypes.find((ft) => ft.type === field.type)?.label || field.type }}{{ field.required ? ' · 必填' : '' }}</p>
               </div>
-              <button class="p-1 rounded hover:bg-subtle text-danger" @click="removeField(field.id)"><X :size="14" /></button>
+              <button class="p-1 rounded hover:bg-subtle text-danger" @click.stop="removeField(field.id)"><X :size="14" /></button>
             </div>
           </div>
         </Card>
@@ -105,25 +123,26 @@ onMounted(loadData)
         <!-- 右：属性面板 -->
         <Card class="h-fit">
           <p class="text-sm font-medium text-text-primary mb-3">属性配置</p>
-          <div class="space-y-3 text-sm">
+          <div v-if="selectedField" class="space-y-3 text-sm">
             <div>
               <label class="block text-xs text-text-secondary mb-1">字段标签</label>
-              <input type="text" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary" placeholder="选择字段后编辑" />
+              <input v-model="selectedField.label" type="text" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary" placeholder="字段标签" />
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">描述说明</label>
-              <input type="text" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary" placeholder="可选" />
+              <input v-model="selectedField.description" type="text" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary" placeholder="可选" />
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">字段权限</label>
-              <select class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary">
+              <select v-model="selectedField.permission" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary">
                 <option value="read_write">可读可写</option>
                 <option value="read_only">只读</option>
                 <option value="hidden">隐藏</option>
               </select>
             </div>
-            <label class="flex items-center gap-2"><input type="checkbox" class="rounded border-border" /> 必填</label>
+            <label class="flex items-center gap-2"><input v-model="selectedField.required" type="checkbox" class="rounded border-border" /> 必填</label>
           </div>
+          <p v-else class="text-xs text-text-secondary">选择字段后编辑属性</p>
         </Card>
       </div>
     </div>

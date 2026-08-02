@@ -87,13 +87,39 @@ watch(
 
 onBeforeUnmount(stopCountdown)
 
+// 执行完成后自动进入完成状态
+watch(
+  () => props.executing,
+  (executing, prevExecuting) => {
+    if (prevExecuting && !executing && step.value === 'executing') {
+      step.value = 'done'
+    }
+  }
+)
+
+const remainingSeconds = computed(() => {
+  if (!props.reauthRequired) return 0
+  const elapsed = now.value - openedAt.value
+  return Math.max(0, Math.ceil((props.reauthDeadline - elapsed) / 1000))
+})
+
+const isExpired = computed(() => props.reauthRequired && remainingSeconds.value <= 0)
+
 function handleNext() {
   if (step.value === 'preview') {
+    if (isExpired.value) {
+      reauthError.value = '认证已过期，请重新打开确认'
+      return
+    }
     step.value = 'confirm'
   }
 }
 
 async function handleConfirm() {
+  if (props.reauthRequired && isExpired.value) {
+    reauthError.value = '认证已过期，请重新打开确认'
+    return
+  }
   if (!props.reauthRequired) {
     step.value = 'executing'
     emit('confirm')
@@ -124,16 +150,19 @@ function handleCancel() {
   emit('update:open', false)
 }
 
-const remainingSeconds = computed(() => {
-  if (!props.reauthRequired) return 0
-  const elapsed = now.value - openedAt.value
-  return Math.max(0, Math.ceil((props.reauthDeadline - elapsed) / 1000))
-})
+function handleClose() {
+  emit('update:open', false)
+}
 </script>
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-[480px]">
+    <DialogContent
+      class="max-w-[480px]"
+      :show-close-button="false"
+      @pointer-down-outside.prevent
+      @escape-keydown.prevent
+    >
       <DialogHeader>
         <div class="flex items-center gap-2 mb-1">
           <div class="flex items-center justify-center w-8 h-8 rounded-full bg-warning-subtle text-warning">
@@ -162,10 +191,15 @@ const remainingSeconds = computed(() => {
           <p class="text-xs text-warning mt-2">{{ impactSummary }}</p>
         </div>
 
-        <div v-if="reauthRequired" class="flex items-center gap-2 text-xs text-warning bg-warning-subtle rounded-md px-3 py-2">
+        <div
+          v-if="reauthRequired"
+          class="flex items-center gap-2 text-xs text-warning bg-warning-subtle rounded-md px-3 py-2"
+          :class="isExpired ? 'opacity-60' : ''"
+        >
           <ShieldAlert :size="14" />
-          <span>此操作需要重新认证（剩余 {{ remainingSeconds }} 秒）</span>
+          <span>{{ isExpired ? '认证已过期，请重新打开确认' : `此操作需要重新认证（剩余 ${remainingSeconds} 秒）` }}</span>
         </div>
+        <p v-if="step === 'preview' && reauthError" class="text-xs text-danger" role="alert">{{ reauthError }}</p>
       </div>
 
       <!-- Step: Confirm -->
@@ -188,6 +222,7 @@ const remainingSeconds = computed(() => {
             class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             :class="reauthError ? 'border-danger' : ''"
             placeholder="请输入登录密码"
+            :disabled="isExpired"
             @keyup.enter="handleConfirm"
           />
           <p v-if="reauthError" class="text-xs text-danger" role="alert">{{ reauthError }}</p>
@@ -208,8 +243,20 @@ const remainingSeconds = computed(() => {
 
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
-        <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>
-        <Button v-else variant="destructive" :loading="executing || reauthBusy" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
+        <Button v-if="step === 'preview'" :disabled="isExpired" @click="handleNext">下一步</Button>
+        <Button
+          v-else
+          variant="destructive"
+          :loading="executing || reauthBusy"
+          :disabled="isExpired"
+          @click="handleConfirm"
+        >
+          {{ reauthRequired ? '验证并执行' : confirmLabel }}
+        </Button>
+      </DialogFooter>
+
+      <DialogFooter v-else-if="step === 'done'">
+        <Button @click="handleClose">知道了</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

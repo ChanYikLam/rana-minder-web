@@ -30,6 +30,11 @@ const state = ref<PageState>('loading')
 const items = ref<Invite[]>([])
 const departments = ref<Dept[]>([])
 const isManageView = computed(() => route.meta.view === 'manage')
+const invitationId = computed(() => route.params.invitationId as string | undefined)
+const displayItems = computed(() => {
+  if (isManageView.value || !invitationId.value) return items.value
+  return items.value.filter((i) => i.id === invitationId.value)
+})
 const actingId = ref<string | null>(null)
 
 // 发送邀请弹窗
@@ -160,10 +165,10 @@ onMounted(loadData)
         </button>
       </div>
 
-      <EmptyState v-if="items.length === 0" type="no_data" :title="isManageView ? '暂无入社邀请' : '暂无待处理的入社邀请'" :description="isManageView ? '发出的入社邀请将显示在这里' : '收到邀请后将在这里处理'" />
+      <EmptyState v-if="displayItems.length === 0" type="no_data" :title="isManageView ? '暂无入社邀请' : '暂无待处理的入社邀请'" :description="isManageView ? '发出的入社邀请将显示在这里' : '收到邀请后将在这里处理'" />
 
       <div v-else class="space-y-3">
-        <Card v-for="inv in items" :key="inv.id">
+        <Card v-for="inv in displayItems" :key="inv.id">
           <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
               <div class="flex items-center justify-center w-10 h-10 rounded-full bg-primary-subtle text-primary">

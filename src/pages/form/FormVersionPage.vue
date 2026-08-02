@@ -17,6 +17,7 @@ const formTitle = ref('')
 const versions = ref<FormVersion[]>([])
 const currentVersion = ref<FormVersion | null>(null)
 const formData = reactive<Record<string, string>>({})
+const formErrors = ref<Record<string, string>>({})
 const submitting = ref(false)
 const saving = ref(false)
 
@@ -37,6 +38,10 @@ async function loadForm() {
 }
 
 async function handleSaveDraft() {
+  if (currentVersion.value?.status === 'published') {
+    toast.error('已发布版本不可覆盖，请先创建新版本')
+    return
+  }
   saving.value = true
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
@@ -54,9 +59,31 @@ async function handleSaveDraft() {
 }
 
 async function handleSubmit() {
+  if (!currentVersion.value) return
+  formErrors.value = {}
+  for (const field of currentVersion.value.fields) {
+    if (field.required && !formData[field.id]) {
+      formErrors.value[field.id] = `${field.label}为必填项`
+    }
+  }
+  if (Object.keys(formErrors.value).length > 0) return
+
   submitting.value = true
-  await new Promise((r) => setTimeout(r, 800))
+  const formId = route.params.formId as string
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { submitting.value = false; return }
+  const result = await post(`${apiScope.prefix}/forms/${formId}/submissions`, {
+    version: currentVersion.value.version,
+    answers: formData,
+  })
   submitting.value = false
+  if (result.kind === 'completed') {
+    toast.success('提交成功')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error(result.error.message || '提交失败')
+  } else {
+    toast.error('提交失败，请稍后重试')
+  }
 }
 
 onMounted(loadForm)
@@ -84,7 +111,8 @@ onMounted(loadForm)
               :value="formData[field.id] || ''"
               type="text"
               :readonly="field.readonly"
-              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              class="w-full h-10 px-3 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
               @input="formData[field.id] = ($event.target as HTMLInputElement).value"
             />
 
@@ -93,7 +121,8 @@ onMounted(loadForm)
               :id="field.id"
               :value="formData[field.id] || ''"
               rows="4"
-              class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              class="w-full px-3 py-2 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
               @input="formData[field.id] = ($event.target as HTMLTextAreaElement).value"
             />
 
@@ -101,7 +130,8 @@ onMounted(loadForm)
               v-else-if="field.type === 'select'"
               :id="field.id"
               :value="formData[field.id] || ''"
-              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              class="w-full h-10 px-3 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
               @change="formData[field.id] = ($event.target as HTMLSelectElement).value"
             >
               <option value="">请选择</option>
@@ -110,11 +140,14 @@ onMounted(loadForm)
 
             <button
               v-else-if="field.type === 'file'"
-              class="w-full h-24 rounded-md border border-dashed border-border flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+              class="w-full h-24 rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
             >
               <Upload :size="20" />
               <span class="text-xs">点击上传文件</span>
             </button>
+
+            <p v-if="formErrors[field.id]" class="mt-1 text-xs text-danger" role="alert">{{ formErrors[field.id] }}</p>
           </div>
         </div>
       </Card>

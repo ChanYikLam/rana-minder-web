@@ -294,9 +294,9 @@ async function handleLogout() {
           <p class="text-xs text-text-secondary mb-1">当前社团</p>
           <div class="flex items-center gap-2">
             <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs font-medium">
-              {{ workspace.currentClubName?.charAt(0) || '社' }}
+              {{ workspace.currentClubName?.charAt(0) || '?' }}
             </div>
-            <span class="text-sm font-medium">{{ workspace.currentClubName || '计算机协会' }}</span>
+            <span class="text-sm font-medium">{{ workspace.currentClubName || '未选择社团' }}</span>
           </div>
         </div>
         <div v-else-if="isAdmin" class="p-3 border-b">
@@ -363,9 +363,9 @@ async function handleLogout() {
             <p class="text-xs text-text-secondary mb-1">当前社团</p>
             <div class="flex items-center gap-2">
               <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs font-medium">
-                {{ workspace.currentClubName?.charAt(0) || '社' }}
+                {{ workspace.currentClubName?.charAt(0) || '?' }}
               </div>
-              <span class="text-sm font-medium">{{ workspace.currentClubName || '计算机协会' }}</span>
+              <span class="text-sm font-medium">{{ workspace.currentClubName || '未选择社团' }}</span>
             </div>
           </div>
           <div v-else-if="isAdmin" class="px-4 pt-3">

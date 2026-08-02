@@ -362,6 +362,7 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       late: 'late',
       absent: 'absent',
       start: 'in_progress',
+      invalidate: 'invalidated',
     },
     leave: { rearrange: 'scheduled' },
     late: { rearrange: 'scheduled', start: 'in_progress' },

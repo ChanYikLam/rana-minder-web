@@ -128,7 +128,6 @@ const USER_APPLICANT_MAP: Record<string, string> = {
   'user-applicant-001': 'u-001',
   'user-applicant-002': 'u-002',
   'user-applicant-003': 'u-006',
-  'user-candidate-001': 'u-003',
 }
 
 function actorApplicantId(user: { id: string }): string | null {
@@ -422,6 +421,24 @@ const recHandlers: MockMethod[] = [
       return ok({ items, nextCursor: null })
     },
   },
+  // 报名申请详情（管理视角）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const app = rdb.recruitmentApplications.find((a) => a.activityId === query.activityId && a.applicantId === query.applicantId)
+      if (!app) return notFound('申请不存在')
+      return ok({
+        id: app.id, activityId: app.activityId, applicantId: app.applicantId, applicantName: app.applicantName,
+        applicantStudentId: app.studentId, status: app.status, preferences: app.preferences,
+        allowAdjustment: app.allowAdjustment, formVersion: app.formVersion, answers: app.answers,
+        paths: app.paths, submittedAt: app.submittedAt, withdrawnAt: app.withdrawnAt,
+        identityAnomalyAt: app.identityAnomalyAt, recoveryWindowDeadline: app.recoveryWindowDeadline,
+        version: app.version,
+      })
+    },
+  },
   // 提交报名申请
   {
     url: '/api/activity/recruitment/:activityId/apply',
@@ -579,6 +596,25 @@ const recHandlers: MockMethod[] = [
       return ok({ items, nextCursor: null })
     },
   },
+  // 面试详情（管理视角）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/interviews/:interviewId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
+      if (!it) return notFound('面试不存在')
+      const a = rdb.findAnyActivity(it.activityId)
+      const round = a?.rounds.find((r) => r.id === it.roundId)
+      const app = rdb.recruitmentApplications.find((x) => x.applicantId === it.applicantId)
+      return ok({
+        id: it.id, activityId: it.activityId, activityTitle: a?.title || '', roundId: it.roundId, roundName: round?.name || '',
+        applicantId: it.applicantId, applicantName: app?.applicantName || it.applicantName, status: it.status,
+        scheduledTime: it.startAt, endTime: it.endAt, interviewers: [], attendance: it.attendance,
+        invalidReason: it.invalidReason, skipReason: it.skipReason, cancelReason: it.cancelReason, version: it.version,
+      })
+    },
+  },
   // 管理代预约面试
   {
     url: '/api/org/:clubId/recruitment/:activityId/interviews/book',
@@ -723,7 +759,12 @@ const recHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { rating?: number; comment?: string }
-      const app = rdb.recruitmentApplications.find((a) => a.id === query.reviewId && a.activityId === query.activityId)
+      // reviewId 对应 recruitmentReviews.id（如 rev-001），需先定位到 applicantId
+      const review = rdb.recruitmentReviews.find((r) => r.id === query.reviewId && r.activityId === query.activityId)
+      const applicantId = review?.applicantId
+      const app = applicantId
+        ? rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
+        : undefined
       if (!app) return notFound('申请人不存在')
       const me = actorInfo(url)
       const r = rdb.submitReview(query.activityId, app.applicantId, {
@@ -771,6 +812,21 @@ const recHandlers: MockMethod[] = [
           sentAt: i.sentAt, acceptedAt: i.acceptedAt, expiredAt: i.expiredAt, casdoorSync: i.casdoorSync, version: i.version,
         }))
       return ok({ items, nextCursor: null })
+    },
+  },
+  // 邀请详情（管理视角）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/invitations/:invitationId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const inv = rdb.recruitmentInvitations.find((i) => i.id === query.invitationId && i.activityId === query.activityId)
+      if (!inv) return notFound('邀请不存在')
+      return ok({
+        id: inv.id, activityId: inv.activityId, applicantId: inv.applicantId, applicantName: inv.applicantName,
+        departmentId: inv.departmentId, departmentName: inv.departmentName, status: inv.status,
+        sentAt: inv.sentAt, acceptedAt: inv.acceptedAt, expiredAt: inv.expiredAt, casdoorSync: inv.casdoorSync, version: inv.version,
+      })
     },
   },
   // 创建邀请
@@ -1160,6 +1216,22 @@ const jointHandlers: MockMethod[] = [
           submittedAt: a.submittedAt, version: a.version,
         }))
       return ok({ items, nextCursor: null })
+    },
+  },
+  // 联合申请详情（管理视角）
+  {
+    url: '/api/org/:clubId/joint/:jointId/applications/:applicantId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!canManageJoint(url, query.clubId)) return forbidden()
+      const app = rdb.findJointApplication(query.jointId, query.applicantId)
+      if (!app) return notFound('联合申请不存在')
+      return ok({
+        id: app.id, jointId: app.jointId, applicantId: app.applicantId, applicantName: app.applicantName,
+        applicantStudentId: app.studentId, status: app.status, consented: app.consented,
+        consentAt: app.consentAt, agreementVersion: app.agreementVersion, allowJointAdjustment: app.allowJointAdjustment,
+        answers: app.answers, formVersion: app.formVersion, submittedAt: app.submittedAt, version: app.version,
+      })
     },
   },
   // 提交联合报名

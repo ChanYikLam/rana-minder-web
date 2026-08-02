@@ -42,12 +42,10 @@ export function useRequest<T>(
       } else {
         state.value = 'normal'
       }
-    } else if (result.kind === 'accepted') {
+    } else if (result.kind === 'accepted' || result.kind === 'external_uncertain') {
+      // 异步处理中：保持 loading，不展示错误，由调用方展示"处理中"提示
       state.value = 'loading'
-      error.value = { code: 'IFC-ERR-014', message: '操作正在处理中' }
-    } else if (result.kind === 'external_uncertain') {
-      state.value = 'loading'
-      error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
+      error.value = null
     } else if (result.kind === 'concurrency_conflict') {
       state.value = 'error'
       error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
