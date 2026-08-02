@@ -271,9 +271,9 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       skip_round: 'cancelled',
       invalidate: 'invalidated',
     },
-    leave: { rearrange: 'scheduled', cancel: 'cancelled' },
-    late: { rearrange: 'scheduled', start: 'in_progress', cancel: 'cancelled' },
-    absent: { rearrange: 'scheduled', cancel: 'cancelled' },
+    leave: { rearrange: 'scheduled', cancel: 'cancelled', invalidate: 'invalidated' },
+    late: { rearrange: 'scheduled', start: 'in_progress', cancel: 'cancelled', invalidate: 'invalidated' },
+    absent: { rearrange: 'scheduled', cancel: 'cancelled', invalidate: 'invalidated' },
     in_progress: {
       complete: 'completed',
       invalidate: 'invalidated',

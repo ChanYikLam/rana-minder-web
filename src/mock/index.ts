@@ -446,7 +446,7 @@ const organizationHandlers: MockMethod[] = [
           },
           todos: [
             { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted').length },
-            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted').length },
+            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted' && !rdb.recruitmentInterviews.some((i) => i.activityId === a.activityId && i.applicantId === a.applicantId)).length },
             { id: 'todo-003', type: 'invitation_pending', title: '待发送邀请', count: rdb.recruitmentInvitations.filter((i) => i.clubId === query.clubId && i.status === 'pending_acceptance').length },
           ],
           recentActivities: [],
@@ -866,7 +866,7 @@ const memberHandlers: MockMethod[] = [
       const candidateId = actorCandidateId(user)
       const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
       if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
-      if (candidateId && inv.candidateId !== candidateId) return forbidden()
+      if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       return {
         code: 0,
         data: {
@@ -1257,7 +1257,7 @@ const platformHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const user = resolveMockUser(url)
-      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      if (!getPermissions(user, query.clubId).includes('club:form:design')) return forbidden()
       return {
         code: 0,
         data: {
@@ -1279,7 +1279,7 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { fields: unknown[] } } }) => {
       const user = resolveMockUser(url)
-      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      if (!getPermissions(user, query.clubId).includes('club:form:design')) return forbidden()
       const fields = body.input?.fields
       if (!Array.isArray(fields)) return businessError('fields 必须为数组')
       for (const f of fields) {
@@ -1348,7 +1348,9 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/forms/designer/:formId/save',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:form:design')) return forbidden()
       return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
     },
   },

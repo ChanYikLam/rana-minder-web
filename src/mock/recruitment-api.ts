@@ -10,7 +10,7 @@ import type { MockMethod } from './types'
 // Node HTTP types via any (mock layer, no @types/node in remote baseline)
 type RawReq = any
 type RawRes = any
-import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP } from './auth'
+import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, mockUsers } from './auth'
 import * as rdb from './db-recruitment'
 
 /** 错误信封类型 */
@@ -610,11 +610,15 @@ const recHandlers: MockMethod[] = [
       if (!it) return notFound('面试不存在')
       const a = rdb.findAnyActivity(it.activityId)
       const round = a?.rounds.find((r) => r.id === it.roundId)
-      const app = rdb.recruitmentApplications.find((x) => x.applicantId === it.applicantId)
+      const app = rdb.recruitmentApplications.find((x) => x.activityId === it.activityId && x.applicantId === it.applicantId)
+      const interviewers = it.interviewerIds.map((id) => {
+        const u = mockUsers[id]
+        return { id, name: u?.name || id }
+      })
       return ok({
         id: it.id, activityId: it.activityId, activityTitle: a?.title || '', roundId: it.roundId, roundName: round?.name || '',
         applicantId: it.applicantId, applicantName: app?.applicantName || it.applicantName, status: it.status,
-        scheduledTime: it.startAt, endTime: it.endAt, interviewers: [], attendance: it.attendance,
+        scheduledTime: it.startAt, endTime: it.endAt, interviewers, attendance: it.attendance,
         invalidReason: it.invalidReason, skipReason: it.skipReason, cancelReason: it.cancelReason, version: it.version,
       })
     },

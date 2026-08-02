@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -23,6 +23,7 @@ const saving = ref(false)
 
 interface FileUploadState { file: File | null; status: 'idle' | 'scanning' | 'safe' | 'unsafe'; message: string }
 const fileUploads = reactive<Record<string, FileUploadState>>({})
+const fileTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function getFileUpload(fieldId: string): FileUploadState {
   if (!fileUploads[fieldId]) {
@@ -40,14 +41,23 @@ function handleFileSelect(fieldId: string, event: Event) {
   upload.status = 'scanning'
   upload.message = '文件正在安全检查中...'
   formData[fieldId] = file.name
+  // 清理已有定时器，避免重选文件后旧回调覆盖新状态
+  const existing = fileTimers.get(fieldId)
+  if (existing) clearTimeout(existing)
   // 模拟安全检查；实际应调用后端上传/检查接口
-  setTimeout(() => {
+  fileTimers.set(fieldId, setTimeout(() => {
     upload.status = 'safe'
     upload.message = '文件安全检查通过'
-  }, 2000)
+    fileTimers.delete(fieldId)
+  }, 2000))
   // 允许重选同一文件
   input.value = ''
 }
+
+onBeforeUnmount(() => {
+  fileTimers.forEach((t) => clearTimeout(t))
+  fileTimers.clear()
+})
 
 function handleFileClick(fieldId: string) {
   const input = document.getElementById(`file-input-${fieldId}`) as HTMLInputElement | null
