@@ -40,7 +40,7 @@ const filtered = computed(() => {
       ...group,
       items: group.items.filter((it) => isSubsequence(normalized(it.label + it.subtitle || ''), q)),
     }))
-    .filter((group) => group.items.length > 0 && group.items.length > 0)
+    .filter((group) => group.items.length > 0)
 })
 
 function toggle(id: string) {

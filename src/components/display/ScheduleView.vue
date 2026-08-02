@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { CalendarDays, List, AlertTriangle } from '@lucide/vue'
+import { formatDateCn, formatDateKey, formatTimeCn, formatWeekdayCn } from '@/lib/date'
 
 export interface ScheduleSlot {
   id: string
@@ -52,9 +53,9 @@ const conflicts = computed(() => {
 const weekDays = computed(() => {
   const days = new Map<string, NormalizedSlot[]>()
   for (const it of normalized.value) {
-    const key = it.start.toDateString()
-    if (!days.has(key)) days.set(key, [])
-    days.get(key)!.push(it)
+    const shanghaiDate = formatDateKey(it.start)
+    if (!days.has(shanghaiDate)) days.set(shanghaiDate, [])
+    days.get(shanghaiDate)!.push(it)
   }
   return Array.from(days.entries()).sort(([a], [b]) => a.localeCompare(b))
 })
@@ -108,7 +109,7 @@ const weekDays = computed(() => {
           </span>
         </div>
         <p class="text-xs text-text-secondary mt-0.5">
-          {{ it.start.toLocaleString('zh-CN') }} – {{ it.end.toTimeString().slice(0, 5) }}
+          {{ formatDateCn(it.start) }} – {{ formatTimeCn(it.end) }}
           <template v-if="it.location"> · {{ it.location }}</template>
           <template v-if="it.interviewer"> · 面试官：{{ it.interviewer }}</template>
         </p>
@@ -119,7 +120,7 @@ const weekDays = computed(() => {
     <div v-else class="space-y-3">
       <div v-for="[day, slots] in weekDays" :key="day" class="rounded-md border border-border">
         <p class="px-3 py-1.5 text-xs font-medium text-text-secondary bg-subtle border-b border-border">
-          {{ new Date(day).toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' }) }}
+          {{ formatWeekdayCn(`${day}T12:00:00+08:00`) }}
         </p>
         <div class="p-2 space-y-1.5">
           <div
@@ -128,7 +129,7 @@ const weekDays = computed(() => {
             class="px-2 py-1.5 rounded bg-elevated text-sm flex items-center justify-between gap-2"
             :class="conflicts.has(it.id) || it.conflictWith ? 'bg-danger-subtle' : ''"
           >
-            <span class="text-text-primary">{{ it.start.toTimeString().slice(0, 5) }} {{ it.title }}</span>
+            <span class="text-text-primary">{{ formatTimeCn(it.start) }} {{ it.title }}</span>
             <span v-if="conflicts.has(it.id) || it.conflictWith" class="text-xs text-danger shrink-0">冲突</span>
           </div>
         </div>

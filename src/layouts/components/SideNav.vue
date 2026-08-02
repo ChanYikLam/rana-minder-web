@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import WorkspaceNav from './WorkspaceNav.vue'
 import ClubSwitcher from '@/components/business/ClubSwitcher.vue'
 import type { SideNavGroup, PersonalLink } from './sideNav'
 
-defineProps<{
+const props = defineProps<{
   clubId: string | null
   isAdmin: boolean
   showClubIndicator: boolean
@@ -14,6 +15,9 @@ defineProps<{
 }>()
 
 const route = useRoute()
+
+// 需要社团上下文的链接在无社团时隐藏，避免 :to="" 生成非法路由
+const visibleLinks = computed(() => props.personalLinks.filter((l) => !l.requireClub || !!props.clubId))
 
 function active(path: string): boolean {
   return path.length > 0 && (route.path === path || route.path.startsWith(`${path}/`))
@@ -36,7 +40,7 @@ function active(path: string): boolean {
     <nav class="p-2" role="navigation" aria-label="个人导航">
       <p class="px-3 pt-1 pb-1 text-xs font-medium text-text-secondary">发现与个人</p>
       <router-link
-        v-for="link in personalLinks"
+        v-for="link in visibleLinks"
         :key="link.label"
         :to="link.path"
         class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"

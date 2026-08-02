@@ -13,14 +13,20 @@ export interface FilterField {
   label: string
   options: FilterOption[]
   multiple?: boolean
-  quickRange?: { label: string; value: string; offsetDays: number }[]
+}
+
+export interface DeadlineShortcut {
+  label: string
+  fieldKey: string
+  /** 相对当前时刻的截止（天，正数=未来） */
+  offsetDays: number
 }
 
 const props = defineProps<{
   fields: FilterField[]
   searchable?: boolean
   searchPlaceholder?: string
-  deadlineShortcuts?: { label: string; key: string }[]
+  deadlineShortcuts?: DeadlineShortcut[]
 }>()
 
 const emit = defineEmits<{
@@ -42,8 +48,9 @@ function toggle(key: string, val: string) {
   emitChange()
 }
 
-function applyShortcut(key: string) {
-  values.value[key] = [key]
+function applyShortcut(fieldKey: string, offsetDays: number) {
+  const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)
+  values.value[fieldKey] = [target.toISOString()]
   emitChange()
 }
 
@@ -59,7 +66,7 @@ function emitChange() {
     if (v.length === 1 && !props.fields.find((f) => f.key === k)?.multiple) out[k] = v[0]
     else if (v.length > 0) out[k] = v
   }
-  out.search = search.value
+  if (search.value) out.search = search.value
   emit('change', out)
 }
 </script>
@@ -119,11 +126,11 @@ function emitChange() {
           <div class="flex flex-wrap gap-1.5">
             <button
               v-for="s in deadlineShortcuts"
-              :key="s.key"
+              :key="s.label"
               type="button"
               class="rounded-md border px-2.5 py-1 text-xs transition-colors"
-              :class="values[s.key]?.length ? 'border-primary bg-primary-subtle text-primary' : 'border-border text-text-secondary hover:border-border-strong'"
-              @click="applyShortcut(s.key)"
+              :class="values[s.fieldKey]?.length ? 'border-primary bg-primary-subtle text-primary' : 'border-border text-text-secondary hover:border-border-strong'"
+              @click="applyShortcut(s.fieldKey, s.offsetDays)"
             >
               {{ s.label }}
             </button>

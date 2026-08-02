@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { LoaderCircle, Clock3, CheckCircle2, RefreshCw } from '@lucide/vue'
+import { LoaderCircle, Clock3, CheckCircle2, RefreshCw, XCircle } from '@lucide/vue'
 
 const props = withDefaults(defineProps<{
   status: 'uploading' | 'checking' | 'saving' | 'syncing' | 'generating' | 'approved' | 'pending' | 'failed'
@@ -20,7 +20,7 @@ const config = computed(() => {
     case 'approved':
       return { icon: CheckCircle2, cls: 'bg-success-subtle text-success', spin: false }
     case 'failed':
-      return { icon: CheckCircle2, cls: 'bg-danger-subtle text-danger', spin: false }
+      return { icon: XCircle, cls: 'bg-danger-subtle text-danger', spin: false }
     default:
       return { icon: LoaderCircle, cls: 'bg-subtle text-text-secondary', spin: false }
   }

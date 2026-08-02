@@ -1,0 +1,57 @@
+/**
+ * 平台时区（UTC+8）显示工具。
+ * 排期/日程类展示统一使用 Asia/Shanghai，避免依赖浏览器本地时区导致错位。
+ */
+
+export const PLATFORM_TIMEZONE = 'Asia/Shanghai'
+
+const dateTimeFmt = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: PLATFORM_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+const timeFmt = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: PLATFORM_TIMEZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+const weekdayFmt = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: PLATFORM_TIMEZONE,
+  weekday: 'long',
+  month: 'long',
+  day: 'numeric',
+})
+
+/** 2025-08-02 12:34（平台时区） */
+export function formatDateCn(value: string | Date): string {
+  return dateTimeFmt.format(new Date(value))
+}
+
+/** 平台时区的自然日键：2025-08-02（作为分组/key 使用，可正确排序） */
+export function formatDateKey(value: string | Date): string {
+  const d = new Date(value)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: PLATFORM_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
+  return parts
+}
+
+/** 12:34（平台时区） */
+export function formatTimeCn(value: string | Date): string {
+  return timeFmt.format(new Date(value)).replace(/^24:/, '00:')
+}
+
+/** 8月2日 星期六（平台时区） */
+export function formatWeekdayCn(value: string | Date): string {
+  return weekdayFmt.format(new Date(value))
+}
