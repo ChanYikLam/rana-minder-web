@@ -562,7 +562,7 @@ const personalHandlers: MockMethod[] = [
           return {
             id: a.id, type: 'joint', title: `联合报名：${ja?.title || a.jointId}`,
             description: '联合活动报名进行中',
-            submittedAt: a.submittedAt, link: `/explore/activities/${a.jointId}`,
+            submittedAt: a.submittedAt, link: `/activity/joint/${a.jointId}`,
             activityId: '', status: a.status,
           }
         })
@@ -1236,14 +1236,16 @@ const platformHandlers: MockMethod[] = [
     url: '/api/admin/clubs',
     method: 'get',
     response: () => {
+      const clubIds = ['club-001', 'club-002', 'club-003']
+      const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会' }
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', status: 'approved', memberCount: 5, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-002', name: '电子设计协会', status: 'approved', memberCount: 3, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-003', name: '数学建模协会', status: 'approved', memberCount: 4, createdAt: '2022-09-01', groupMapped: true },
-          ],
+          items: clubIds.map((id) => ({
+            id, name: clubNames[id], status: 'approved',
+            memberCount: db.listMembers(id).filter((m) => m.status === 'active').length,
+            createdAt: '2022-09-01', groupMapped: true,
+          })),
           nextCursor: null,
         },
       }
@@ -1253,11 +1255,13 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/forms/designer/:formId',
     method: 'get',
-    response: () => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
       return {
         code: 0,
         data: {
-          id: 'form-001', title: '招新报名表', status: 'published',
+          id: query.formId || 'form-001', title: '招新报名表', status: 'published',
           fields: [
             { id: 'f1', type: 'text', label: '自我介绍', required: true, readonly: false, permission: 'read_write', options: null, description: '简要介绍自己' },
             { id: 'f2', type: 'select', label: '意向部门', required: true, readonly: false, permission: 'read_write', options: ['技术部', '运营部', '设计部'], description: null },
@@ -1267,6 +1271,23 @@ const platformHandlers: MockMethod[] = [
           version: 1,
         },
       }
+    },
+  },
+  // 表单设计器保存
+  {
+    url: '/api/org/:clubId/forms/designer/:formId',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { fields: unknown[] } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const fields = body.input?.fields
+      if (!Array.isArray(fields)) return businessError('fields 必须为数组')
+      for (const f of fields) {
+        if (!f || typeof f !== 'object' || !('id' in f) || !('type' in f)) {
+          return businessError('每个字段必须包含 id 和 type')
+        }
+      }
+      return { code: 0, data: { id: query.formId, status: 'published', version: 2, savedAt: new Date().toISOString() } }
     },
   },
   // 邮件配置

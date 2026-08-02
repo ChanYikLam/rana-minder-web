@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount } from 'vue'
-import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound } from '@lucide/vue'
+import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound, AlertCircle } from '@lucide/vue'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,7 @@ interface Props {
   reauthRequired?: boolean
   reauthDeadline?: number
   executing?: boolean
+  error?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -37,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   reauthRequired: false,
   reauthDeadline: 10 * 60 * 1000,
   executing: false,
+  error: null,
 })
 
 const emit = defineEmits<{
@@ -87,12 +89,17 @@ watch(
 
 onBeforeUnmount(stopCountdown)
 
-// 执行完成后自动进入完成状态
+// 执行完成后：成功进入完成状态，失败回到确认步骤展示错误
 watch(
   () => props.executing,
   (executing, prevExecuting) => {
     if (prevExecuting && !executing && step.value === 'executing') {
-      step.value = 'done'
+      if (props.error) {
+        // 失败：回到确认步骤，允许重试
+        step.value = 'confirm'
+      } else {
+        step.value = 'done'
+      }
     }
   }
 )
@@ -210,6 +217,11 @@ function handleClose() {
         </div>
         <div class="text-sm text-text-secondary">
           <p>即将执行：<span class="font-medium text-primary">{{ title }}</span></p>
+        </div>
+
+        <div v-if="error" class="flex items-start gap-2 rounded-md bg-danger-subtle p-3">
+          <AlertCircle :size="16" class="text-danger shrink-0 mt-0.5" />
+          <p class="text-xs text-danger">{{ error }}</p>
         </div>
 
         <div v-if="reauthRequired" class="space-y-2">

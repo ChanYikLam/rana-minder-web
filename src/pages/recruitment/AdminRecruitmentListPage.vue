@@ -95,6 +95,7 @@ onMounted(loadData)
         impact-summary="强制结束后活动进入平台强制结束状态，社团不可再恢复。"
         confirm-label="确认强制结束"
         :executing="busy"
+        :error="reasonError || null"
         @confirm="handleForceComplete"
       >
         <template #extra>

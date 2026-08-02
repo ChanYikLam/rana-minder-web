@@ -45,7 +45,10 @@ export function useRequest<T>(
     } else if (result.kind === 'accepted' || result.kind === 'external_uncertain') {
       // 异步处理中：保持 loading，不展示错误，由调用方展示"处理中"提示
       state.value = 'loading'
-      error.value = null
+      // external_uncertain 保留 supportId 供调用方在需要时引用（不作为错误展示）
+      error.value = result.kind === 'external_uncertain'
+        ? { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
+        : null
     } else if (result.kind === 'concurrency_conflict') {
       state.value = 'error'
       error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }

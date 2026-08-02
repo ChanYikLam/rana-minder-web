@@ -21,6 +21,39 @@ const formErrors = ref<Record<string, string>>({})
 const submitting = ref(false)
 const saving = ref(false)
 
+interface FileUploadState { file: File | null; status: 'idle' | 'scanning' | 'safe' | 'unsafe'; message: string }
+const fileUploads = reactive<Record<string, FileUploadState>>({})
+
+function getFileUpload(fieldId: string): FileUploadState {
+  if (!fileUploads[fieldId]) {
+    fileUploads[fieldId] = { file: null, status: 'idle', message: '' }
+  }
+  return fileUploads[fieldId]
+}
+
+function handleFileSelect(fieldId: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const upload = getFileUpload(fieldId)
+  upload.file = file
+  upload.status = 'scanning'
+  upload.message = '文件正在安全检查中...'
+  formData[fieldId] = file.name
+  // 模拟安全检查；实际应调用后端上传/检查接口
+  setTimeout(() => {
+    upload.status = 'safe'
+    upload.message = '文件安全检查通过'
+  }, 2000)
+  // 允许重选同一文件
+  input.value = ''
+}
+
+function handleFileClick(fieldId: string) {
+  const input = document.getElementById(`file-input-${fieldId}`) as HTMLInputElement | null
+  input?.click()
+}
+
 async function loadForm() {
   state.value = 'loading'
   const formId = route.params.formId as string
@@ -62,7 +95,16 @@ async function handleSubmit() {
   if (!currentVersion.value) return
   formErrors.value = {}
   for (const field of currentVersion.value.fields) {
-    if (field.required && !formData[field.id]) {
+    if (field.type === 'file') {
+      const upload = getFileUpload(field.id)
+      if (field.required && !upload.file) {
+        formErrors.value[field.id] = `${field.label}为必填项`
+      } else if (upload.file && upload.status === 'scanning') {
+        formErrors.value[field.id] = `${field.label}附件安全检查中，请稍后提交`
+      } else if (upload.file && upload.status === 'unsafe') {
+        formErrors.value[field.id] = `${field.label}附件未通过安全检查`
+      }
+    } else if (field.required && !formData[field.id]) {
       formErrors.value[field.id] = `${field.label}为必填项`
     }
   }
@@ -138,14 +180,31 @@ onMounted(loadForm)
               <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
             </select>
 
-            <button
-              v-else-if="field.type === 'file'"
-              class="w-full h-24 rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
-              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
-            >
-              <Upload :size="20" />
-              <span class="text-xs">点击上传文件</span>
-            </button>
+            <div v-else-if="field.type === 'file'" class="relative">
+              <input
+                :id="`file-input-${field.id}`"
+                type="file"
+                class="hidden"
+                @change="handleFileSelect(field.id, $event)"
+              />
+              <button
+                :id="field.id"
+                type="button"
+                class="w-full h-24 rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+                :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
+                @click="handleFileClick(field.id)"
+              >
+                <Upload :size="20" />
+                <span class="text-xs">{{ getFileUpload(field.id).file ? getFileUpload(field.id).file!.name : '点击上传文件' }}</span>
+              </button>
+              <p
+                v-if="getFileUpload(field.id).message"
+                class="text-xs mt-1"
+                :class="getFileUpload(field.id).status === 'safe' ? 'text-success' : 'text-warning'"
+              >
+                {{ getFileUpload(field.id).message }}
+              </p>
+            </div>
 
             <p v-if="formErrors[field.id]" class="mt-1 text-xs text-danger" role="alert">{{ formErrors[field.id] }}</p>
           </div>

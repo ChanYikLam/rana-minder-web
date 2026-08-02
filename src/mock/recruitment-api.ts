@@ -427,6 +427,8 @@ const recHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
+      const act = rdb.findActivity(query.clubId, query.activityId)
+      if (!act) return notFound('活动不存在')
       const app = rdb.recruitmentApplications.find((a) => a.activityId === query.activityId && a.applicantId === query.applicantId)
       if (!app) return notFound('申请不存在')
       return ok({
@@ -602,6 +604,8 @@ const recHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const act = rdb.findActivity(query.clubId, query.activityId)
+      if (!act) return notFound('活动不存在')
       const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
       if (!it) return notFound('面试不存在')
       const a = rdb.findAnyActivity(it.activityId)
@@ -820,6 +824,8 @@ const recHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
+      const act = rdb.findActivity(query.clubId, query.activityId)
+      if (!act) return notFound('活动不存在')
       const inv = rdb.recruitmentInvitations.find((i) => i.id === query.invitationId && i.activityId === query.activityId)
       if (!inv) return notFound('邀请不存在')
       return ok({
@@ -930,6 +936,17 @@ const recHandlers: MockMethod[] = [
           ],
         }],
       })
+    },
+  },
+  // 表单提交
+  {
+    url: '/api/org/:clubId/forms/:formId/submissions',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: unknown }) => {
+      const input = unwrap(body) as { version?: number; answers?: Record<string, unknown> }
+      if (!input.version) return businessError('必须指定表单版本')
+      if (!input.answers || typeof input.answers !== 'object') return businessError('answers 不能为空')
+      return ok({ formId: query.formId, version: input.version, status: 'submitted', submittedAt: new Date().toISOString() })
     },
   },
   // 文件预览
@@ -1224,6 +1241,8 @@ const jointHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageJoint(url, query.clubId)) return forbidden()
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja || !ja.clubs.some((c) => c.clubId === query.clubId)) return notFound('联合活动不存在')
       const app = rdb.findJointApplication(query.jointId, query.applicantId)
       if (!app) return notFound('联合申请不存在')
       return ok({

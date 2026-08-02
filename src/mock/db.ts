@@ -431,7 +431,6 @@ export function executeDepartmentApplication(appId: string): { ok: boolean; erro
         id: 'pos-' + Date.now(), departmentId: app.targetDeptId || '', departmentName: app.targetDeptName || '',
         title: '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active',
       })
-      member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'join', departmentName: app.targetDeptName || '', at: now })
     }
     if (app.type === 'leave' || app.type === 'transfer') {
       const pos = member.positions.find((p) => p.status === 'active' && p.departmentName === app.currentDept)
@@ -439,8 +438,11 @@ export function executeDepartmentApplication(appId: string): { ok: boolean; erro
         pos.endDate = new Date().toISOString().slice(0, 10)
         pos.status = 'ended'
       }
-      member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: app.currentDept, at: now })
     }
+    // 统一历史记录语义：transfer 写单条 'transfer'，join/leave 各写一条
+    const action = app.type === 'transfer' ? 'transfer' : app.type
+    const deptName = app.type === 'leave' ? app.currentDept : (app.targetDeptName || '')
+    member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action, departmentName: deptName, at: now })
   }
   return { ok: true, app }
 }
