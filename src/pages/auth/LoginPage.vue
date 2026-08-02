@@ -3,7 +3,12 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
-import { LogIn, Compass, ShieldCheck, Users, UserCog, ClipboardCheck, User, GraduationCap } from '@lucide/vue'
+import { DEMO_ROLES } from '@/mock/auth'
+import type { MockRole } from '@/mock/auth'
+import {
+  ShieldCheck, Users, UserCog, Building2, ClipboardCheck, User, GraduationCap,
+  LogIn, Compass,
+} from '@lucide/vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -13,14 +18,17 @@ const loggingIn = ref(false)
 const loginError = ref<string | null>(null)
 const selectedRole = ref('leader')
 
-const mockRoles = [
-  { key: 'admin', label: '超级管理员', desc: '平台全局管理', icon: ShieldCheck },
-  { key: 'leader', label: '社团负责人', desc: '社团管理全部功能', icon: Users },
-  { key: 'hr', label: '人事', desc: '招新与成员管理', icon: UserCog },
-  { key: 'interviewer', label: '面试官', desc: '面试评价', icon: ClipboardCheck },
-  { key: 'member', label: '普通成员', desc: '查看本人信息', icon: User },
-  { key: 'applicant', label: '申请人', desc: '报名与查看邀请', icon: GraduationCap },
-]
+const roleIcons: Record<MockRole['role'], typeof ShieldCheck> = {
+  super_admin: ShieldCheck,
+  club_leader: Users,
+  hr: UserCog,
+  department_leader: Building2,
+  interviewer: ClipboardCheck,
+  member: User,
+  applicant: GraduationCap,
+}
+
+const mockRoles = DEMO_ROLES.map((r) => ({ ...r, icon: roleIcons[r.role] }))
 
 function getRequestedRedirect(): string | null {
   const redirect = route.query.redirect

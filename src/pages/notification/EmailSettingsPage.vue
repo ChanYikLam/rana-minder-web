@@ -2,10 +2,11 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
+import { Banner, ErrorState } from '@/components/feedback'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Save, Send, CheckCircle2 } from '@lucide/vue'
+import { Save, Send } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
 const route = useRoute()
@@ -13,6 +14,7 @@ const state = ref<PageState>('loading')
 const config = ref({ smtpHost: '', smtpPort: 465, smtpUser: '', fromName: '', encryption: 'ssl', verified: false })
 const testing = ref(false)
 const testResult = ref<string | null>(null)
+const testError = ref<string | null>(null)
 const saving = ref(false)
 
 const scope = computed(() => (route.meta.scope as string) || 'personal')
@@ -38,6 +40,7 @@ async function loadData() {
 async function handleTest() {
   testing.value = true
   testResult.value = null
+  testError.value = null
   const apiScope = resolveApiScope(route)
   if (!apiScope) { testing.value = false; return }
   const result = await post(`${apiScope.prefix}/notifications/email-config/test`, {})
@@ -45,7 +48,7 @@ async function handleTest() {
   if (result.kind === 'completed') {
     testResult.value = '测试邮件已发送至 ' + config.value.smtpUser + '，请查收'
   } else {
-    toast.error('测试邮件发送失败，请稍后重试')
+    testError.value = '测试邮件发送失败，请稍后重试'
   }
 }
 
@@ -151,14 +154,18 @@ onMounted(loadData)
           </div>
         </Card>
 
-        <Card v-if="config.verified" class="mb-4 border-success">
-          <div class="flex items-center gap-2 text-success">
-            <CheckCircle2 :size="18" />
-            <span class="text-sm font-medium">发信配置已验证</span>
-          </div>
-        </Card>
+        <Banner v-if="config.verified" tone="success" title="发信配置已验证" class="mb-4" />
 
         <p v-if="testResult" class="text-sm text-success mb-4" role="status">{{ testResult }}</p>
+
+        <ErrorState
+          v-if="testError"
+          title="测试发送失败"
+          :message="testError"
+          compact
+          class="mb-4"
+          @retry="handleTest"
+        />
 
         <div class="flex gap-3">
           <button class="flex items-center gap-1.5 px-4 h-10 rounded-md border border-border text-text-primary hover:bg-subtle" :disabled="testing" @click="handleTest">

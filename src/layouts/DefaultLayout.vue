@@ -1,186 +1,29 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
-import { useNotificationViewStore } from '@/state/notificationViewStore'
-import {
-  Search, Bell, User, Settings, LogOut, ChevronDown, Menu, X, Sun, Moon,
-  Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Megaphone, Flag,
-} from '@lucide/vue'
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu'
+import { Search, User, ShieldAlert, X } from '@lucide/vue'
 import {
   Drawer, DrawerContent, DrawerTitle, DrawerDescription,
 } from '@/components/ui/drawer'
-import WorkspaceNav from './components/WorkspaceNav.vue'
-import ClubSwitcher from '@/components/business/ClubSwitcher.vue'
-import Breadcrumbs from '@/components/business/Breadcrumbs.vue'
-import RoleBadge from '@/components/business/RoleBadge.vue'
-import { useTheme } from '@/composables/useTheme'
+import TopNav from './components/TopNav.vue'
+import SideNav from './components/SideNav.vue'
+import Breadcrumb from './components/Breadcrumb.vue'
+import ContentContainer from './components/ContentContainer.vue'
+import DegradedBanner from '@/components/business/DegradedBanner.vue'
+import { useSideNav, ADMIN_NAV } from './components/sideNav'
 
 const route = useRoute()
-const router = useRouter()
 const session = useSessionViewStore()
 const workspace = useWorkspaceContextStore()
-const notifications = useNotificationViewStore()
-const { theme, toggleTheme } = useTheme()
 
 const currentClubId = computed(() => workspace.currentClubId)
 const clubIdFromRoute = computed(() => (route.params.clubId as string) || currentClubId.value)
 
-interface NavGroup {
-  label: string
-  icon: typeof Building2
-  prefix: string
-  items: { label: string; path: string; permission?: string }[]
-  permission?: string
-}
-
-const canAccess = (permission?: string) => !permission || workspace.hasPermission(permission)
-
-const navGroups = computed<NavGroup[]>(() => {
-  if (!clubIdFromRoute.value) return []
-  const base = `/org/${clubIdFromRoute.value}`
-  const groups: NavGroup[] = [
-    {
-      label: '工作台', icon: BarChart3, prefix: `${base}/dashboard`,
-      items: [
-        { label: '管理看板', path: `${base}/dashboard`, permission: 'club:dashboard:view' },
-        { label: '批量操作', path: `${base}/batch`, permission: 'club:batch:execute' },
-      ],
-    },
-    {
-      label: '普通招新', icon: Megaphone, prefix: `${base}/recruitment`, permission: 'club:recruitment:manage',
-      items: [
-        { label: '活动列表', path: `${base}/recruitment` },
-        { label: '创建活动', path: `${base}/recruitment/create` },
-      ],
-    },
-    {
-      label: '联合活动', icon: Users, prefix: `${base}/joint`, permission: 'club:joint:manage',
-      items: [
-        { label: '活动列表', path: `${base}/joint` },
-        { label: '发起活动', path: `${base}/joint/create` },
-      ],
-    },
-    {
-      label: '成员与组织', icon: Building2, prefix: `${base}/members`,
-      items: [
-        { label: '成员列表', path: `${base}/members`, permission: 'club:member:manage' },
-        { label: '部门关系申请', path: `${base}/members/department-apply`, permission: 'club:member:manage' },
-        { label: '常规入社邀请', path: `${base}/members/invite`, permission: 'club:invite:manage' },
-        { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:member:manage' },
-        { label: '成员退出与移除', path: `${base}/members/exit`, permission: 'club:member:manage' },
-        { label: '换届管理', path: `${base}/members/transition`, permission: 'club:transition:manage' },
-      ],
-    },
-    {
-      label: '动态表单', icon: FileText, prefix: `${base}/forms`, permission: 'club:form:design',
-      items: [
-        { label: '表单列表', path: `${base}/forms` },
-      ],
-    },
-    {
-      label: '统计与导出', icon: BarChart3, prefix: `${base}/stat`,
-      items: [
-        { label: '数据统计', path: `${base}/stats`, permission: 'club:stats:view' },
-        { label: '数据导出', path: `${base}/exports`, permission: 'club:export:execute' },
-      ],
-    },
-    {
-      label: '通知配置', icon: Mail, prefix: `${base}/notifications`, permission: 'club:config:manage',
-      items: [
-        { label: '发信配置', path: `${base}/notifications/email-config` },
-      ],
-    },
-    {
-      label: '纠错与审计', icon: ShieldAlert, prefix: `${base}/audit`, permission: 'club:audit:view',
-      items: [
-        { label: '事实纠错', path: `${base}/audit/corrections` },
-        { label: '审计日志', path: `${base}/audit/logs` },
-      ],
-    },
-    {
-      label: '社团配置', icon: Settings, prefix: `${base}/config`, permission: 'club:config:manage',
-      items: [
-        { label: '配置管理', path: `${base}/config` },
-      ],
-    },
-  ]
-  return groups
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => canAccess(item.permission ?? group.permission)),
-    }))
-    .filter((group) => group.items.length > 0)
-})
-
-const adminNavGroups: NavGroup[] = [
-  {
-    label: '社团管理', icon: Building2, prefix: '/admin/clubs',
-    items: [
-      { label: '社团接入', path: '/admin/clubs' },
-    ],
-  },
-  {
-    label: '联合活动', icon: Users, prefix: '/admin/joint',
-    items: [
-      { label: '活动列表', path: '/admin/joint' },
-    ],
-  },
-  {
-    label: '招新活动', icon: Flag, prefix: '/admin/recruitment',
-    items: [
-      { label: '活动列表', path: '/admin/recruitment' },
-    ],
-  },
-  {
-    label: '表单管理', icon: FileText, prefix: '/admin/forms',
-    items: [
-      { label: '平台表单', path: '/admin/forms' },
-    ],
-  },
-  {
-    label: '审计管理', icon: ShieldAlert, prefix: '/admin/audit',
-    items: [
-      { label: '纠错处置', path: '/admin/audit/corrections' },
-      { label: '审计日志', path: '/admin/audit/logs' },
-      { label: '正式删除', path: '/admin/delete' },
-      { label: '数据保留', path: '/admin/retention' },
-    ],
-  },
-  {
-    label: '统计导出', icon: BarChart3, prefix: '/admin/stat',
-    items: [
-      { label: '全局统计', path: '/admin/stats' },
-      { label: '全平台导出', path: '/admin/exports' },
-    ],
-  },
-  {
-    label: '通知配置', icon: Mail, prefix: '/admin/notifications',
-    items: [
-      { label: '平台发信', path: '/admin/notifications/email-config' },
-    ],
-  },
-  {
-    label: '平台配置', icon: Settings, prefix: '/admin/config',
-    items: [
-      { label: '平台配置', path: '/admin/config' },
-      { label: '权限模板', path: '/admin/config/permission-templates' },
-    ],
-  },
-  {
-    label: '运维状态', icon: ClipboardList, prefix: '/admin/ops',
-    items: [
-      { label: '运维监控', path: '/admin/ops-status' },
-    ],
-  },
-]
-
 const isAdmin = computed(() => session.hasPermission('platform:club:manage'))
+
+const { clubNav, personalLinks } = useSideNav(clubIdFromRoute)
 
 const mobileNavOpen = ref(false)
 
@@ -188,12 +31,7 @@ function closeMobileNav() {
   mobileNavOpen.value = false
 }
 
-async function handleLogout() {
-  await session.logout()
-  workspace.clearWorkspace()
-  closeMobileNav()
-  await router.push('/login')
-}
+watch(() => route.fullPath, closeMobileNav)
 </script>
 
 <template>
@@ -204,108 +42,8 @@ async function handleLogout() {
     >
       跳到主内容
     </a>
-    <!-- Top Navigation -->
-    <header
-      class="sticky top-0 z-50 flex items-center justify-between h-14 px-4 border-b bg-elevated shadow-sm"
-      role="banner"
-    >
-      <div class="flex items-center gap-4">
-        <button
-          class="md:hidden flex items-center justify-center w-9 h-9 rounded-md text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-          aria-label="打开导航菜单"
-          @click="mobileNavOpen = true"
-        >
-          <Menu :size="20" />
-        </button>
 
-        <router-link to="/explore" class="flex items-center gap-2 font-bold text-primary text-lg" aria-label="RanaMinder 首页">
-          <Building2 :size="24" />
-          <span class="hidden sm:inline">RanaMinder</span>
-        </router-link>
-
-        <nav class="hidden md:flex items-center gap-1" role="navigation" aria-label="主导航">
-          <router-link
-            to="/explore"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-            :class="{ 'text-primary bg-primary-subtle': route.path.startsWith('/explore') }"
-          >
-            <Search :size="16" /> 找社团/活动
-          </router-link>
-          <router-link
-            to="/me"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-            :class="{ 'text-primary bg-primary-subtle': route.path.startsWith('/me') }"
-          >
-            <User :size="16" /> 个人中心
-          </router-link>
-          <router-link
-            v-if="isAdmin"
-            to="/admin/clubs"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-            :class="{ 'text-primary bg-primary-subtle': route.path.startsWith('/admin') }"
-          >
-            <ShieldAlert :size="16" /> 平台管理
-          </router-link>
-        </nav>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <button
-          class="flex items-center justify-center w-9 h-9 rounded-md text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-          :aria-label="theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
-          @click="toggleTheme"
-        >
-          <Sun v-if="theme === 'dark'" :size="18" />
-          <Moon v-else :size="18" />
-        </button>
-
-        <router-link
-          to="/me/notifications"
-          class="relative flex items-center justify-center w-9 h-9 rounded-md text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-          aria-label="通知"
-        >
-          <Bell :size="18" />
-          <span
-            v-if="notifications.hasUnread"
-            class="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-4 h-4 px-1 text-xs font-bold rounded-full bg-accent text-text-on-accent"
-            role="status"
-          >
-            {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
-          </span>
-        </router-link>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button class="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-sm hover:bg-primary-subtle transition-colors" aria-label="用户菜单">
-              <div class="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-text-on-primary text-xs font-medium">
-                {{ session.user?.name?.charAt(0) || '?' }}
-              </div>
-              <span class="hidden sm:inline text-text-secondary">{{ session.user?.name || '未登录' }}</span>
-              <ChevronDown :size="14" class="text-text-secondary" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-48">
-            <div class="px-2 py-1.5 border-b">
-              <p class="text-sm font-medium">{{ session.user?.name }}</p>
-              <p class="text-xs text-text-secondary">{{ session.user?.email }}</p>
-              <div v-if="workspace.currentClubId" class="mt-1.5">
-                <RoleBadge />
-              </div>
-            </div>
-            <DropdownMenuItem @click="router.push('/me/profile')" class="cursor-pointer">
-              <User :size="16" class="mr-2" /> 个人资料
-            </DropdownMenuItem>
-            <DropdownMenuItem v-if="isAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
-              <Settings :size="16" class="mr-2" /> 平台管理
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem @click="handleLogout" class="cursor-pointer text-danger">
-              <LogOut :size="16" class="mr-2" /> 退出登录
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </header>
+    <TopNav :on-open-mobile-menu="() => (mobileNavOpen = true)" />
 
     <!-- Body: Sidebar + Content -->
     <div class="flex flex-1">
@@ -314,64 +52,23 @@ async function handleLogout() {
         role="complementary"
         aria-label="主导航"
       >
-        <!-- 社团标识 / 平台标识 -->
-        <div v-if="clubIdFromRoute" class="p-3 border-b">
-          <p class="text-xs text-text-secondary mb-1 px-2">切换社团</p>
-          <ClubSwitcher />
-        </div>
-        <div v-else-if="isAdmin" class="p-3 border-b">
-          <p class="text-xs text-text-secondary mb-1">管理视角</p>
-          <span class="text-sm font-medium text-primary">平台管理</span>
-        </div>
-
-        <!-- 发现与个人 -->
-        <nav class="p-2" role="navigation" aria-label="个人导航">
-          <p class="px-3 pt-1 pb-1 text-xs font-medium text-text-secondary">发现与个人</p>
-          <router-link
-            to="/explore"
-            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
-            :class="route.path.startsWith('/explore') ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
-          >
-            <Search :size="16" /> 公开发现
-          </router-link>
-          <router-link
-            v-if="clubIdFromRoute"
-            :to="`/org/${clubIdFromRoute}/dashboard`"
-            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
-            :class="route.path.startsWith(`/org/${clubIdFromRoute}/dashboard`) ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
-          >
-            <Users :size="16" /> 我的工作台
-          </router-link>
-          <router-link
-            to="/me"
-            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
-            :class="route.path.startsWith('/me') ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
-          >
-            <User :size="16" /> 个人空间
-          </router-link>
-        </nav>
-
-        <!-- 社团管理 -->
-        <template v-if="clubIdFromRoute">
-          <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">社团管理</p>
-          <WorkspaceNav :groups="navGroups" />
-        </template>
-
-        <!-- 平台 -->
-        <template v-if="isAdmin">
-          <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">平台</p>
-          <WorkspaceNav :groups="adminNavGroups" />
-        </template>
+        <SideNav
+          :club-id="clubIdFromRoute"
+          :is-admin="isAdmin"
+          :show-club-indicator="!!clubIdFromRoute"
+          :club-groups="clubNav"
+          :admin-groups="ADMIN_NAV"
+          :personal-links="personalLinks"
+        />
       </aside>
 
       <!-- Main Content -->
       <main id="default-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
-        <div class="mx-auto max-w-[1400px] p-4 md:p-6">
-          <div class="mb-4">
-            <Breadcrumbs />
-          </div>
+        <ContentContainer>
+          <div class="mb-4"><DegradedBanner /></div>
+          <div class="mb-4"><Breadcrumb /></div>
           <slot />
-        </div>
+        </ContentContainer>
       </main>
     </div>
 
@@ -417,50 +114,14 @@ async function handleLogout() {
               <ShieldAlert :size="16" /> 平台管理
             </router-link>
           </nav>
-          <div v-if="clubIdFromRoute" class="px-4 pt-3">
-            <p class="text-xs text-text-secondary mb-1">切换社团</p>
-            <ClubSwitcher />
-          </div>
-          <div v-else-if="isAdmin" class="px-4 pt-3">
-            <p class="text-xs text-text-secondary mb-1">管理视角</p>
-            <span class="text-sm font-medium text-primary">平台管理</span>
-          </div>
-          <nav class="p-2" role="navigation" aria-label="个人导航">
-            <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">发现与个人</p>
-            <router-link
-              to="/explore"
-              class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-subtle transition-colors"
-              :class="route.path.startsWith('/explore') ? 'text-primary font-medium' : ''"
-              @click="closeMobileNav"
-            >
-              <Search :size="16" /> 公开发现
-            </router-link>
-            <router-link
-              v-if="clubIdFromRoute"
-              :to="`/org/${clubIdFromRoute}/dashboard`"
-              class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-subtle transition-colors"
-              :class="route.path.startsWith(`/org/${clubIdFromRoute}/dashboard`) ? 'text-primary font-medium' : ''"
-              @click="closeMobileNav"
-            >
-              <Users :size="16" /> 我的工作台
-            </router-link>
-            <router-link
-              to="/me"
-              class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-subtle transition-colors"
-              :class="route.path.startsWith('/me') ? 'text-primary font-medium' : ''"
-              @click="closeMobileNav"
-            >
-              <User :size="16" /> 个人空间
-            </router-link>
-          </nav>
-          <template v-if="clubIdFromRoute">
-            <p class="px-4 pt-2 pb-1 text-xs font-medium text-text-secondary">社团管理</p>
-            <WorkspaceNav :groups="navGroups" />
-          </template>
-          <template v-if="isAdmin">
-            <p class="px-4 pt-2 pb-1 text-xs font-medium text-text-secondary">平台</p>
-            <WorkspaceNav :groups="adminNavGroups" />
-          </template>
+          <SideNav
+            :club-id="clubIdFromRoute"
+            :is-admin="isAdmin"
+            :show-club-indicator="!!clubIdFromRoute"
+            :club-groups="clubNav"
+            :admin-groups="ADMIN_NAV"
+            :personal-links="personalLinks"
+          />
         </div>
       </DrawerContent>
     </Drawer>

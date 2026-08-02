@@ -297,6 +297,44 @@ export const mockUsers: Record<string, MockUser> = {
 
 let activeMockUserKey: string | null = null
 
+/** 演示登录身份目录（由 mockUsers 派生，MOCK 模式登录页按此渲染，避免与 mock 数据漂移） */
+export interface DemoRoleInfo {
+  key: string
+  role: MockRole['role']
+  label: string
+  desc: string
+}
+
+const ROLE_LABELS: Record<MockRole['role'], string> = {
+  super_admin: '超级管理员',
+  club_leader: '社团负责人',
+  hr: '人事',
+  department_leader: '部门负责人',
+  interviewer: '面试官',
+  member: '普通成员',
+  applicant: '申请人',
+}
+
+const ROLE_HINTS: Record<MockRole['role'], string> = {
+  super_admin: '平台全局管理',
+  club_leader: '社团管理全部功能',
+  hr: '招新与成员管理',
+  department_leader: '成员管理（仅本部门范围）',
+  interviewer: '面试评价',
+  member: '查看本人信息',
+  applicant: '报名与查看邀请',
+}
+
+export const DEMO_ROLES: DemoRoleInfo[] = Object.entries(mockUsers).map(([key, u]) => {
+  const role = u.roles[0]?.role ?? 'applicant'
+  return {
+    key,
+    role,
+    label: ROLE_LABELS[role],
+    desc: u.roles[0]?.clubName ? `${ROLE_HINTS[role]} · ${u.roles[0].clubName}` : ROLE_HINTS[role],
+  }
+})
+
 export function resolveMockSessionUser(url: string): MockUser | null {
   const u = new URL(url, 'http://localhost')
   const requestedKey = u.searchParams.get('_mock_user')

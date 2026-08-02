@@ -13,7 +13,7 @@ export interface Member {
   exitedAt: string | null
 }
 
-export type MemberStatus = 'active' | 'suspended' | 'exiting' | 'exited' | 'removed' | 'rejoining'
+export type MemberStatus = 'non_member' | 'pending_effective' | 'active' | 'exiting' | 'exited' | 'sync_anomaly'
 
 export interface MemberPosition {
   id: string

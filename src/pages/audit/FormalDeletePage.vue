@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
+import { ImpactPreview, type ImpactItem } from '@/components/operation'
+import { PartialSuccess, type PartialResult } from '@/components/operation'
+import DangerButton from '@/components/operation/DangerButton.vue'
+import { ConfirmScope } from '@/components/operation'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { ShieldAlert, Trash2, CheckCircle2, AlertTriangle, Database } from '@lucide/vue'
+import { ShieldAlert, Trash2, AlertTriangle, Database } from '@lucide/vue'
 import { identityApi } from '@/services/modules'
 
 interface DeleteTarget { id: string; label: string; type: string; recordCount: number; memberCount: number }
@@ -21,6 +25,20 @@ const reauthProof = ref('')
 const reauthenticating = ref(false)
 const hasActiveRelationships = computed(() => preview.value?.targets.some((target) => target.memberCount > 0) ?? true)
 const canExecute = computed(() => !hasActiveRelationships.value && reason.value.trim().length >= 5 && Boolean(reauthProof.value))
+
+const impactTargets = computed<ImpactItem[]>(() =>
+  (preview.value?.targets ?? []).map((t) => ({ id: t.id, label: t.label, detail: `${t.type} · ${t.recordCount} 条记录` })),
+)
+
+const confirmOpen = ref(false)
+const executingConfirm = ref(false)
+
+const partialResults = computed<PartialResult[]>(() =>
+  results.value.map((r) => {
+    const target = preview.value?.targets.find((t) => t.id === r.targetId)
+    return { id: r.targetId, label: target?.label || r.targetId, success: r.success, message: r.success ? `${r.stores.join('、')} 已清除` : '删除失败' }
+  }),
+)
 
 async function loadData() {
   state.value = 'loading'
@@ -47,6 +65,8 @@ async function reauthenticate() {
 
 async function execute() {
   if (!preview.value || !canExecute.value) return
+  confirmOpen.value = false
+  executingConfirm.value = true
   step.value = 'executing'
   results.value = []
   const result = await post<{ results: DeleteResult[]; auditRef: string }>('/admin/delete/execute', {
@@ -55,6 +75,7 @@ async function execute() {
     previewVersion: preview.value.previewVersion,
     reauthProof: reauthProof.value,
   }, { expectedVersion: preview.value.previewVersion })
+  executingConfirm.value = false
   if (result.kind === 'completed') {
     results.value = result.data.results
     auditRef.value = result.data.auditRef
@@ -76,15 +97,12 @@ onMounted(loadData)
 
       <!-- 预览 -->
       <template v-if="step === 'preview'">
-        <Card class="mb-4 border-warning">
-          <div class="flex items-start gap-2">
-            <ShieldAlert :size="20" class="text-warning mt-0.5 shrink-0" />
-            <div>
-              <p class="text-sm font-medium text-warning">{{ preview.warning }}</p>
-              <p class="text-xs text-text-secondary mt-1">将影响 {{ preview.totalRecords }} 条记录和 {{ preview.totalMembers }} 名成员</p>
-            </div>
-          </div>
-        </Card>
+        <ImpactPreview
+          class="mb-4"
+          :targets="impactTargets"
+          :notify-count="preview.totalMembers"
+          :irreversible="true"
+        />
 
         <Card class="mb-4">
           <h2 class="text-base font-medium text-text-primary mb-3">删除范围</h2>
@@ -155,8 +173,23 @@ onMounted(loadData)
         </Card>
         <div class="flex gap-3">
           <button class="flex-1 h-11 rounded-md border border-border text-text-primary hover:bg-subtle" @click="step = 'preview'">返回</button>
-          <button class="flex-1 h-11 rounded-md bg-danger text-text-on-primary font-medium hover:opacity-90 disabled:opacity-50" :disabled="!canExecute" @click="execute">确认删除</button>
+          <DangerButton
+            class="flex-1"
+            label="确认删除"
+            :disabled="!canExecute"
+            @confirm="confirmOpen = true"
+          />
         </div>
+
+        <ConfirmScope
+          :open="confirmOpen"
+          :targets="impactTargets"
+          :notify-count="preview.totalMembers"
+          :irreversible="true"
+          :confirming="executingConfirm"
+          @confirm="execute()"
+          @cancel="confirmOpen = false"
+        />
       </template>
 
       <!-- 执行中 -->
@@ -167,23 +200,9 @@ onMounted(loadData)
 
       <!-- 结果 -->
       <template v-else>
-        <Card class="mb-4">
-          <div class="flex items-center gap-3 mb-4">
-            <CheckCircle2 :size="32" class="text-success" />
-            <div>
-              <p class="text-base font-medium text-text-primary">删除完成</p>
-              <p class="text-sm text-text-secondary">已删除 {{ results.length }} 个目标</p>
-            </div>
-          </div>
-          <div class="space-y-2">
-            <div v-for="r in results" :key="r.targetId" class="flex items-center gap-2 text-sm">
-              <CheckCircle2 v-if="r.success" :size="14" class="text-success" />
-              <AlertTriangle v-else :size="14" class="text-danger" />
-              <span class="text-text-primary">{{ preview!.targets.find((t) => t.id === r.targetId)?.label || r.targetId }}</span>
-              <span class="text-xs text-text-secondary" v-if="r.success">（{{ r.stores.join('、') }}）</span>
-            </div>
-          </div>
-          <p v-if="auditRef" class="text-xs text-text-secondary mt-3">审计编号：{{ auditRef }}</p>
+        <PartialSuccess :results="partialResults" class="mb-4" />
+        <Card v-if="auditRef" class="mb-4">
+          <p class="text-xs text-text-secondary">审计编号：{{ auditRef }}</p>
         </Card>
         <button class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover" @click="step = 'preview'">完成</button>
       </template>
