@@ -24,11 +24,11 @@ function consumeReauthProof(proof: unknown): boolean {
   return true
 }
 
-/** 业务规则拒绝（HTTP 422 + IFC-ERR-008） */
+/** 业务规则拒绝（HTTP 422 + IFC-ERR-006） */
 function businessError(message: string) {
   return {
     statusCode: 422,
-    body: { code: 'IFC-ERR-008', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+    body: { code: 'IFC-ERR-006', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
   }
 }
 
@@ -280,7 +280,7 @@ const identityHandlers: MockMethod[] = [
         return {
           statusCode: 422,
           body: {
-            code: 'IFC-ERR-008',
+            code: 'IFC-ERR-005',
             message: '不支持的冲突字段',
             supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
           },
@@ -734,8 +734,8 @@ const memberHandlers: MockMethod[] = [
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       const app = db.departmentApplications.find((a) => a.id === query.applicationId)
-      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '申请不存在', supportId: 'MOCK' } }
-      if (app.status !== 'under_review') return { statusCode: 422, body: { code: 'IFC-ERR-008', message: '仅待审批的申请可撤回', supportId: 'MOCK' } }
+      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '申请不存在', supportId: 'MOCK' } }
+      if (app.status !== 'under_review') return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '仅待审批的申请可撤回', supportId: 'MOCK' } }
       const actor = actorMemberId(user)
       const isApplicant = actor === app.applicantId
       if (!isApplicant && !canManageMembers(user, query.clubId)) return forbidden()
@@ -754,7 +754,7 @@ const memberHandlers: MockMethod[] = [
       const scope = departmentScopeFor(user, query.clubId)
       if (!member || !canManageMembers(user, query.clubId)) return forbidden()
       const app = db.departmentApplications.find((a) => a.id === query.applicationId)
-      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '申请不存在', supportId: 'MOCK' } }
+      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '申请不存在', supportId: 'MOCK' } }
       if (scope && app.targetDeptName !== scope) return forbidden()
       const r = db.decideDepartmentApplication(query.applicationId, body.input?.decision === 'approve' ? 'approve' : 'reject', member.id, member.name, body.input?.rejectReason)
       if (!r.ok) return businessError(r.error || '操作失败')
@@ -865,7 +865,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const candidateId = actorCandidateId(user)
       const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
-      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
       if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       return {
         code: 0,
@@ -885,7 +885,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const candidateId = actorCandidateId(user)
       const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
-      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
       if (candidateId && inv.candidateId !== candidateId) return forbidden()
       const r = db.respondInvitation(query.invitationId, body.input?.action === 'accept' ? 'accept' : 'reject')
       if (!r.ok) return businessError(r.error || '操作失败')
@@ -900,7 +900,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const candidateId = actorCandidateId(user)
       const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
-      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
       if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       const r = db.confirmInvitationSync(query.invitationId)
       if (!r.ok) return businessError(r.error || '确认失败')
@@ -1035,7 +1035,7 @@ const memberHandlers: MockMethod[] = [
         return {
           statusCode: 422,
           body: {
-            code: 'IFC-ERR-008',
+            code: 'IFC-ERR-005',
             message: '辞职必须填写原因',
             fieldErrors: { reason: ['请填写辞职原因'] },
             supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
@@ -1213,10 +1213,10 @@ const memberHandlers: MockMethod[] = [
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       const member = db.getMemberProfile(query.clubId, query.memberId)
-      if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '成员不存在', supportId: 'MOCK' } }
+      if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '成员不存在', supportId: 'MOCK' } }
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       }
       return {
         code: 0,

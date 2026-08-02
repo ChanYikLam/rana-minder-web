@@ -97,11 +97,11 @@ export function withStatus(handler: MockMethod): MockMethod {
   }
 }
 
-/** 业务规则拒绝（HTTP 422 + IFC-ERR-008） */
+/** 业务规则拒绝（HTTP 422 + IFC-ERR-006） */
 function businessError(message: string) {
   return {
     statusCode: 422,
-    body: { code: 'IFC-ERR-008', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+    body: { code: 'IFC-ERR-006', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
   }
 }
 
@@ -113,11 +113,11 @@ function forbidden() {
   }
 }
 
-/** 资源不存在（HTTP 404 + IFC-ERR-004） */
+/** 资源不存在（HTTP 404 + IFC-ERR-015） */
 function notFound(message = '请求的内容不存在或已被移除') {
   return {
     statusCode: 404,
-    body: { code: 'IFC-ERR-004', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+    body: { code: 'IFC-ERR-015', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
   }
 }
 
