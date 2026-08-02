@@ -22,16 +22,24 @@ const mockRoles = [
   { key: 'applicant', label: '申请人', desc: '报名与查看邀请', icon: GraduationCap },
 ]
 
-function getRedirect(): string {
+function getRequestedRedirect(): string | null {
   const redirect = route.query.redirect
-  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return '/me'
+  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return null
 
   try {
     const target = new URL(redirect, window.location.origin)
-    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : '/me'
+    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : null
   } catch {
-    return '/me'
+    return null
   }
+}
+
+function resolveTargetAfterLogin(): string {
+  const requested = getRequestedRedirect()
+  if (requested) return requested
+  if (session.workspace?.clubId) return `/org/${session.workspace.clubId}/dashboard`
+  if (session.hasPermission('platform:club:manage')) return '/admin/clubs'
+  return '/me'
 }
 
 async function handleLogin() {
@@ -40,7 +48,7 @@ async function handleLogin() {
   loginError.value = null
 
   try {
-    const result = await startLogin(getRedirect(), selectedRole.value)
+    const result = await startLogin(getRequestedRedirect() ?? '/me', selectedRole.value)
     if (result === 'redirected') return
     if (result === 'disabled') {
       loginError.value = '统一认证尚未配置，当前无法登录'
@@ -53,7 +61,7 @@ async function handleLogin() {
       return
     }
 
-    await router.push(getRedirect())
+    await router.push(resolveTargetAfterLogin())
   } catch {
     loginError.value = '登录失败，请稍后重试'
   } finally {
