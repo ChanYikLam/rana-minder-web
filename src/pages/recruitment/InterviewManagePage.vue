@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
@@ -40,22 +40,14 @@ const cancelRoundId = ref<string | null>(null)
 const cancelRoundReason = ref('')
 const cancelRoundError = ref('')
 
-const clubId = computed(() => {
-  const cid = route.params.clubId as string
-  if (!cid) {
+const clubId = computed(() => route.params.clubId as string)
+const actId = computed(() => route.params.activityId as string)
+
+watch([clubId, actId], ([cid, aid]) => {
+  if (!cid || !aid) {
     state.value = 'error'
-    return ''
   }
-  return cid
-})
-const actId = computed(() => {
-  const aid = route.params.activityId as string
-  if (!aid) {
-    state.value = 'error'
-    return ''
-  }
-  return aid
-})
+}, { immediate: true })
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
