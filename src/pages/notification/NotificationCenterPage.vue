@@ -10,8 +10,22 @@ const state = ref<PageState>('loading')
 
 async function loadNotifications() {
   state.value = 'loading'
-  await notifStore.loadNotifications()
-  state.value = 'normal'
+  try {
+    await notifStore.loadNotifications()
+    state.value = notifStore.items.length === 0 ? 'normal' : 'normal'
+  } catch {
+    state.value = 'error'
+  }
+}
+
+async function handleMarkAllRead() {
+  try {
+    state.value = 'loading'
+    await notifStore.markAllRead()
+    state.value = 'normal'
+  } catch {
+    state.value = 'error'
+  }
 }
 
 function formatTime(iso: string): string {
@@ -35,7 +49,7 @@ onMounted(loadNotifications)
         <button
           v-if="notifStore.hasUnread"
           class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle"
-          @click="notifStore.markAllRead()"
+          @click="handleMarkAllRead"
         >
           <CheckCheck :size="16" /> 全部已读
         </button>

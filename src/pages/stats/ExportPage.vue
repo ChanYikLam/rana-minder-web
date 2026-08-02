@@ -42,16 +42,24 @@ function formatTime(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+let creating = false
+
 async function handleCreate() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
   executing.value = true
+  creating = true
   const result = await post(`${apiScope.prefix}/exports`, { type: '成员名单' })
   executing.value = false
+  creating = false
   if (result.kind === 'completed') {
     confirmOpen.value = false
     await loadData()
   }
+}
+
+function openCreateConfirm() {
+  confirmOpen.value = true
 }
 
 async function handleDownload(task: ExportTask) {
@@ -71,7 +79,7 @@ onMounted(loadData)
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">导出管理</h1>
         <PermissionGuard permission="club:member:manage">
-          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleCreate">
+          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openCreateConfirm">
             <Plus :size="16" /> 新建导出
           </button>
         </PermissionGuard>
@@ -80,7 +88,7 @@ onMounted(loadData)
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无导出任务">
         <template #action>
           <PermissionGuard permission="club:member:manage">
-            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleCreate">
+            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openCreateConfirm">
               <Plus :size="16" /> 新建导出
             </button>
           </PermissionGuard>

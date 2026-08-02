@@ -51,10 +51,11 @@ const reauthPassword = ref('')
 const reauthError = ref('')
 const reauthBusy = ref(false)
 
-// 重认证倒计时：从弹窗打开起计时，每秒刷新
 const openedAt = ref(Date.now())
 const now = ref(Date.now())
 let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+const isReauthExpired = computed(() => props.reauthRequired && remainingSeconds.value <= 0)
 
 function stopCountdown() {
   if (countdownTimer) {
@@ -85,6 +86,15 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => props.executing,
+  (executing, wasExecuting) => {
+    if (wasExecuting && !executing && step.value === 'executing') {
+      step.value = 'done'
+    }
+  }
+)
+
 onBeforeUnmount(stopCountdown)
 
 function handleNext() {
@@ -94,6 +104,10 @@ function handleNext() {
 }
 
 async function handleConfirm() {
+  if (isReauthExpired.value) {
+    reauthError.value = '认证已过期，请重新打开确认'
+    return
+  }
   if (!props.reauthRequired) {
     step.value = 'executing'
     emit('confirm')
@@ -133,7 +147,7 @@ const remainingSeconds = computed(() => {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-[480px]">
+    <DialogContent class="max-w-[480px]" @pointerdown-outside.prevent @escape-key-down.prevent>
       <DialogHeader>
         <div class="flex items-center gap-2 mb-1">
           <div class="flex items-center justify-center w-8 h-8 rounded-full bg-warning-subtle text-warning">
@@ -209,7 +223,7 @@ const remainingSeconds = computed(() => {
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
         <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>
-        <Button v-else variant="destructive" :loading="executing || reauthBusy" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
+        <Button v-else variant="destructive" :loading="executing || reauthBusy" :disabled="isReauthExpired" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

@@ -44,10 +44,8 @@ export function useRequest<T>(
       }
     } else if (result.kind === 'accepted') {
       state.value = 'loading'
-      error.value = { code: 'IFC-ERR-014', message: '操作正在处理中' }
     } else if (result.kind === 'external_uncertain') {
       state.value = 'loading'
-      error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
     } else if (result.kind === 'concurrency_conflict') {
       state.value = 'error'
       error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }

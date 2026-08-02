@@ -5,7 +5,7 @@ import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/compo
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send } from '@lucide/vue'
+import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning } from '@lucide/vue'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -18,6 +18,7 @@ const activity = ref<ActivityDetail | null>(null)
 const formFields = ref<FormField[]>([])
 
 const formData = reactive<Record<string, string>>({})
+const formFiles = reactive<Record<string, { name: string; size: number; checking: boolean } | null>>({})
 const formErrors = ref<Record<string, string>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
@@ -227,16 +228,40 @@ onMounted(loadData)
               <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
             </select>
 
-            <button
+            <div
               v-else-if="field.type === 'file'"
               :id="field.id"
-              class="w-full h-24 rounded-md border border-dashed border-border flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+              :class="[formErrors[field.id] ? 'border-danger' : 'border-border']"
+              class="w-full rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
               :aria-invalid="Boolean(formErrors[field.id])"
               :aria-describedby="getFieldDescribedBy(field)"
             >
-              <Upload :size="20" />
-              <span class="text-xs">点击上传文件</span>
-            </button>
+              <template v-if="formFiles[field.id]">
+                <div class="flex items-center gap-2 p-3">
+                  <FileWarning v-if="formFiles[field.id]!.checking" :size="16" class="text-warning" />
+                  <Upload v-else :size="16" class="text-success" />
+                  <span class="text-xs text-text-primary">{{ formFiles[field.id]!.name }}</span>
+                  <span class="text-xs text-text-secondary">({{ (formFiles[field.id]!.size / 1024).toFixed(1) }} KB)</span>
+                  <button class="text-xs text-danger hover:underline" @click="formFiles[field.id] = null">移除</button>
+                </div>
+              </template>
+              <label v-else class="flex flex-col items-center justify-center gap-1 py-6 cursor-pointer w-full h-full">
+                <Upload :size="20" />
+                <span class="text-xs">点击上传文件</span>
+                <input
+                  type="file"
+                  class="hidden"
+                  :aria-label="`上传${field.label}`"
+                  @change="(e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0]
+                    if (file) {
+                      formFiles[field.id] = { name: file.name, size: file.size, checking: true }
+                      formData[field.id] = file.name
+                    }
+                  }"
+                />
+              </label>
+            </div>
 
             <p v-if="formErrors[field.id]" :id="getFieldErrorId(field.id)" class="mt-1 text-xs text-danger" role="alert">
               {{ formErrors[field.id] }}

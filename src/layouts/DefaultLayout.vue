@@ -139,7 +139,7 @@ const adminNavGroups: NavGroup[] = [
     ],
   },
   {
-    label: '统计导出', icon: BarChart3, prefix: '/admin/stat',
+    label: '统计导出', icon: BarChart3, prefix: '/admin/stats',
     items: [
       { label: '全局统计', path: '/admin/stats' },
       { label: '全平台导出', path: '/admin/exports' },
@@ -159,14 +159,22 @@ const adminNavGroups: NavGroup[] = [
     ],
   },
   {
-    label: '运维状态', icon: ClipboardList, prefix: '/admin/ops',
+    label: '运维状态', icon: ClipboardList, prefix: '/admin/ops-status',
     items: [
       { label: '运维监控', path: '/admin/ops-status' },
     ],
   },
 ]
 
-const isAdmin = computed(() => session.hasPermission('platform:club:manage'))
+const isAdmin = computed(() => {
+  return session.hasPermission('platform:club:manage') ||
+    session.hasPermission('platform:form:design') ||
+    session.hasPermission('platform:config:manage') ||
+    session.hasPermission('platform:audit:view') ||
+    session.hasPermission('platform:export:execute') ||
+    session.hasPermission('platform:delete:execute') ||
+    session.hasPermission('platform:ops:view')
+})
 
 const mobileNavOpen = ref(false)
 
@@ -296,7 +304,7 @@ async function handleLogout() {
             <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs font-medium">
               {{ workspace.currentClubName?.charAt(0) || '社' }}
             </div>
-            <span class="text-sm font-medium">{{ workspace.currentClubName || '计算机协会' }}</span>
+            <span class="text-sm font-medium">{{ workspace.currentClubName || '未选择社团' }}</span>
           </div>
         </div>
         <div v-else-if="isAdmin" class="p-3 border-b">
@@ -365,7 +373,7 @@ async function handleLogout() {
               <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs font-medium">
                 {{ workspace.currentClubName?.charAt(0) || '社' }}
               </div>
-              <span class="text-sm font-medium">{{ workspace.currentClubName || '计算机协会' }}</span>
+              <span class="text-sm font-medium">{{ workspace.currentClubName || '未选择社团' }}</span>
             </div>
           </div>
           <div v-else-if="isAdmin" class="px-4 pt-3">

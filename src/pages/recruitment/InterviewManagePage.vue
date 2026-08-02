@@ -36,9 +36,26 @@ const roundError = ref('')
 const skipForm = ref({ applicantId: '', reason: '' })
 const updatingRound = ref<string | null>(null)
 const newRoundDeadline = ref('')
+const cancelRoundId = ref<string | null>(null)
+const cancelRoundReason = ref('')
+const cancelRoundError = ref('')
 
-const clubId = computed(() => (route.params.clubId as string) || 'club-001')
-const actId = computed(() => (route.params.activityId as string) || 'act-001')
+const clubId = computed(() => {
+  const cid = route.params.clubId as string
+  if (!cid) {
+    state.value = 'error'
+    return ''
+  }
+  return cid
+})
+const actId = computed(() => {
+  const aid = route.params.activityId as string
+  if (!aid) {
+    state.value = 'error'
+    return ''
+  }
+  return aid
+})
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
@@ -170,18 +187,31 @@ async function handleUpdateRound(roundId: string) {
 }
 
 async function handleCancelRound(roundId: string) {
+  if (!cancelRoundReason.value.trim()) {
+    cancelRoundError.value = '请填写取消原因'
+    return
+  }
   if (actionLoading.value) return
   actionLoading.value = true
   actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/cancel`, {
-    reason: '管理员取消轮次',
+    reason: cancelRoundReason.value.trim(),
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
+    cancelRoundId.value = null
+    cancelRoundReason.value = ''
+    cancelRoundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
     actionError.value = (result.error as { message?: string }).message || '取消失败'
   }
+}
+
+function openCancelRound(roundId: string) {
+  cancelRoundId.value = roundId
+  cancelRoundReason.value = ''
+  cancelRoundError.value = ''
 }
 
 async function handleSkipRound() {
@@ -356,7 +386,7 @@ onMounted(async () => {
                     v-if="r.status === 'open'"
                     class="flex items-center gap-1 px-2 h-8 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
                     :disabled="actionLoading"
-                    @click="handleCancelRound(r.id)"
+                    @click="openCancelRound(r.id)"
                   >
                     <XCircle :size="12" /> 取消轮次
                   </button>
@@ -380,6 +410,28 @@ onMounted(async () => {
                     {{ actionLoading ? '处理中...' : '执行跳轮' }}
                   </button>
                 </div>
+              </div>
+
+              <!-- 取消轮次原因 -->
+              <div v-if="cancelRoundId" class="rounded-lg border border-danger bg-danger-subtle p-3">
+                <p class="text-sm font-medium text-danger mb-2">取消轮次</p>
+                <div class="flex items-center gap-2">
+                  <input v-model="cancelRoundReason" class="flex-1 px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" placeholder="请填写取消原因（必填）" />
+                  <button
+                    class="px-3 h-9 rounded-md bg-destructive text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                    :disabled="actionLoading || !cancelRoundReason.trim()"
+                    @click="handleCancelRound(cancelRoundId)"
+                  >
+                    {{ actionLoading ? '取消中...' : '确认取消' }}
+                  </button>
+                  <button
+                    class="px-3 h-9 rounded-md border border-border text-text-primary text-sm hover:bg-subtle"
+                    @click="cancelRoundId = null; cancelRoundReason = ''; cancelRoundError = ''"
+                  >
+                    取消
+                  </button>
+                </div>
+                <p v-if="cancelRoundError" class="text-xs text-destructive mt-1">{{ cancelRoundError }}</p>
               </div>
             </div>
           </div>

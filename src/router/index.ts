@@ -185,7 +185,7 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, view: 'self' },
   },
   {
-    path: '/me/invitations/membership',
+    path: '/me/invitations/membership/:invitationId',
     name: 'P-MEM-03-self',
     component: () => import('@/pages/member/MembershipInvitePage.vue'),
     meta: { layout: 'default', requiresAuth: true, view: 'self' },

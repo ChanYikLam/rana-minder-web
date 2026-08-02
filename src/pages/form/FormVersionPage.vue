@@ -41,6 +41,13 @@ async function handleSaveDraft() {
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
+
+  if (currentVersion.value?.status === 'published') {
+    toast.error('已发布版本不可覆盖，请修改后创建新草稿')
+    saving.value = false
+    return
+  }
+
   const result = await post(`${apiScope.prefix}/forms/designer/${formId}/save`, {
     fields: currentVersion.value?.fields || [],
     version: currentVersion.value?.version || 1,
@@ -55,8 +62,23 @@ async function handleSaveDraft() {
 
 async function handleSubmit() {
   submitting.value = true
-  await new Promise((r) => setTimeout(r, 800))
+  const formId = route.params.formId as string
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { submitting.value = false; return }
+
+  const result = await post(`${apiScope.prefix}/forms/versions/${formId}/submit`, {
+    formData,
+    version: currentVersion.value?.version || 1,
+    idempotencyKey: `${formId}-${currentVersion.value?.version}-${Date.now()}`,
+  })
   submitting.value = false
+  if (result.kind === 'completed') {
+    toast.success('表单已提交')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '提交失败')
+  } else {
+    toast.error('提交失败，请稍后重试')
+  }
 }
 
 onMounted(loadForm)

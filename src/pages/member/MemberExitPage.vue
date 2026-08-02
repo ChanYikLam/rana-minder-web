@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
@@ -78,7 +79,7 @@ async function handleRemove() {
   }
   removeSubmitting.value = true
   const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/exit`, { memberId: removingId.value! })
+  const r = await post(`/org/${clubId}/members/exit`, { memberId: removingId.value!, reason: removeReason.value.trim() })
   removeSubmitting.value = false
   if (r.kind === 'completed') {
     toast.success('成员已移除')
@@ -195,12 +196,14 @@ onMounted(loadData)
               <StateTag :status="res.status" />
             </div>
             <div v-if="res.status === 'under_review'" class="mt-3 flex gap-2">
-              <button class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90" :disabled="actingId === res.id" @click="handleResignDecide(res, 'approve')">
-                <CheckCircle2 :size="14" /> 批准
-              </button>
-              <button class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === res.id" @click="handleResignDecide(res, 'reject')">
-                <XCircle :size="14" /> 驳回
-              </button>
+              <PermissionGuard permission="club:member:manage" scope="workspace">
+                <button class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90" :disabled="actingId === res.id" @click="handleResignDecide(res, 'approve')">
+                  <CheckCircle2 :size="14" /> 批准
+                </button>
+                <button class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === res.id" @click="handleResignDecide(res, 'reject')">
+                  <XCircle :size="14" /> 驳回
+                </button>
+              </PermissionGuard>
             </div>
             <p v-else-if="res.status === 'rejected' && res.decidedBy" class="text-xs text-text-secondary mt-2">由 {{ res.decidedBy }} 驳回</p>
             <p v-else-if="res.status === 'approved' && res.decidedBy" class="text-xs text-success mt-2">由 {{ res.decidedBy }} 批准</p>
