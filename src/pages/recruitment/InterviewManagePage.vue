@@ -200,7 +200,7 @@ async function handleCancelRound(roundId: string) {
   }
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
+  cancelRoundError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/cancel`, {
     reason: cancelRoundReason.value.trim(),
   })
@@ -211,7 +211,7 @@ async function handleCancelRound(roundId: string) {
     cancelRoundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '取消失败'
+    cancelRoundError.value = (result.error as { message?: string }).message || '取消失败'
   }
 }
 
@@ -219,6 +219,7 @@ function openCancelRound(roundId: string) {
   cancelRoundId.value = roundId
   cancelRoundReason.value = ''
   cancelRoundError.value = ''
+  actionError.value = ''
 }
 
 async function handleSkipRound() {

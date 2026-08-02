@@ -1613,6 +1613,285 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
+// 管理员路由：配置
+  {
+    url: '/api/admin/config',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          clubName: 'RanaMinder 平台', clubDescription: '社团招新管理平台',
+          requireEmailVerification: true, requireProfileComplete: true,
+          maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/config',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, version: 2, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 管理员路由：统计
+  {
+    url: '/api/admin/stats',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          summary: [
+            { label: '总社团数', value: 3, trend: 'up', trendValue: 1 },
+            { label: '总成员数', value: 278, trend: 'up', trendValue: 24 },
+            { label: '活跃招新', value: 2, trend: 'flat', trendValue: 0 },
+            { label: '待处理申请', value: 28, trend: 'down', trendValue: 8 },
+          ],
+          departmentDistribution: [
+            { name: '计算机协会', count: 128 },
+            { name: '电子设计协会', count: 86 },
+            { name: '数学建模协会', count: 64 },
+          ],
+        },
+      }
+    },
+  },
+  // 管理员路由：导出
+  {
+    url: '/api/admin/exports',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          items: [
+            { id: 'exp-003', clubId: 'club-001', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', expiredAt: '2025-08-08T10:00:00+08:00', downloadUrl: '#', fileSize: 32768 },
+          ],
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/exports',
+    method: 'post',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:delete:execute')) return forbidden()
+      return {
+        code: 0,
+        data: {
+          id: 'exp-' + Date.now(), clubId: '', type: '全平台导出',
+          status: 'generating', createdAt: new Date().toISOString(),
+          completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/exports/:id/download',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return {
+        code: 0,
+        data: {
+          fileId: query.id, status: 'downloaded',
+          downloadUrl: '/mock-files/' + query.id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+      }
+    },
+  },
+  // 管理员路由：审计日志
+  {
+    url: '/api/admin/audit/logs',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:delete:execute')) return forbidden()
+      const allLogs = [
+        { id: 'log-101', actorName: '超级管理员', action: '强制关闭联合活动', targetType: '联合活动', targetId: 'jnt-002', detail: '设计+摄影联合招新', createdAt: '2025-08-01T09:00:00+08:00' },
+        { id: 'log-102', actorName: '超级管理员', action: '批准社团接入', targetType: '社团', targetId: 'club-001', detail: '计算机协会', createdAt: '2025-07-01T10:00:00+08:00' },
+      ]
+      const search = query.search
+      const items = search ? allLogs.filter((l) => l.actorName.includes(search) || l.action.includes(search) || l.detail.includes(search)) : allLogs
+      return { code: 0, data: { items, nextCursor: null } }
+    },
+  },
+  // 管理员路由：事实纠错
+  {
+    url: '/api/admin/audit/corrections',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          items: [
+            { id: 'cor-003', targetType: '社团信息', targetId: 'club-002', reason: '社团名称有误', evidence: '审批文件', status: 'submitted', submittedAt: '2025-07-28T10:00:00+08:00', submitterName: '超级管理员' },
+          ],
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/audit/corrections',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: 'cor-' + Date.now(), status: 'submitted', submittedAt: new Date().toISOString(), ...body.input } }
+    },
+  },
+  {
+    url: '/api/admin/audit/corrections/:correctionId/decide',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
+      return {
+        code: 0,
+        data: { id: query.correctionId, status: body.input?.decision === 'approve' ? 'approved' : 'rejected', decidedAt: new Date().toISOString() },
+      }
+    },
+  },
+  {
+    url: '/api/admin/audit/corrections/:correctionId/withdraw',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return { code: 0, data: { id: query.correctionId, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+    },
+  },
+  // 管理员路由：邮件配置
+  {
+    url: '/api/admin/notifications/email-config',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          smtpHost: 'smtp.platform.edu.cn', smtpPort: 465, smtpUser: 'admin@platform.edu.cn',
+          fromName: 'RanaMinder 平台', encryption: 'ssl', verified: true,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/notifications/email-config',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, verified: true, savedAt: new Date().toISOString() } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/email-config/test',
+    method: 'post',
+    response: () => {
+      return { code: 0, data: { status: 'sent', sentAt: new Date().toISOString(), to: 'admin@platform.edu.cn' } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/email-config/rotate-key',
+    method: 'post',
+    response: () => {
+      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/preferences',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 管理员路由：表单
+  {
+    url: '/api/admin/forms/designer/:formId',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          id: 'pform-001', title: '平台通用报名表', status: 'published',
+          fields: [
+            { id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null },
+            { id: 'f2', type: 'text', label: '学号', required: true, readonly: false, permission: 'read_write', options: null, description: null },
+            { id: 'f3', type: 'select', label: '意向社团', required: true, readonly: false, permission: 'read_write', options: ['计算机协会', '电子设计协会', '数学建模协会'], description: null },
+          ],
+          version: 3,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/forms/designer/:formId/save',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
+    },
+  },
+  {
+    url: '/api/admin/forms/:formId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return {
+        code: 0,
+        data: {
+          id: query.formId, title: '平台通用表单', status: 'published',
+          versions: [{
+            version: 1, status: 'published', publishedAt: '2025-07-01T10:00:00+08:00',
+            fields: [
+              { id: 'f1', type: 'text', label: '字段1', description: null, required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            ],
+          }],
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/forms/versions/:formId/submit',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：导出下载
+  {
+    url: '/api/org/:clubId/exports/:id/download',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return {
+        code: 0,
+        data: {
+          fileId: query.id, status: 'downloaded',
+          downloadUrl: '/mock-files/' + query.id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+      }
+    },
+  },
+  // 工作空间：邮件密钥轮换
+  {
+    url: '/api/org/:clubId/notifications/email-config/rotate-key',
+    method: 'post',
+    response: () => {
+      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：通知偏好
+  {
+    url: '/api/org/:clubId/notifications/preferences',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：表单版本提交
+  {
+    url: '/api/org/:clubId/forms/versions/:formId/submit',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
+    },
+  },
 ]
 
 /** 列表页补充 handlers */
