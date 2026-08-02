@@ -1,5 +1,5 @@
 import type { MockMethod } from './types'
-import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, type MockUser } from './auth'
+import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
@@ -316,6 +316,14 @@ const identityHandlers: MockMethod[] = [
     },
   },
   {
+    url: '/api/auth/logout',
+    method: 'post',
+    response: () => {
+      clearMockSession()
+      return { code: 0, data: null }
+    },
+  },
+  {
     url: '/api/auth/casdoor/login-url',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
@@ -404,25 +412,22 @@ const organizationHandlers: MockMethod[] = [
     url: '/api/org/:clubId/context',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
       const user = resolveMockUser(url)
-      const ws = getWorkspace(user)
-      if (!ws || ws.clubId !== query.clubId) {
-        return {
-          statusCode: 403,
-          body: {
-            code: 'IFC-ERR-003',
-            message: '您没有访问该社团工作空间的权限',
-            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
-          },
-        }
+      const membership = user.roles.find((role) => role.clubId === query.clubId)
+      if (!membership) {
+        return { statusCode: 403, body: { code: 'IFC-ERR-004', message: '工作空间不可访问' } }
       }
       return {
         code: 0,
         data: {
-          clubId: ws.clubId,
-          clubName: ws.clubName,
-          role: ws.role,
-          permissions: ws.permissions,
+          clubId: membership.clubId,
+          clubName: membership.clubName,
+          role: membership.role,
+          permissions: membership.permissions,
         },
       }
     },
@@ -686,7 +691,6 @@ const memberHandlers: MockMethod[] = [
       }
     },
   },
-  // 部门关系申请列表
   {
     url: '/api/org/:clubId/members/department-apply',
     method: 'get',
