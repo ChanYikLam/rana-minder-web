@@ -2,9 +2,12 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import type { PageState } from '@/types/machine'
 import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, Search, RefreshCw } from '@lucide/vue'
 
@@ -27,6 +30,7 @@ interface Dept { id: string; name: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<Invite[]>([])
 const departments = ref<Dept[]>([])
 const isManageView = computed(() => route.meta.view === 'manage')
@@ -48,6 +52,9 @@ const sendSubmitting = ref(false)
 
 const actionableStatuses = ['sent', 'pending_acceptance']
 
+// 接受邀请高风险确认
+const acceptTarget = ref<Invite | null>(null)
+
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
@@ -57,7 +64,13 @@ async function loadData() {
     items.value = result.data.items
     if (result.data.departments) departments.value = result.data.departments
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
+  } else {
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
+  }
 }
 
 function formatDate(iso: string): string {
@@ -123,7 +136,7 @@ async function handleWithdraw(inv: Invite) {
     toast.success('邀请已撤回')
     await loadData()
   } else {
-    toast.error('撤回失败，请重试')
+    toastError(r, '撤回失败，请重试')
   }
 }
 
@@ -135,7 +148,7 @@ async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
     toast.success(action === 'accept' ? '已整体接受邀请' : '已拒绝邀请')
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -148,7 +161,7 @@ async function handleSyncConfirm(inv: Invite) {
     toast.success('已确认生效')
     await loadData()
   } else {
-    toast.error('确认失败，请重试')
+    toastError(r, '确认失败，请重试')
   }
 }
 
@@ -156,7 +169,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="常规入社邀请" @retry="loadData">
+  <PageStateBoundary :state="state" title="常规入社邀请" :error="pageError" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">{{ isManageView ? '常规入社邀请' : '我的入社邀请' }}</h1>
@@ -205,8 +218,8 @@ onMounted(loadData)
               <p class="text-xs text-warning">接受邀请将同时加入社团{{ inv.departmentName ? `和「${inv.departmentName}」部门` : '' }}，不可拆分接受</p>
             </div>
             <div class="flex gap-2">
-              <button class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="handleRespond(inv, 'accept')">
-                <CheckCircle2 :size="16" /> {{ actingId === inv.id ? '处理中...' : '整体接受' }}
+              <button class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="acceptTarget = inv">
+                <CheckCircle2 :size="16" /> 整体接受
               </button>
               <button class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md border border-danger text-danger text-sm hover:bg-danger-subtle" :disabled="actingId === inv.id" @click="handleRespond(inv, 'reject')">
                 <XCircle :size="16" /> 拒绝
@@ -278,6 +291,22 @@ onMounted(loadData)
           </div>
         </div>
       </div>
+
+      <HighRiskConfirm
+        :open="!!acceptTarget"
+        title="确认接受入社邀请"
+        description="接受后将建立该社团的成员关系，以及邀请中指定的部门关系。"
+        :targets="acceptTarget ? [
+          { id: 'club', label: '目标社团', detail: acceptTarget.clubName ?? '该社团' },
+          { id: 'dept', label: '加入部门', detail: acceptTarget.departmentName ?? '不指定' },
+          { id: 'status', label: '当前状态', detail: '待处理邀请' },
+        ] : []"
+        impact-summary="接受后将创建成员生效任务。系统完成 Casdoor Group 写入并可信回读前，不会开放成员权限。"
+        confirm-label="确认接受"
+        :executing="acceptTarget !== null && actingId === acceptTarget.id"
+        @confirm="acceptTarget && handleRespond(acceptTarget, 'accept')"
+        @update:open="(v) => { if (!v) acceptTarget = null }"
+      />
     </div>
   </PageStateBoundary>
 </template>

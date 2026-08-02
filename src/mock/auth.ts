@@ -75,7 +75,27 @@ export const mockUsers: Record<string, MockUser> = {
           'club:recruitment:manage',
           'club:joint:manage',
           'club:member:manage',
+          'club:invite:manage',
+          'club:transition:manage',
           'club:form:design',
+          'club:stats:view',
+          'club:export:execute',
+          'club:audit:view',
+          'club:config:manage',
+          'club:batch:execute',
+        ],
+      },
+      {
+        clubId: 'club-002',
+        clubName: '网络协会',
+        role: 'hr',
+        permissions: [
+          'club:dashboard:view',
+          'club:recruitment:manage',
+          'club:joint:manage',
+          'club:member:manage',
+          'club:invite:manage',
+          'club:transition:manage',
           'club:stats:view',
           'club:export:execute',
           'club:audit:view',
@@ -105,8 +125,14 @@ export const mockUsers: Record<string, MockUser> = {
         permissions: [
           'club:dashboard:view',
           'club:recruitment:manage',
+          'club:joint:manage',
           'club:member:manage',
+          'club:invite:manage',
+          'club:transition:manage',
           'club:stats:view',
+          'club:export:execute',
+          'club:audit:view',
+          'club:config:manage',
           'club:batch:execute',
         ],
       },
@@ -132,6 +158,30 @@ export const mockUsers: Record<string, MockUser> = {
         permissions: [
           'club:interview:view',
           'club:interview:evaluate',
+        ],
+      },
+    ],
+  },
+
+  /** 部门负责人（数据范围仅限本部门） */
+  deptleader: {
+    id: 'user-deptleader-001',
+    studentId: '20210006',
+    name: '林晓薇',
+    email: 'deptleader@example.edu.cn',
+    phone: '13800000007',
+    avatar: null,
+    emailVerified: true,
+    profileComplete: true,
+    currentClubId: 'club-001',
+    roles: [
+      {
+        clubId: 'club-001',
+        clubName: '计算机协会',
+        role: 'department_leader',
+        permissions: [
+          'club:dashboard:view',
+          'club:member:manage',
         ],
       },
     ],
@@ -292,6 +342,7 @@ export const USER_MEMBER_MAP: Record<string, string> = {
   'user-hr-001': 'mem-003',
   'user-interviewer-001': 'mem-002',
   'user-member-001': 'mem-001',
+  'user-deptleader-001': 'mem-006',
 }
 
 /** 获取当前用户的默认工作空间（有社团归属时返回） */

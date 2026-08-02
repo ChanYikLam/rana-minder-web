@@ -31,7 +31,7 @@ export interface MockTenure {
 
 export interface MockDeptHistoryEntry {
   id: string
-  action: 'join' | 'leave' | 'transfer_in' | 'transfer_out'
+  action: 'join' | 'leave' | 'transfer'
   departmentName: string
   at: string
 }
@@ -233,6 +233,23 @@ export const members: MockMember[] = [
     ],
     departmentHistory: [
       { id: 'dhis-004', action: 'join', departmentName: '管理', at: '2022-09-01T10:00:00+08:00' },
+    ],
+    anomalies: [],
+  },
+  {
+    id: 'mem-006', clubId: 'club-001', studentId: '20210006',
+    name: '林晓薇', email: 'deptleader@example.edu.cn', phone: '13800000007',
+    status: 'active', joinedAt: '2022-09-01T00:00:00+08:00', exitedAt: null,
+    positions: [
+      { id: 'pos-006', departmentId: 'dept-001', departmentName: '技术部', title: '部长', startDate: '2024-09-01', endDate: null, status: 'active' },
+    ],
+    tenures: [
+      { id: 'ten-007', departmentName: '技术部', title: '干事', startDate: '2022-09-01', endDate: '2023-08-31', endReason: '任期结束' },
+      { id: 'ten-008', departmentName: '技术部', title: '副部长', startDate: '2023-09-01', endDate: '2024-08-31', endReason: '任期结束' },
+      { id: 'ten-009', departmentName: '技术部', title: '部长', startDate: '2024-09-01', endDate: null, endReason: null },
+    ],
+    departmentHistory: [
+      { id: 'dhis-007', action: 'join', departmentName: '技术部', at: '2022-09-01T10:00:00+08:00' },
     ],
     anomalies: [],
   },

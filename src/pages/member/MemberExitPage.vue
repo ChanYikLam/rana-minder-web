@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import { useSessionViewStore } from '@/state/sessionViewStore'
+import { useLastLeaderGuard } from '@/composables/useLastLeaderGuard'
 import type { PageState } from '@/types/machine'
 import { UserMinus, LogOut, AlertTriangle, FileText, CheckCircle2, XCircle } from '@lucide/vue'
 
@@ -16,11 +19,13 @@ interface Resignation { id: string; memberId: string; memberName: string; depart
 const route = useRoute()
 const session = useSessionViewStore()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<ExitMember[]>([])
 const resignations = ref<Resignation[]>([])
 
 // 移除确认弹窗
 const removingId = ref<string | null>(null)
+const removingMember = computed(() => items.value.find((m) => m.id === removingId.value) ?? null)
 const removeReason = ref('')
 const removeError = ref('')
 const exitingId = ref<string | null>(null)
@@ -35,7 +40,13 @@ async function loadData() {
     items.value = result.data.items
     resignations.value = result.data.resignations
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
+  } else {
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
+  }
 }
 
 function formatDate(iso: string): string {
@@ -49,9 +60,7 @@ function canRemove(m: ExitMember): boolean {
 }
 
 // 最后负责人不可移除/退出（需先交接）
-function isLastLeader(m: ExitMember): boolean {
-  return m.title === '负责人' && items.value.filter((i) => i.title === '负责人' && i.status === 'active').length <= 1
-}
+const { isLastLeader } = useLastLeaderGuard(items)
 
 function startRemove(id: string) {
   removingId.value = id
@@ -68,7 +77,7 @@ async function handleMarkExit(m: ExitMember) {
     toast.success('已标记退出')
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -87,7 +96,7 @@ async function handleRemove() {
     removingId.value = null
     await loadData()
   } else {
-    toast.error('移除失败，请重试')
+    toastError(r, '移除失败，请重试')
   }
 }
 
@@ -101,7 +110,7 @@ async function handleResignDecide(res: Resignation, decision: 'approve' | 'rejec
     toast.success(decision === 'approve' ? '已批准辞职' : '已驳回辞职')
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -136,7 +145,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="成员退出与移除" @retry="loadData">
+  <PageStateBoundary :state="state" title="成员退出与移除" :error="pageError" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <h1 class="text-2xl font-bold text-text-primary mb-2">成员退出与移除</h1>
       <p class="text-sm text-text-secondary mb-6">管理成员退出和移除操作</p>
@@ -253,6 +262,11 @@ onMounted(loadData)
             <h3 class="text-base font-medium text-danger">确认移除成员</h3>
           </div>
           <p class="text-sm text-text-secondary mb-3">此操作不可撤销，将移除该成员的全部部门、职位和访问权限，并通知当事人。</p>
+          <div v-if="removingMember" class="rounded-lg border border-border p-3 mb-3 text-sm">
+            <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">目标成员</span><span class="text-text-primary">{{ removingMember.name }}</span></div>
+            <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">学号</span><span class="text-text-primary">{{ removingMember.studentId }}</span></div>
+            <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">部门 · 职位</span><span class="text-text-primary">{{ removingMember.department }} · {{ removingMember.title }}</span></div>
+          </div>
           <p class="text-xs text-warning mb-2">移除必须填写原因</p>
           <textarea
             v-model="removeReason"
