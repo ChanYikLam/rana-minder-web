@@ -4,7 +4,9 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { ArrowRightLeft, Plus, AlertTriangle, RefreshCw } from '@lucide/vue'
@@ -22,6 +24,7 @@ interface Dept { id: string; name: string }
 const route = useRoute()
 const session = useSessionViewStore()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<DeptApply[]>([])
 const departments = ref<Dept[]>([])
 
@@ -48,7 +51,13 @@ async function loadData() {
     items.value = result.data.items
     departments.value = result.data.departments
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
+  } else {
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
+  }
 }
 
 function formatDate(iso: string): string {
@@ -81,7 +90,7 @@ async function handleReject() {
     toast.success('已驳回')
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -94,7 +103,7 @@ async function handleApprove(id: string) {
     toast.success('已批准，待执行生效')
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -112,7 +121,7 @@ async function handleExecute(id: string) {
     }
     await loadData()
   } else {
-    toast.error('执行失败，请重试')
+    toastError(r, '执行失败，请重试')
   }
 }
 
@@ -125,7 +134,7 @@ async function handleWithdraw(id: string) {
     toast.success('申请已撤回')
     await loadData()
   } else if (r.kind === 'rejected' && r.error) {
-    toast.error((r.error as { message?: string }).message || '撤回失败')
+    toastError(r, '撤回失败')
   }
 }
 
@@ -167,7 +176,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="部门关系申请" @retry="loadData">
+  <PageStateBoundary :state="state" title="部门关系申请" :error="pageError" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">部门关系申请</h1>
