@@ -1,0 +1,4 @@
+interface:
+  display_name: "前端代码审计"
+  short_description: "按项目基线审计 Vue/Taro 前端改动与验证证据"
+  default_prompt: "使用 $frontend-code-audit 审计本阶段前端改动，并输出分级问题与验证证据。"
