@@ -50,12 +50,12 @@ const more = computed(() => props.selected.length - previewItems.value.length)
       </p>
     </div>
 
-    <div class="flex gap-2">
-      <Button variant="outline" :disabled="selected.length === 0" @click="emit('preview')">
+    <div class="flex flex-col-reverse sm:flex-row gap-2">
+      <Button variant="outline" class="sm:w-auto" :disabled="selected.length === 0" @click="emit('preview')">
         预览固定清单
       </Button>
       <Button
-        class="flex-1"
+        class="w-full sm:flex-1"
         :disabled="selected.length === 0"
         :loading="executing"
         @click="emit('execute')"

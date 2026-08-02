@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ShieldAlert, Check } from '@lucide/vue'
 import ImpactPreview, { type ImpactItem } from './ImpactPreview.vue'
 import Button from '@/components/common/Button.vue'
+import { useFocusDialog } from '@/composables/useFocusDialog'
 
 export interface ConfirmScopeProps {
   open: boolean
@@ -27,16 +28,26 @@ const emit = defineEmits<{
 
 const agreed = computed(() => props.open && props.targets.length > 0)
 
+function close() {
+  emit('cancel')
+  emit('update:open', false)
+}
+
 function onConfirm() {
   if (!agreed.value) return
   emit('confirm')
 }
+
+const dialogRef = ref<HTMLElement | null>(null)
+const open = computed(() => props.open)
+useFocusDialog(dialogRef, open, close)
 </script>
 
 <template>
   <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div class="absolute inset-0 bg-black/40" aria-hidden="true" @click="emit('update:open', false)" />
+    <div class="absolute inset-0 bg-black/40" aria-hidden="true" @click="close" />
     <div
+      ref="dialogRef"
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-scope-title"
@@ -62,8 +73,8 @@ function onConfirm() {
         </p>
       </div>
 
-      <div class="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
-        <Button variant="outline" @click="emit('cancel'); emit('update:open', false)">取消</Button>
+      <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-border px-5 py-3">
+        <Button variant="outline" @click="close">取消</Button>
         <Button variant="destructive" :loading="confirming" :disabled="!agreed" @click="onConfirm">
           <Check :size="14" class="mr-1" /> 确认执行（{{ targets.length }} 项）
         </Button>
