@@ -12,19 +12,21 @@ async function loadNotifications() {
   state.value = 'loading'
   try {
     await notifStore.loadNotifications()
-    state.value = notifStore.items.length === 0 ? 'normal' : 'normal'
-  } catch {
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  } catch (error) {
     state.value = 'error'
+    console.error('加载通知失败:', error)
   }
 }
 
 async function handleMarkAllRead() {
+  state.value = 'loading'
   try {
-    state.value = 'loading'
     await notifStore.markAllRead()
-    state.value = 'normal'
-  } catch {
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  } catch (error) {
     state.value = 'error'
+    console.error('标记已读失败:', error)
   }
 }
 

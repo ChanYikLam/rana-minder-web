@@ -60,16 +60,30 @@ async function handleSaveDraft() {
   }
 }
 
+function stableHash(value: string): string {
+  // 简单稳定的字符串哈希（FNV-1a 变种），用于幂等键指纹
+  let h = 2166136261
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0).toString(16)
+}
+
 async function handleSubmit() {
   submitting.value = true
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) { submitting.value = false; return }
 
+  // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键
+  const dataFingerprint = stableHash(JSON.stringify(formData))
+  const idempotencyKey = `${formId}-v${currentVersion.value?.version || 1}-${dataFingerprint}`
+
   const result = await post(`${apiScope.prefix}/forms/versions/${formId}/submit`, {
     formData,
     version: currentVersion.value?.version || 1,
-    idempotencyKey: `${formId}-${currentVersion.value?.version}-${Date.now()}`,
+    idempotencyKey,
   })
   submitting.value = false
   if (result.kind === 'completed') {

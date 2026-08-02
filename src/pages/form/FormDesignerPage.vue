@@ -13,6 +13,8 @@ interface Field { id: string; type: string; label: string; required: boolean; re
 const route = useRoute()
 const state = ref<PageState>('loading')
 const formTitle = ref('')
+const formId = ref('')
+const currentVersion = ref(1)
 const fields = ref<Field[]>([])
 const selectedFieldId = ref<string | null>(null)
 const saving = ref(false)
@@ -33,13 +35,15 @@ const fieldTypes = [
 
 async function loadData() {
   state.value = 'loading'
-  const formId = route.params.formId as string
+  const id = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) { state.value = 'error'; return }
-  const result = await get<{ title: string; fields: Field[] }>(`${apiScope.prefix}/forms/designer/${formId}`)
+  const result = await get<{ id: string; title: string; fields: Field[]; version: number }>(`${apiScope.prefix}/forms/designer/${id}`)
   if (result.kind === 'completed') {
     formTitle.value = result.data.title
     fields.value = result.data.fields
+    formId.value = result.data.id || id
+    currentVersion.value = typeof result.data.version === 'number' ? result.data.version : 1
     state.value = 'normal'
   } else { state.value = 'error' }
 }
@@ -72,16 +76,21 @@ function updateSelectedField(updates: Partial<Field>) {
 
 async function handleSave() {
   saving.value = true
-  const formId = route.params.formId as string
+  const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
-  const result = await post(`${apiScope.prefix}/forms/designer/${formId}/save`, {
+  const nextVersion = currentVersion.value + 1
+  const result = await post(`${apiScope.prefix}/forms/designer/${id}/save`, {
     fields: fields.value,
-    version: 1,
+    version: nextVersion,
+    expectedVersion: currentVersion.value,
   })
   saving.value = false
   if (result.kind === 'completed') {
-    toast.success('表单已保存')
+    const data = result.data as { version?: number; status?: string }
+    if (typeof data?.version === 'number') currentVersion.value = data.version
+    else currentVersion.value = nextVersion
+    toast.success(`表单已保存（v${currentVersion.value}）`)
   } else {
     toast.error('保存失败，请稍后重试')
   }

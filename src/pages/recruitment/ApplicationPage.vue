@@ -18,13 +18,48 @@ const activity = ref<ActivityDetail | null>(null)
 const formFields = ref<FormField[]>([])
 
 const formData = reactive<Record<string, string>>({})
-const formFiles = reactive<Record<string, { name: string; size: number; checking: boolean } | null>>({})
+interface FormFile { fileId: string; name: string; size: number; checking: boolean; error: boolean }
+const formFiles = reactive<Record<string, FormFile | null>>({})
 const formErrors = ref<Record<string, string>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
 const savingDraft = ref(false)
+
+async function uploadFile(fieldId: string, file: File): Promise<void> {
+  formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: true, error: false }
+  const uploadForm = new FormData()
+  uploadForm.append('file', file)
+  uploadForm.append('purpose', 'application')
+  try {
+    const result = await post<{ fileId: string; status: string }>('/files/upload', uploadForm)
+    if (result.kind === 'completed') {
+      const data = result.data as { fileId: string; status?: string }
+      if (data.status === 'failed') {
+        formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
+        toast.error('文件安全检查未通过，请重新上传')
+        return
+      }
+      formFiles[fieldId] = { fileId: data.fileId, name: file.name, size: file.size, checking: false, error: false }
+      formData[fieldId] = data.fileId
+    } else {
+      formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
+      toast.error('文件上传失败，请重试')
+    }
+  } catch {
+    formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
+    toast.error('文件上传失败，请重试')
+  }
+}
+
+async function handleFileChange(e: Event, fieldId: string) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  await uploadFile(fieldId, file)
+  input.value = ''
+}
 
 function getFieldDescriptionId(fieldId: string): string {
   return `field-${fieldId}-description`
@@ -100,6 +135,14 @@ async function handleSubmit() {
   for (const field of formFields.value) {
     if (field.required && !formData[field.id]) {
       formErrors.value[field.id] = `${field.label}为必填项`
+    }
+    if (field.type === 'file') {
+      const f = formFiles[field.id]
+      if (f?.checking) {
+        formErrors.value[field.id] = '文件安全检查中，请稍候再提交'
+      } else if (f?.error) {
+        formErrors.value[field.id] = '文件上传失败，请重新上传'
+      }
     }
   }
   if (preferences.value.length === 0) {
@@ -231,7 +274,7 @@ onMounted(loadData)
             <div
               v-else-if="field.type === 'file'"
               :id="field.id"
-              :class="[formErrors[field.id] ? 'border-danger' : 'border-border']"
+              :class="[formErrors[field.id] || formFiles[field.id]?.error ? 'border-danger' : 'border-border']"
               class="w-full rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
               :aria-invalid="Boolean(formErrors[field.id])"
               :aria-describedby="getFieldDescribedBy(field)"
@@ -239,10 +282,14 @@ onMounted(loadData)
               <template v-if="formFiles[field.id]">
                 <div class="flex items-center gap-2 p-3">
                   <FileWarning v-if="formFiles[field.id]!.checking" :size="16" class="text-warning" />
-                  <Upload v-else :size="16" class="text-success" />
+                  <Upload v-else-if="!formFiles[field.id]!.error" :size="16" class="text-success" />
+                  <FileWarning v-else :size="16" class="text-danger" />
                   <span class="text-xs text-text-primary">{{ formFiles[field.id]!.name }}</span>
                   <span class="text-xs text-text-secondary">({{ (formFiles[field.id]!.size / 1024).toFixed(1) }} KB)</span>
-                  <button class="text-xs text-danger hover:underline" @click="formFiles[field.id] = null">移除</button>
+                  <span v-if="formFiles[field.id]!.checking" class="text-xs text-warning">检查中...</span>
+                  <span v-else-if="formFiles[field.id]!.error" class="text-xs text-danger">上传失败</span>
+                  <span v-else class="text-xs text-success">已上传</span>
+                  <button type="button" class="text-xs text-danger hover:underline" :disabled="formFiles[field.id]!.checking" @click="formFiles[field.id] = null; formData[field.id] = ''">移除</button>
                 </div>
               </template>
               <label v-else class="flex flex-col items-center justify-center gap-1 py-6 cursor-pointer w-full h-full">
@@ -252,13 +299,7 @@ onMounted(loadData)
                   type="file"
                   class="hidden"
                   :aria-label="`上传${field.label}`"
-                  @change="(e) => {
-                    const file = (e.target as HTMLInputElement).files?.[0]
-                    if (file) {
-                      formFiles[field.id] = { name: file.name, size: file.size, checking: true }
-                      formData[field.id] = file.name
-                    }
-                  }"
+                  @change="(e) => handleFileChange(e as Event, field.id)"
                 />
               </label>
             </div>

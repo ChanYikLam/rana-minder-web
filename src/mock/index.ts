@@ -539,7 +539,7 @@ const personalHandlers: MockMethod[] = [
             title: '处理常规入社邀请',
             description: '计算机协会' + (pending.departmentName ? ` · 加入「${pending.departmentName}」` : ''),
             deadline: pending.expiredAt,
-            link: '/me/invitations/membership',
+            link: '/me/invitations/membership/' + pending.id,
           })
         }
       }
@@ -860,6 +860,34 @@ const memberHandlers: MockMethod[] = [
               }))
             : [],
           nextCursor: null,
+        },
+      }
+    },
+  },
+  // 被邀请人：单条入社邀请详情（路由参数化后的入口）
+  {
+    url: '/api/me/invitations/membership/:invitationId',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const candidateId = actorCandidateId(user)
+      const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
+      if (candidateId && inv.candidateId !== candidateId) return forbidden()
+      return {
+        code: 0,
+        data: {
+          id: inv.id,
+          clubId: inv.clubId,
+          clubName: '计算机协会',
+          candidateId: inv.candidateId,
+          candidateName: inv.candidateName,
+          departmentId: inv.departmentId,
+          departmentName: inv.departmentName,
+          status: inv.status,
+          sentAt: inv.sentAt,
+          expiredAt: inv.expiredAt,
+          acceptedAt: inv.acceptedAt,
         },
       }
     },
@@ -1341,6 +1369,26 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
+  // 文件上传（FORM/REC：附件走此端点，3 秒后完成安全检查并返回 fileId）
+  {
+    url: '/api/files/upload',
+    method: 'post',
+    response: ({ body }: { body: { input?: { purpose?: string; name?: string } } }) => {
+      const fileId = 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+      const name = body.input?.name || 'upload.bin'
+      return {
+        code: 0,
+        data: {
+          fileId,
+          name,
+          size: 1024 * (8 + Math.floor(Math.random() * 32)),
+          mimeType: 'application/octet-stream',
+          status: 'clean',
+          uploadedAt: new Date().toISOString(),
+        },
+      }
+    },
+  },
   // 事实纠错列表
   {
     url: '/api/org/:clubId/audit/corrections',
@@ -1687,7 +1735,7 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
-      if (!getPermissions(user, '').includes('platform:delete:execute')) return forbidden()
+      if (!getPermissions(user, '').includes('platform:export:execute')) return forbidden()
       return {
         code: 0,
         data: {
@@ -1712,13 +1760,35 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
+  // 管理员：导出任务状态查询（用于轮询）
+  {
+    url: '/api/admin/exports/:id/status',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const task = exportTasks.find((t) => t.id === query.id)
+      if (!task) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '导出任务不存在', supportId: 'MOCK' } }
+      }
+      return {
+        code: 0,
+        data: {
+          id: task.id,
+          status: task.status,
+          downloadUrl: task.downloadUrl,
+          fileSize: task.fileSize,
+          completedAt: task.completedAt,
+          expiredAt: task.expiredAt,
+        },
+      }
+    },
+  },
   // 管理员路由：审计日志
   {
     url: '/api/admin/audit/logs',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const user = resolveMockUser(url)
-      if (!getPermissions(user, '').includes('platform:delete:execute')) return forbidden()
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
       const allLogs = [
         { id: 'log-101', actorName: '超级管理员', action: '强制关闭联合活动', targetType: '联合活动', targetId: 'jnt-002', detail: '设计+摄影联合招新', createdAt: '2025-08-01T09:00:00+08:00' },
         { id: 'log-102', actorName: '超级管理员', action: '批准社团接入', targetType: '社团', targetId: 'club-001', detail: '计算机协会', createdAt: '2025-07-01T10:00:00+08:00' },
@@ -1872,6 +1942,28 @@ const platformHandlers: MockMethod[] = [
           fileId: query.id, status: 'downloaded',
           downloadUrl: '/mock-files/' + query.id,
           expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+      }
+    },
+  },
+  // 工作空间：导出任务状态查询（用于轮询）
+  {
+    url: '/api/org/:clubId/exports/:id/status',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const task = exportTasks.find((t) => t.id === query.id)
+      if (!task) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '导出任务不存在', supportId: 'MOCK' } }
+      }
+      return {
+        code: 0,
+        data: {
+          id: task.id,
+          status: task.status,
+          downloadUrl: task.downloadUrl,
+          fileSize: task.fileSize,
+          completedAt: task.completedAt,
+          expiredAt: task.expiredAt,
         },
       }
     },
