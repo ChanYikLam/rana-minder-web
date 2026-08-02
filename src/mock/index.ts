@@ -124,6 +124,20 @@ const identityHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const user = resolveMockUser(url)
+
+      // 降级注入：?_mock_degraded=window（15 分钟白名单窗口内）/ expired（已超 15 分钟）
+      // 未传参数时保持非降级，模拟故障前正常会话或恢复后重读
+      let degraded = false
+      let degradedSince: string | null = null
+      const degradeFlag = new URL(url, 'http://localhost').searchParams.get('_mock_degraded')
+      if (degradeFlag === 'window') {
+        degraded = true
+        degradedSince = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+      } else if (degradeFlag === 'expired') {
+        degraded = true
+        degradedSince = new Date(Date.now() - 20 * 60 * 1000).toISOString()
+      }
+
       return {
         code: 0,
         data: {
@@ -141,7 +155,8 @@ const identityHandlers: MockMethod[] = [
             complete: user.profileComplete,
             emailVerified: user.emailVerified,
           },
-          degraded: false,
+          degraded,
+          degradedSince,
           permissions: getPermissions(user, user.currentClubId || ''),
           workspace: getWorkspace(user),
         },

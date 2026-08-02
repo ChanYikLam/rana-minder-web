@@ -21,6 +21,7 @@ const sessionSchema = z.object({
     emailVerified: z.boolean(),
   }),
   degraded: z.boolean(),
+  degradedSince: z.string().nullable().optional(),
   permissions: z.array(z.string()),
   workspace: z.object({
     clubId: z.string(),

@@ -18,6 +18,7 @@ import {
 import WorkspaceNav from './components/WorkspaceNav.vue'
 import ClubSwitcher from '@/components/business/ClubSwitcher.vue'
 import Breadcrumbs from '@/components/business/Breadcrumbs.vue'
+import DegradedBanner from '@/components/business/DegradedBanner.vue'
 import RoleBadge from '@/components/business/RoleBadge.vue'
 import { useTheme } from '@/composables/useTheme'
 
@@ -367,6 +368,7 @@ async function handleLogout() {
       <!-- Main Content -->
       <main id="default-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
         <div class="mx-auto max-w-[1400px] p-4 md:p-6">
+          <div class="mb-4"><DegradedBanner /></div>
           <div class="mb-4">
             <Breadcrumbs />
           </div>

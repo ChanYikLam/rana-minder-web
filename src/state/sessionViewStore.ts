@@ -7,14 +7,31 @@ export const useSessionViewStore = defineStore('sessionView', () => {
   const user = ref<User | null>(null)
   const profileGate = ref<ProfileGate>({ complete: false, emailVerified: false })
   const degraded = ref(false)
+  /** 降级起点时间戳（毫秒）；SRS-FAIL-001 15 分钟窗口 */
+  const degradedSince = ref<number | null>(null)
   const permissions = ref<string[]>([])
   const workspace = ref<WorkspaceInfo | null>(null)
   const loading = ref(false)
   const lastLoadedAt = ref<number | null>(null)
 
+  /** SRS-FAIL-001 最小白名单窗口：15 分钟 */
+  const DEGRADED_WINDOW_MS = 15 * 60 * 1000
+
   const isAuthenticated = computed(() => user.value !== null)
   const isProfileComplete = computed(() => profileGate.value.complete && profileGate.value.emailVerified)
   const needsProfileGate = computed(() => isAuthenticated.value && !isProfileComplete.value)
+
+  /** 是否处于 15 分钟白名单窗口内（故障前已可信登录的既有会话） */
+  const inDegradedWindow = computed(() => {
+    if (!degraded.value || degradedSince.value == null) return false
+    return Date.now() - degradedSince.value < DEGRADED_WINDOW_MS
+  })
+
+  /** 剩余窗口毫秒（窗口外为 0） */
+  const degradedWindowRemainingMs = computed(() => {
+    if (!degraded.value || degradedSince.value == null) return 0
+    return Math.max(0, DEGRADED_WINDOW_MS - (Date.now() - degradedSince.value))
+  })
 
   async function loadSession() {
     loading.value = true
@@ -26,6 +43,12 @@ export const useSessionViewStore = defineStore('sessionView', () => {
         user.value = data.user
         profileGate.value = data.profileGate
         degraded.value = data.degraded
+        degradedSince.value =
+          data.degraded && data.degradedSince
+            ? new Date(data.degradedSince).getTime()
+            : data.degraded
+              ? Date.now()
+              : null
         permissions.value = data.permissions
         workspace.value = data.workspace
         lastLoadedAt.value = Date.now()
@@ -41,6 +64,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     user.value = null
     profileGate.value = { complete: false, emailVerified: false }
     degraded.value = false
+    degradedSince.value = null
     permissions.value = []
     workspace.value = null
     lastLoadedAt.value = null
@@ -62,6 +86,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     user,
     profileGate,
     degraded,
+    degradedSince,
     permissions,
     workspace,
     loading,
@@ -69,6 +94,8 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     isAuthenticated,
     isProfileComplete,
     needsProfileGate,
+    inDegradedWindow,
+    degradedWindowRemainingMs,
     loadSession,
     clearSession,
     logout,

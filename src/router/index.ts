@@ -530,6 +530,26 @@ router.beforeEach(async (to) => {
       return { name: 'P-IDN-01', query: { redirect: to.fullPath } }
     }
 
+    // SRS-FAIL-001/002 Casdoor 故障降级
+    if (session.degraded) {
+      const name = String(to.name)
+      const inWindow = session.inDegradedWindow
+      // 故障已超过 15 分钟：除公开页面外全部关闭，落降级页 P-GEN-03
+      if (!inWindow) {
+        return { name: 'P-GEN-03', query: { from: to.fullPath } }
+      }
+      // 15 分钟窗口内最小白名单：仅本人基础资料查看与既有本人表单草稿（非附件）
+      const WHITELIST = new Set([
+        'P-IDN-02',        // 查看本人基础资料
+        'P-IDN-03',        // 个人中心
+        'P-REC-03',        // 报名申请/草稿
+        'P-JNT-02',        // 联合申请/草稿
+      ])
+      if (!WHITELIST.has(name)) {
+        return { name: 'P-GEN-03', query: { from: to.fullPath } }
+      }
+    }
+
     if (session.needsProfileGate && to.name !== 'P-GEN-04' && to.name !== 'P-IDN-02' && to.name !== 'P-IDN-02-edit' && to.name !== 'P-IDN-02-sync-conflict') {
       return { name: 'P-GEN-04' }
     }
