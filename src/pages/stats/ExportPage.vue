@@ -42,19 +42,17 @@ function formatTime(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-let creating = false
-
 async function handleCreate() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
   executing.value = true
-  creating = true
   const result = await post(`${apiScope.prefix}/exports`, { type: '成员名单' })
   executing.value = false
-  creating = false
   if (result.kind === 'completed') {
     confirmOpen.value = false
     await loadData()
+  } else {
+    toast.error('创建导出失败，请稍后重试')
   }
 }
 
