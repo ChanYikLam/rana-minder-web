@@ -1,3 +1,5 @@
-allowBuilds:
+packages:
+  - '.'
+onlyBuiltDependencies:
   esbuild: true
   vue-demi: true
