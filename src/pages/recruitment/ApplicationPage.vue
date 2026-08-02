@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { PreferenceSorter, type PreferenceEntry } from '@/components/form'
 import { ObjectPicker, type PickerGroup } from '@/components/form'
-import { AttachmentUpload } from '@/components/form'
-import type { FileMeta } from '@/types/domain/form'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Save, Send } from '@lucide/vue'
+import { ArrowLeft, Upload, Save, Send } from '@lucide/vue'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -23,12 +21,61 @@ const formFields = ref<FormField[]>([])
 
 const formData = reactive<Record<string, string>>({})
 const formErrors = ref<Record<string, string>>({})
-const fileValues = ref<Record<string, FileMeta[]>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
 const savingDraft = ref(false)
+
+interface FileUploadState { file: File | null; status: 'idle' | 'scanning' | 'safe' | 'unsafe'; message: string }
+const fileUploads = reactive<Record<string, FileUploadState>>({})
+const fileContents = reactive<Record<string, { name: string; size: number; type: string; content: string }>>({})
+const fileTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function getFileUpload(fieldId: string): FileUploadState {
+  if (!fileUploads[fieldId]) {
+    fileUploads[fieldId] = { file: null, status: 'idle', message: '' }
+  }
+  return fileUploads[fieldId]
+}
+
+function handleFileSelect(fieldId: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const upload = getFileUpload(fieldId)
+  upload.file = file
+  upload.status = 'scanning'
+  upload.message = '文件正在安全检查中...'
+  formData[fieldId] = file.name
+  // 清理已有定时器
+  const existing = fileTimers.get(fieldId)
+  if (existing) clearTimeout(existing)
+  // 模拟真实上传：将文件读取为 base64 内容，供提交时随答案一并发送
+  const reader = new FileReader()
+  reader.onloadend = () => {
+    fileContents[fieldId] = { name: file.name, size: file.size, type: file.type, content: reader.result as string }
+  }
+  reader.readAsDataURL(file)
+  // 模拟安全检查；实际应调用后端上传/检查接口
+  fileTimers.set(fieldId, setTimeout(() => {
+    upload.status = 'safe'
+    upload.message = '文件安全检查通过'
+    fileTimers.delete(fieldId)
+  }, 2000))
+  // 允许重选同一文件
+  input.value = ''
+}
+
+function handleFileClick(fieldId: string) {
+  const input = document.getElementById(`file-input-${fieldId}`) as HTMLInputElement | null
+  input?.click()
+}
+
+onBeforeUnmount(() => {
+  fileTimers.forEach((t) => clearTimeout(t))
+  fileTimers.clear()
+})
 
 function getFieldDescriptionId(fieldId: string): string {
   return `field-${fieldId}-description`
@@ -102,8 +149,15 @@ function onDeptPick(ids: string[]) {
 
 async function handleSaveDraft() {
   savingDraft.value = true
+  // 草稿同样包含文件元数据
+  const answers: Record<string, unknown> = { ...formData }
+  for (const field of formFields.value) {
+    if (field.type === 'file' && fileContents[field.id]) {
+      answers[field.id] = fileContents[field.id]
+    }
+  }
   const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
-    formAnswers: formData,
+    answers,
   })
   savingDraft.value = false
   if (result.kind === 'completed') {
@@ -121,8 +175,16 @@ async function handleSubmit() {
   submitError.value = null
 
   for (const field of formFields.value) {
-    const hasFile = field.type === 'file' ? (fileValues.value[field.id]?.length ?? 0) > 0 : false
-    if (field.required && !formData[field.id] && !hasFile) {
+    if (field.type === 'file') {
+      const upload = getFileUpload(field.id)
+      if (field.required && !upload.file) {
+        formErrors.value[field.id] = `${field.label}为必填项`
+      } else if (upload.file && upload.status === 'scanning') {
+        formErrors.value[field.id] = `${field.label}附件安全检查中，请稍后提交`
+      } else if (upload.file && upload.status === 'unsafe') {
+        formErrors.value[field.id] = `${field.label}附件未通过安全检查`
+      }
+    } else if (field.required && !formData[field.id]) {
       formErrors.value[field.id] = `${field.label}为必填项`
     }
   }
@@ -132,10 +194,17 @@ async function handleSubmit() {
   }
   if (Object.keys(formErrors.value).length > 0) return
 
+  // 构建提交答案：文本字段取 formData，文件字段附带文件元数据
+  const answers: Record<string, unknown> = { ...formData }
+  for (const field of formFields.value) {
+    if (field.type === 'file' && fileContents[field.id]) {
+      answers[field.id] = fileContents[field.id]
+    }
+  }
+
   submitting.value = true
   const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
-    formData,
-    files: fileValues.value,
+    answers,
     preferences: preferences.value,
   })
   submitting.value = false
@@ -227,13 +296,33 @@ onMounted(loadData)
               <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
             </select>
 
-            <AttachmentUpload
-              v-else-if="field.type === 'file'"
-              :id="field.id"
-              v-model="fileValues[field.id]"
-              :aria-invalid="Boolean(formErrors[field.id])"
-              :aria-describedby="getFieldDescribedBy(field)"
-            />
+            <div v-else-if="field.type === 'file'" class="relative">
+              <input
+                :id="`file-input-${field.id}`"
+                type="file"
+                class="hidden"
+                @change="handleFileSelect(field.id, $event)"
+              />
+              <button
+                :id="field.id"
+                type="button"
+                class="w-full h-24 rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+                :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
+                :aria-invalid="Boolean(formErrors[field.id])"
+                :aria-describedby="getFieldDescribedBy(field)"
+                @click="handleFileClick(field.id)"
+              >
+                <Upload :size="20" />
+                <span class="text-xs">{{ getFileUpload(field.id).file ? getFileUpload(field.id).file!.name : '点击上传文件' }}</span>
+              </button>
+              <p
+                v-if="getFileUpload(field.id).message"
+                class="text-xs mt-1"
+                :class="getFileUpload(field.id).status === 'safe' ? 'text-success' : 'text-warning'"
+              >
+                {{ getFileUpload(field.id).message }}
+              </p>
+            </div>
 
             <p v-if="formErrors[field.id]" :id="getFieldErrorId(field.id)" class="mt-1 text-xs text-danger" role="alert">
               {{ formErrors[field.id] }}

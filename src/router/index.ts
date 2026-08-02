@@ -147,6 +147,10 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/me/invitations/membership',
+    redirect: '/me/todo',
+  },
+  {
+    path: '/me/invitations/membership/:invitationId',
     name: 'P-MEM-03-self',
     component: () => import('@/pages/member/MembershipInvitePage.vue'),
     meta: { layout: 'default', requiresAuth: true, view: 'self' },

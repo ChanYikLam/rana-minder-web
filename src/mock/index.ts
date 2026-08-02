@@ -29,11 +29,11 @@ function consumeReauthProof(proof: unknown): boolean {
   return true
 }
 
-/** 业务规则拒绝（HTTP 422 + IFC-ERR-008） */
+/** 业务规则拒绝（HTTP 422 + IFC-ERR-006） */
 function businessError(message: string) {
   return {
     statusCode: 422,
-    body: { code: 'IFC-ERR-008', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+    body: { code: 'IFC-ERR-006', message, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
   }
 }
 
@@ -300,7 +300,7 @@ const identityHandlers: MockMethod[] = [
         return {
           statusCode: 422,
           body: {
-            code: 'IFC-ERR-008',
+            code: 'IFC-ERR-005',
             message: '不支持的冲突字段',
             supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
           },
@@ -373,14 +373,15 @@ const publicHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      const clubs = [
+        { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', logo: null },
+        { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', logo: null },
+        { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', logo: null },
+      ]
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', memberCount: 128, logo: null },
-            { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', memberCount: 86, logo: null },
-            { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', memberCount: 64, logo: null },
-          ],
+          items: clubs.map((c) => ({ ...c, memberCount: db.listMembers(c.id).filter((m) => m.status === 'active').length })),
           nextCursor: null,
         },
       }
@@ -394,33 +395,21 @@ const publicHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      const items = rdb.recruitmentActivities
+        .filter((a) => a.channelStatus === 'open' && a.status !== 'archived')
+        .map((a) => ({
+          id: a.id,
+          clubId: a.clubId,
+          clubName: a.clubName,
+          title: a.title,
+          type: 'recruitment' as const,
+          status: a.status === 'in_progress' ? 'open' : a.status,
+          deadline: a.deadline,
+          description: a.description,
+        }))
       return {
         code: 0,
-        data: {
-          items: [
-            {
-              id: 'act-001',
-              clubId: 'club-001',
-              clubName: '计算机协会',
-              title: '2025 秋季招新',
-              type: 'recruitment',
-              status: 'open',
-              deadline: '2025-09-15T23:59:00+08:00',
-              description: '面向全校新生的秋季招新活动',
-            },
-            {
-              id: 'act-002',
-              clubId: 'club-002',
-              clubName: '电子设计协会',
-              title: '嵌入式方向招新',
-              type: 'recruitment',
-              status: 'open',
-              deadline: '2025-09-20T23:59:00+08:00',
-              description: '嵌入式开发方向招新',
-            },
-          ],
-          nextCursor: null,
-        },
+        data: { items, nextCursor: null },
       }
     },
   },
@@ -462,24 +451,26 @@ const organizationHandlers: MockMethod[] = [
       }
       const user = resolveMockUser(url)
       const permissions = getPermissions(user, query.clubId || '')
-      const pendingApplications = db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review').length
-      const pendingInvitations = db.membershipInvitations.filter((i) => i.clubId === query.clubId && (i.status === 'sent' || i.status === 'pending_acceptance')).length
+      const clubId = query.clubId || ''
+      const pendingApplications = db.departmentApplications.filter((a) => a.clubId === clubId && a.status === 'under_review').length
+      const pendingInvitations = db.membershipInvitations.filter((i) => i.clubId === clubId && (i.status === 'sent' || i.status === 'pending_acceptance')).length
+      const pendingInterviews = rdb.recruitmentInterviews.filter((i) => i.clubId === clubId && (i.status === 'scheduled' || i.status === 'pending_selection')).length
       return {
         code: 0,
         data: {
-          club: { id: query.clubId, name: '计算机协会' },
-          role: user.roles.find((r) => r.clubId === query.clubId)?.role || 'member',
+          club: { id: clubId, name: '计算机协会' },
+          role: user.roles.find((r) => r.clubId === clubId)?.role || 'member',
           permissions,
           metrics: {
             pendingReviews: pendingApplications + pendingInvitations,
-            pendingInterviews: 5,
+            pendingInterviews,
             pendingResults: 0,
             syncErrors: 2,
           },
           todos: [
-            { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: 12 },
-            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: 5 },
-            { id: 'todo-003', type: 'invitation_pending', title: '待发送邀请', count: 3 },
+            { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted').length },
+            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted' && !rdb.recruitmentInterviews.some((i) => i.activityId === a.activityId && i.applicantId === a.applicantId)).length },
+            { id: 'todo-003', type: 'invitation_pending', title: '待发送邀请', count: rdb.recruitmentInvitations.filter((i) => i.clubId === clubId && i.status === 'pending_acceptance').length },
           ],
           recentActivities: [],
         },
@@ -501,7 +492,7 @@ const notificationHandlers: MockMethod[] = [
       const allItems = [
         { id: 'ntf-001', type: 'application', title: '报名申请已提交', body: '您的报名申请已提交，请等待审核。', read: false, createdAt: '2025-08-01T10:00:00+08:00', link: '/me/todo' },
         { id: 'ntf-002', type: 'interview', title: '面试已排期', body: '您的面试已安排，请查看日程。', read: false, createdAt: '2025-08-01T09:00:00+08:00', link: '/me/schedule' },
-        { id: 'ntf-003', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/inv-001' },
+        { id: 'ntf-003', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/rinv-001' },
         { id: 'ntf-004', type: 'system', title: '系统维护通知', body: '系统将于本周六凌晨进行维护。', read: true, createdAt: '2025-07-30T18:00:00+08:00', link: null },
       ]
       const items = query.unreadOnly === 'true' ? allItems.filter((n) => !n.read) : allItems
@@ -542,10 +533,48 @@ const personalHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const user = resolveMockUser(url)
-      const items: { id: string; type: string; title: string; description: string; deadline: string; link: string }[] = [
-        { id: 'todo-1', type: 'invitation', title: '确认录取邀请', description: '计算机协会 - 2025秋季招新', deadline: '2025-08-05T23:59:00+08:00', link: '/me/invitations/recruitment/inv-001' },
-        { id: 'todo-2', type: 'interview', title: '确认面试时间', description: '嵌入式方向面试', deadline: '2025-08-03T12:00:00+08:00', link: '/me/schedule' },
-      ]
+      const items: { id: string; type: string; title: string; description: string; deadline: string; link: string }[] = []
+      const applicantId = applicantIdOfUrl(url)
+
+      // 招新申请人视角：待处理待办
+      if (applicantId) {
+        const recApp = rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.status === 'submitted')
+        if (recApp) {
+          const act = rdb.findAnyActivity(recApp.activityId)
+          items.push({
+            id: 'todo-rec-' + recApp.id,
+            type: 'application',
+            title: '招新报名审核中',
+            description: `${act?.clubName || ''} · ${act?.title || recApp.activityId}`,
+            deadline: act?.deadline || rdb.daysFromNow(30),
+            link: `/explore/activities/${recApp.activityId}`,
+          })
+        }
+        const interview = rdb.recruitmentInterviews.find((i) => i.applicantId === applicantId && i.status === 'scheduled')
+        if (interview) {
+          const act = rdb.findAnyActivity(interview.activityId)
+          items.push({
+            id: 'todo-int-' + interview.id,
+            type: 'interview',
+            title: '确认面试时间',
+            description: `${act?.clubName || ''} · ${act?.title || interview.activityId}`,
+            deadline: interview.startAt || rdb.daysFromNow(7),
+            link: `/me/interviews/recruitment/${interview.id}`,
+          })
+        }
+        const recInv = rdb.recruitmentInvitations.find((i) => i.applicantId === applicantId && i.status === 'pending_acceptance')
+        if (recInv) {
+          items.push({
+            id: 'todo-rinv-' + recInv.id,
+            type: 'invitation',
+            title: '确认录取邀请',
+            description: '计算机协会 - 2025秋季招新',
+            deadline: recInv.expiredAt,
+            link: `/me/invitations/recruitment/${recInv.id}`,
+          })
+        }
+      }
+
       // 被邀请人视角：常规入社邀请待处理
       const candidateId = actorCandidateId(user)
       if (candidateId) {
@@ -559,7 +588,7 @@ const personalHandlers: MockMethod[] = [
             title: '处理常规入社邀请',
             description: '计算机协会' + (pending.departmentName ? ` · 加入「${pending.departmentName}」` : ''),
             deadline: pending.expiredAt,
-            link: '/me/invitations/membership',
+            link: `/me/invitations/membership/${pending.id}`,
           })
         }
       }
@@ -594,11 +623,11 @@ const personalHandlers: MockMethod[] = [
           return {
             id: a.id, type: 'joint', title: `联合报名：${ja?.title || a.jointId}`,
             description: '联合活动报名进行中',
-            submittedAt: a.submittedAt, link: `/explore/activities/act-001`,
+            submittedAt: a.submittedAt, link: `/activity/joint/${a.jointId}`,
             activityId: '', status: a.status,
           }
         })
-      const items = [...recItems, ...jointItems].filter((i) => ['submitted', 'revision_requested', 'identity_anomaly', 'accepted', 'pending_selection'].includes(i.status))
+      const items = [...recItems, ...jointItems].filter((i) => ['submitted', 'revision_requested', 'identity_anomaly', 'pending_selection'].includes(i.status))
       return {
         code: 0,
         data: { items, nextCursor: null },
@@ -632,14 +661,19 @@ const personalHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      const applicantId = applicantIdOfUrl(url)
+      const items = (applicantId ? rdb.recruitmentInterviews.filter((i) => i.applicantId === applicantId) : [])
+        .filter((i) => ['scheduled', 'confirmed', 'in_progress'].includes(i.status))
+        .map((i) => {
+          const a = rdb.findAnyActivity(i.activityId)
+          return {
+            id: i.id, title: `${a?.title || '招新面试'}`, activityTitle: a?.title || '',
+            time: i.startAt || '', location: '', interviewerName: '', status: i.status,
+          }
+        })
       return {
         code: 0,
-        data: {
-          items: [
-            { id: 'sch-1', title: '技术部面试', activityTitle: '2025秋季招新', time: '2025-08-03T14:00:00+08:00', location: '教学楼A301', interviewerName: '王浩然', status: 'scheduled' },
-          ],
-          nextCursor: null,
-        },
+        data: { items, nextCursor: null },
       }
     },
   },
@@ -761,8 +795,8 @@ const memberHandlers: MockMethod[] = [
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       const app = db.departmentApplications.find((a) => a.id === query.applicationId)
-      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '申请不存在', supportId: 'MOCK' } }
-      if (app.status !== 'under_review') return { statusCode: 422, body: { code: 'IFC-ERR-008', message: '仅待审批的申请可撤回', supportId: 'MOCK' } }
+      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '申请不存在', supportId: 'MOCK' } }
+      if (app.status !== 'under_review') return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '仅待审批的申请可撤回', supportId: 'MOCK' } }
       const actor = actorMemberId(user)
       const isApplicant = actor === app.applicantId
       if (!isApplicant && !canManageMembers(user, query.clubId)) return forbidden()
@@ -781,7 +815,7 @@ const memberHandlers: MockMethod[] = [
       const scope = departmentScopeFor(user, query.clubId)
       if (!member || !canManageMembers(user, query.clubId)) return forbidden()
       const app = db.departmentApplications.find((a) => a.id === query.applicationId)
-      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '申请不存在', supportId: 'MOCK' } }
+      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '申请不存在', supportId: 'MOCK' } }
       if (scope && app.targetDeptName !== scope) return forbidden()
       const r = db.decideDepartmentApplication(query.applicationId, body.input?.decision === 'approve' ? 'approve' : 'reject', member.id, member.name, body.input?.rejectReason)
       if (!r.ok) return businessError(r.error || '操作失败')
@@ -884,6 +918,26 @@ const memberHandlers: MockMethod[] = [
       }
     },
   },
+  // 被邀请人视角：常规入社邀请详情
+  {
+    url: '/api/me/invitations/membership/:invitationId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const candidateId = actorCandidateId(user)
+      const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!candidateId || inv.candidateId !== candidateId) return forbidden()
+      return {
+        code: 0,
+        data: {
+          id: inv.id, clubId: inv.clubId, clubName: '计算机协会', candidateName: inv.candidateName,
+          departmentId: inv.departmentId, departmentName: inv.departmentName,
+          status: inv.status, sentAt: inv.sentAt, expiredAt: inv.expiredAt, acceptedAt: inv.acceptedAt,
+        },
+      }
+    },
+  },
   // 被邀请人：接受/拒绝邀请（整体接受不可拆分）
   {
     url: '/api/me/invitations/membership/:invitationId/respond',
@@ -892,8 +946,8 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const candidateId = actorCandidateId(user)
       const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
-      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
-      if (candidateId && inv.candidateId !== candidateId) return forbidden()
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       const r = db.respondInvitation(query.invitationId, body.input?.action === 'accept' ? 'accept' : 'reject')
       if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status, acceptedAt: r.invitation?.acceptedAt } }
@@ -903,7 +957,12 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/me/invitations/membership/:invitationId/sync-confirm',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const candidateId = actorCandidateId(user)
+      const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       const r = db.confirmInvitationSync(query.invitationId)
       if (!r.ok) return businessError(r.error || '确认失败')
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status } }
@@ -1037,7 +1096,7 @@ const memberHandlers: MockMethod[] = [
         return {
           statusCode: 422,
           body: {
-            code: 'IFC-ERR-008',
+            code: 'IFC-ERR-005',
             message: '辞职必须填写原因',
             fieldErrors: { reason: ['请填写辞职原因'] },
             supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
@@ -1215,10 +1274,10 @@ const memberHandlers: MockMethod[] = [
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       const member = db.getMemberProfile(query.clubId, query.memberId)
-      if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '成员不存在', supportId: 'MOCK' } }
+      if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '成员不存在', supportId: 'MOCK' } }
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       }
       return {
         code: 0,
@@ -1243,14 +1302,16 @@ const platformHandlers: MockMethod[] = [
     url: '/api/admin/clubs',
     method: 'get',
     response: () => {
+      const clubIds = ['club-001', 'club-002', 'club-003']
+      const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会' }
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', status: 'approved', memberCount: 128, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-002', name: '电子设计协会', status: 'approved', memberCount: 86, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-004', name: '摄影协会', status: 'pending_review', memberCount: 0, createdAt: '2025-07-28', groupMapped: false },
-          ],
+          items: clubIds.map((id) => ({
+            id, name: clubNames[id], status: 'approved',
+            memberCount: db.listMembers(id).filter((m) => m.status === 'active').length,
+            createdAt: '2022-09-01', groupMapped: true,
+          })),
           nextCursor: null,
         },
       }
@@ -1260,11 +1321,13 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/forms/designer/:formId',
     method: 'get',
-    response: () => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:form:design')) return forbidden()
       return {
         code: 0,
         data: {
-          id: 'form-001', title: '招新报名表', status: 'published',
+          id: query.formId || 'form-001', title: '招新报名表', status: 'published',
           fields: [
             { id: 'f1', type: 'text', label: '自我介绍', required: true, readonly: false, permission: 'read_write', options: null, description: '简要介绍自己' },
             { id: 'f2', type: 'select', label: '意向部门', required: true, readonly: false, permission: 'read_write', options: ['技术部', '运营部', '设计部'], description: null },
@@ -1274,6 +1337,23 @@ const platformHandlers: MockMethod[] = [
           version: 1,
         },
       }
+    },
+  },
+  // 表单设计器保存
+  {
+    url: '/api/org/:clubId/forms/designer/:formId',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { fields: unknown[] } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:form:design')) return forbidden()
+      const fields = body.input?.fields
+      if (!Array.isArray(fields)) return businessError('fields 必须为数组')
+      for (const f of fields) {
+        if (!f || typeof f !== 'object' || !('id' in f) || !('type' in f)) {
+          return businessError('每个字段必须包含 id 和 type')
+        }
+      }
+      return { code: 0, data: { id: query.formId, status: 'published', version: 2, savedAt: new Date().toISOString() } }
     },
   },
   // 邮件配置
@@ -1354,7 +1434,9 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/forms/designer/:formId/save',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:form:design')) return forbidden()
       return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
     },
   },
@@ -1428,7 +1510,7 @@ const platformHandlers: MockMethod[] = [
         { id: 'log-001', actorName: '张明远', action: '发布招新活动', targetType: '活动', targetId: 'act-001', detail: '2025 秋季招新', createdAt: '2025-08-01T10:30:00+08:00' },
         { id: 'log-002', actorName: '李思颖', action: '审批部门申请', targetType: '成员', targetId: 'mem-001', detail: '陈雨桐 技术->运营', createdAt: '2025-07-29T14:00:00+08:00' },
         { id: 'log-003', actorName: '王浩然', action: '提交评价', targetType: '申请', targetId: 'app-003', detail: '王梓涵 4分', createdAt: '2025-08-04T11:00:00+08:00' },
-        { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'inv-001', detail: '王梓涵 技术部', createdAt: '2025-08-04T12:00:00+08:00' },
+        { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'rinv-001', detail: '王梓涵 技术部', createdAt: '2025-08-04T12:00:00+08:00' },
       ]
       const search = query.search
       const items = search ? allLogs.filter((l) => l.actorName.includes(search) || l.action.includes(search) || l.detail.includes(search)) : allLogs
@@ -1513,22 +1595,26 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/stats',
     method: 'get',
-    response: () => {
+    response: ({ query }: { query: Record<string, string> }) => {
+      const members = db.listMembers(query.clubId).filter((m) => m.status === 'active')
+      const deptMap: Record<string, number> = {}
+      for (const m of members) {
+        const active = m.positions.find((p) => p.status === 'active')
+        const dept = active?.departmentName || '未分配'
+        deptMap[dept] = (deptMap[dept] || 0) + 1
+      }
+      const pendingApps = rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted').length
+      const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === query.clubId && a.status === 'in_progress').length
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: 128, trend: 'up', trendValue: 12 },
-            { label: '本月新增', value: 8, trend: 'up', trendValue: 3 },
-            { label: '活跃招新', value: 1, trend: 'flat', trendValue: 0 },
-            { label: '待处理申请', value: 12, trend: 'down', trendValue: 5 },
+            { label: '总成员数', value: members.length, trend: 'up', trendValue: 0 },
+            { label: '本月新增', value: 0, trend: 'flat', trendValue: 0 },
+            { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
+            { label: '待处理申请', value: pendingApps, trend: 'flat', trendValue: 0 },
           ],
-          departmentDistribution: [
-            { name: '技术部', count: 45 },
-            { name: '运营部', count: 32 },
-            { name: '设计部', count: 28 },
-            { name: '人事部', count: 23 },
-          ],
+          departmentDistribution: Object.entries(deptMap).map(([name, count]) => ({ name, count })),
         },
       }
     },
@@ -1681,17 +1767,21 @@ const listHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/recruitment/list',
     method: 'get',
-    response: () => {
+    response: ({ query }: { query: Record<string, string> }) => {
+      const items = rdb.recruitmentActivities
+        .filter((a) => a.clubId === query.clubId)
+        .map((a) => ({
+          id: a.id,
+          title: a.title,
+          status: a.status === 'in_progress' ? 'published' : a.status,
+          channelStatus: a.channelStatus,
+          deadline: a.deadline,
+          applicantCount: a.applicantIds.length,
+          createdAt: a.createdAt,
+        }))
       return {
         code: 0,
-        data: {
-          items: [
-            { id: 'act-001', title: '2025 秋季招新', status: 'published', channelStatus: 'open', deadline: '2025-09-15T23:59:00+08:00', applicantCount: 45, createdAt: '2025-08-01T10:00:00+08:00' },
-            { id: 'act-003', title: '2025 春季补录', status: 'draft', channelStatus: 'closed', deadline: '2025-03-01T23:59:00+08:00', applicantCount: 0, createdAt: '2025-01-15T10:00:00+08:00' },
-            { id: 'act-004', title: '2024 秋季招新', status: 'closed', channelStatus: 'closed_final', deadline: '2024-09-15T23:59:00+08:00', applicantCount: 62, createdAt: '2024-08-20T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
+        data: { items, nextCursor: null },
       }
     },
   },
@@ -1699,16 +1789,21 @@ const listHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/joint/list',
     method: 'get',
-    response: () => {
+    response: ({ query }: { query: Record<string, string> }) => {
+      const items = rdb.jointActivities
+        .filter((a) => a.clubs.some((c) => c.clubId === query.clubId))
+        .map((a) => ({
+          id: a.id,
+          title: a.title,
+          status: a.status,
+          channelStatus: a.channelStatus,
+          participants: a.clubs.map((c) => c.clubName),
+          applicantCount: a.applicantIds.length,
+          createdAt: a.createdAt,
+        }))
       return {
         code: 0,
-        data: {
-          items: [
-            { id: 'jnt-001', title: '计算机+电子联合招新', status: 'published', channelStatus: 'open', participants: ['计算机协会', '电子设计协会'], applicantCount: 28, createdAt: '2025-08-01T10:00:00+08:00' },
-            { id: 'jnt-002', title: '设计+摄影联合招新', status: 'closed', channelStatus: 'closed_final', participants: ['设计协会', '摄影协会'], applicantCount: 15, createdAt: '2024-09-01T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
+        data: { items, nextCursor: null },
       }
     },
   },

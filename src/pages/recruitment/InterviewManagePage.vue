@@ -38,8 +38,9 @@ const skipForm = ref({ applicantId: '', reason: '' })
 const updatingRound = ref<string | null>(null)
 const newRoundDeadline = ref('')
 
-const clubId = computed(() => (route.params.clubId as string) || 'club-001')
-const actId = computed(() => (route.params.activityId as string) || 'act-001')
+const clubId = computed(() => route.params.clubId as string)
+const actId = computed(() => route.params.activityId as string)
+const hasRequiredParams = computed(() => Boolean(clubId.value && actId.value))
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
@@ -226,6 +227,10 @@ const canInvalidate = computed(() => {
 })
 
 onMounted(async () => {
+  if (!hasRequiredParams.value) {
+    state.value = 'error'
+    return
+  }
   await loadInterviews()
   await loadBookOptions()
 })

@@ -378,6 +378,7 @@ onMounted(loadDetail)
         confirm-label="确认取消"
         reauth-required
         :executing="actionLoading"
+        :error="actionError || null"
         @confirm="runAction('cancel', { confirm: true, reason: '发起方取消联合活动' })"
       />
     </div>

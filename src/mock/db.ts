@@ -31,7 +31,7 @@ export interface MockTenure {
 
 export interface MockDeptHistoryEntry {
   id: string
-  action: 'join' | 'leave' | 'transfer_in' | 'transfer_out'
+  action: 'join' | 'leave' | 'transfer'
   departmentName: string
   at: string
 }
@@ -226,7 +226,7 @@ export const members: MockMember[] = [
     name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002',
     status: 'active', joinedAt: '2022-09-01T00:00:00+08:00', exitedAt: null,
     positions: [
-      { id: 'pos-004', departmentId: 'dept-000', departmentName: '管理', title: '负责人', startDate: '2024-09-01', endDate: null, status: 'active' },
+      { id: 'pos-004', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', startDate: '2024-09-01', endDate: null, status: 'active' },
     ],
     tenures: [
       { id: 'ten-005', departmentName: '管理', title: '负责人', startDate: '2024-09-01', endDate: null, endReason: null },
@@ -376,8 +376,8 @@ export function hasPendingInvitation(clubId: string, candidateId: string): boole
   return membershipInvitations.some((i) => i.clubId === clubId && i.candidateId === candidateId && (i.status === 'sent' || i.status === 'pending_acceptance'))
 }
 
-export function listInvitations(clubId: string, actorId: string): MockMembershipInvitation[] {
-  return membershipInvitations.filter((i) => i.clubId === clubId && (i.candidateId === actorId || i.status !== 'pending_acceptance' || true))
+export function listInvitations(clubId: string): MockMembershipInvitation[] {
+  return membershipInvitations.filter((i) => i.clubId === clubId)
 }
 
 export function createDepartmentApplication(clubId: string, input: { applicantId: string; applicantName: string; type: DeptApplyType; currentDept: string; targetDeptId: string; reason: string }): MockDeptApplication {
@@ -431,7 +431,6 @@ export function executeDepartmentApplication(appId: string): { ok: boolean; erro
         id: 'pos-' + Date.now(), departmentId: app.targetDeptId || '', departmentName: app.targetDeptName || '',
         title: '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active',
       })
-      member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'join', departmentName: app.targetDeptName || '', at: now })
     }
     if (app.type === 'leave' || app.type === 'transfer') {
       const pos = member.positions.find((p) => p.status === 'active' && p.departmentName === app.currentDept)
@@ -439,8 +438,11 @@ export function executeDepartmentApplication(appId: string): { ok: boolean; erro
         pos.endDate = new Date().toISOString().slice(0, 10)
         pos.status = 'ended'
       }
-      member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: app.currentDept, at: now })
     }
+    // 统一历史记录语义：transfer 写单条 'transfer'，join/leave 各写一条
+    const action = app.type === 'transfer' ? 'transfer' : app.type
+    const deptName = app.type === 'leave' ? app.currentDept : (app.targetDeptName || '')
+    member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action, departmentName: deptName, at: now })
   }
   return { ok: true, app }
 }
@@ -564,12 +566,21 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: pos?.departmentName || '', title: pos?.title || '', startDate: pos?.startDate || '', endDate: new Date().toISOString().slice(0, 10), endReason: '免职' })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: pos?.departmentName || '', at: now })
     } else {
+      // transfer 时先结束原 active 职位，再写入新职位
+      if (cmd.action === 'transfer') {
+        const oldPos = member.positions.find((p) => p.status === 'active')
+        if (oldPos) {
+          oldPos.endDate = new Date().toISOString().slice(0, 10)
+          oldPos.status = 'ended'
+          member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: oldPos.departmentName, title: oldPos.title, startDate: oldPos.startDate, endDate: oldPos.endDate, endReason: '调岗' })
+        }
+      }
       member.positions.push({
         id: 'pos-' + Date.now(), departmentId: cmd.departmentId || '', departmentName: cmd.departmentName || '',
         title: cmd.title || '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active',
       })
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: cmd.departmentName || '', title: cmd.title || '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, endReason: null })
-      member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'join', departmentName: cmd.departmentName || '', at: now })
+      member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: cmd.action === 'transfer' ? 'transfer' : 'join', departmentName: cmd.departmentName || '', at: now })
     }
   }
   return { ok: true, command: cmd }
