@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post, put } from '@/services/client'
+import { ScheduleView, type ScheduleSlot } from '@/components/display'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw } from '@lucide/vue'
 
@@ -122,6 +123,16 @@ const selectedRoundSlots = computed(() => {
   const round = rounds.value.find((r) => r.id === bookForm.value.roundId)
   return round ? round.slots : []
 })
+
+function roundSlots(roundId: string): ScheduleSlot[] {
+  const round = rounds.value.find((r) => r.id === roundId)
+  return (round?.slots ?? []).map((s) => ({
+    id: s.id,
+    title: s.available > 0 ? `剩余 ${s.available}` : '已满',
+    startAt: s.startAt,
+    endAt: s.endAt,
+  }))
+}
 
 async function loadRounds() {
   const r = await get<{ items: RoundItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/rounds`)
@@ -343,6 +354,12 @@ onMounted(async () => {
                     {{ r.name }} <StateTag :status="r.status" />
                   </p>
                   <p class="text-xs text-text-secondary mt-0.5">{{ r.slots.length }} 个时段 · 已约 {{ r.bookedCount }} 人</p>
+                  <ScheduleView
+                    v-if="roundSlots(r.id).length > 0"
+                    :items="roundSlots(r.id)"
+                    mode="list"
+                    class="mt-2"
+                  />
                 </div>
                 <div class="flex items-center gap-2">
                   <template v-if="updatingRound === r.id">

@@ -1,13 +1,23 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
-import { post } from '@/services/client'
+import { BatchActionBar, type BatchItem } from '@/components/operation'
+import { PartialSuccess, type PartialResult } from '@/components/operation'
+import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
-import { CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, ChevronRight } from '@lucide/vue'
+import { ArrowRight, ArrowLeft, ChevronRight } from '@lucide/vue'
 
 type BatchType = 'assign_interviewer' | 'schedule_interview' | 'publish_result' | 'send_invitation'
+
+interface BatchCandidate {
+  id: string
+  name: string
+  studentId: string
+  department: string
+  status: string
+}
 
 const route = useRoute()
 const step = ref<'select' | 'preview' | 'execute' | 'result'>('select')
@@ -15,6 +25,8 @@ const selectedType = ref<BatchType | null>(null)
 const selectedItems = ref<string[]>([])
 const executing = ref(false)
 const retrying = ref(false)
+const candidates = ref<BatchCandidate[]>([])
+const loadingCandidates = ref(false)
 
 const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'assign_interviewer', label: '批量分配面试官', desc: '为多个申请人分配同一面试官' },
@@ -23,16 +35,33 @@ const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'send_invitation', label: '批量发送邀请', desc: '向多个申请人发送同一类型邀请' },
 ]
 
-const mockApplicants = [
-  { id: 'app-001', name: '刘子豪', studentId: '20240001', department: '技术部', status: 'submitted' },
-  { id: 'app-002', name: '陈雨桐', studentId: '20240002', department: '运营部', status: 'under_review' },
-  { id: 'app-003', name: '王梓涵', studentId: '20240003', department: '技术部', status: 'accepted' },
-  { id: 'app-004', name: '张博文', studentId: '20240004', department: '运营部', status: 'rejected' },
-  { id: 'app-005', name: '李欣怡', studentId: '20240005', department: '设计部', status: 'submitted' },
-]
-
 interface BatchResult { id: string; name: string; success: boolean; message: string }
 const results = ref<BatchResult[]>([])
+
+const clubId = computed(() => (typeof route.params.clubId === 'string' ? route.params.clubId : null))
+
+let candidatesAbort: AbortController | null = null
+
+async function loadCandidates() {
+  if (!clubId.value) return
+  if (candidatesAbort) candidatesAbort.abort()
+  candidatesAbort = new AbortController()
+  loadingCandidates.value = true
+  try {
+    const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`, undefined, candidatesAbort.signal)
+    if (res.kind === 'completed') candidates.value = res.data.items
+    else toast.error('候选人加载失败，请重试')
+  } finally {
+    loadingCandidates.value = false
+  }
+}
+
+onMounted(loadCandidates)
+
+onBeforeUnmount(() => {
+  candidatesAbort?.abort()
+  candidatesAbort = null
+})
 
 function selectType(type: BatchType) {
   selectedType.value = type
@@ -48,7 +77,7 @@ function toggleItem(id: string) {
 
 function applyResults(list: { memberId: string; success: boolean; message: string }[]) {
   for (const item of list) {
-    const app = mockApplicants.find((a) => a.id === item.memberId)
+    const app = candidates.value.find((a) => a.id === item.memberId)
     const existing = results.value.findIndex((r) => r.id === item.memberId)
     const entry: BatchResult = {
       id: item.memberId,
@@ -62,12 +91,11 @@ function applyResults(list: { memberId: string; success: boolean; message: strin
 }
 
 async function runBatch(memberIds: string[]) {
-  const clubId = typeof route.params.clubId === 'string' ? route.params.clubId : null
-  if (!clubId) {
+  if (!clubId.value) {
     toast.error('工作空间参数无效')
     return false
   }
-  const result = await post<{ results: { memberId: string; success: boolean; message: string }[] }>(`/org/${clubId}/batch/execute`, {
+  const result = await post<{ results: { memberId: string; success: boolean; message: string }[] }>(`/org/${clubId.value}/batch/execute`, {
     action: selectedType.value,
     memberIds,
   })
@@ -104,8 +132,16 @@ function reset() {
   results.value = []
 }
 
-const successCount = computed(() => results.value.filter((r) => r.success).length)
-const failCount = computed(() => results.value.filter((r) => !r.success).length)
+const batchSelected = computed<BatchItem[]>(() =>
+  selectedItems.value.map((id) => {
+    const c = candidates.value.find((a) => a.id === id)
+    return { id, label: c ? `${c.name}（${c.studentId}）` : id }
+  }),
+)
+
+const batchResults = computed<PartialResult[]>(() =>
+  results.value.map((r) => ({ id: r.id, label: r.name, success: r.success, message: r.message })),
+)
 </script>
 
 <template>
@@ -157,14 +193,16 @@ const failCount = computed(() => results.value.filter((r) => !r.success).length)
           <p class="text-sm font-medium text-text-primary">选择对象（{{ selectedItems.length }}）</p>
           <button
             class="text-xs text-primary hover:underline"
-            @click="selectedItems.length === mockApplicants.length ? (selectedItems = []) : (selectedItems = mockApplicants.map((a) => a.id))"
+            @click="selectedItems.length === candidates.length ? (selectedItems = []) : (selectedItems = candidates.map((a) => a.id))"
           >
-            {{ selectedItems.length === mockApplicants.length ? '取消全选' : '全选' }}
+            {{ selectedItems.length === candidates.length ? '取消全选' : '全选' }}
           </button>
         </div>
-        <div class="space-y-2">
+        <p v-if="loadingCandidates" class="text-sm text-text-secondary py-6 text-center">正在加载候选人...</p>
+        <p v-else-if="candidates.length === 0" class="text-sm text-text-secondary py-6 text-center">暂无报名申请</p>
+        <div v-else class="space-y-2">
           <label
-            v-for="app in mockApplicants"
+            v-for="app in candidates"
             :key="app.id"
             class="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer hover:border-border-strong"
           >
@@ -187,13 +225,14 @@ const failCount = computed(() => results.value.filter((r) => !r.success).length)
         <button class="px-4 h-11 rounded-md border border-border text-text-primary hover:bg-subtle" @click="reset">
           <ArrowLeft :size="16" class="inline mr-1" /> 返回
         </button>
-        <button
-          class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
-          :disabled="selectedItems.length === 0"
-          @click="step = 'execute'; execute()"
-        >
-          确认执行（{{ selectedItems.length }} 项）
-        </button>
+        <div class="flex-1">
+          <BatchActionBar
+            :selected="batchSelected"
+            :executing="executing"
+            :action-label="batchTypes.find((b) => b.type === selectedType)?.label || '执行批量操作'"
+            @execute="execute"
+          />
+        </div>
       </div>
     </div>
 
@@ -205,50 +244,14 @@ const failCount = computed(() => results.value.filter((r) => !r.success).length)
 
     <!-- Step 4: 结果 -->
     <div v-else-if="step === 'result'">
-      <Card class="mb-4">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="flex items-center justify-center w-12 h-12 rounded-full" :class="failCount === 0 ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'">
-            <CheckCircle2 v-if="failCount === 0" :size="24" />
-            <AlertTriangle v-else :size="24" />
-          </div>
-          <div>
-            <p class="text-base font-medium text-text-primary">
-              {{ failCount === 0 ? '全部成功' : '部分成功' }}
-            </p>
-            <p class="text-sm text-text-secondary">
-              成功 {{ successCount }} 项{{ failCount > 0 ? `，失败 ${failCount} 项` : '' }}
-            </p>
-          </div>
-        </div>
-
-        <div class="space-y-2">
-          <div
-            v-for="r in results"
-            :key="r.id"
-            class="flex items-center justify-between rounded-lg border border-border p-2.5"
-          >
-            <span class="text-sm text-text-primary">{{ r.name }}</span>
-            <span
-              class="flex items-center gap-1 text-xs"
-              :class="r.success ? 'text-success' : 'text-danger'"
-            >
-              <CheckCircle2 v-if="r.success" :size="14" />
-              <AlertTriangle v-else :size="14" />
-              {{ r.message }}
-            </span>
-          </div>
-        </div>
-      </Card>
+      <PartialSuccess
+        :results="batchResults"
+        :retrying="retrying"
+        class="mb-4"
+        @retry="retryFailed"
+      />
 
       <div class="flex gap-3">
-        <button
-          v-if="failCount > 0"
-          class="flex-1 h-11 rounded-md border border-border text-text-primary hover:bg-subtle disabled:opacity-60"
-          :disabled="retrying"
-          @click="retryFailed"
-        >
-          {{ retrying ? '重试中...' : '重试失败项' }}
-        </button>
         <button
           class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover"
           @click="reset"

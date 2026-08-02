@@ -7,6 +7,11 @@ import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './rec
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
 const REAUTH_TTL_MS = 10 * 60 * 1000
 const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
+const permissionTemplateVersions = new Map<string, number>([
+  ['tpl-001', 2],
+  ['tpl-002', 1],
+  ['tpl-003', 1],
+])
 
 function issueReauthProof(userId: string): { proof: string; expiresAt: string } {
   const proof = `reauth-${userId}-${Date.now()}`
@@ -124,6 +129,20 @@ const identityHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const user = resolveMockUser(url)
+
+      // 降级注入：?_mock_degraded=window（15 分钟白名单窗口内）/ expired（已超 15 分钟）
+      // 未传参数时保持非降级，模拟故障前正常会话或恢复后重读
+      let degraded = false
+      let degradedSince: string | null = null
+      const degradeFlag = new URL(url, 'http://localhost').searchParams.get('_mock_degraded')
+      if (degradeFlag === 'window') {
+        degraded = true
+        degradedSince = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+      } else if (degradeFlag === 'expired') {
+        degraded = true
+        degradedSince = new Date(Date.now() - 20 * 60 * 1000).toISOString()
+      }
+
       return {
         code: 0,
         data: {
@@ -141,7 +160,8 @@ const identityHandlers: MockMethod[] = [
             complete: user.profileComplete,
             emailVerified: user.emailVerified,
           },
-          degraded: false,
+          degraded,
+          degradedSince,
           permissions: getPermissions(user, user.currentClubId || ''),
           workspace: getWorkspace(user),
         },
@@ -1335,6 +1355,26 @@ const platformHandlers: MockMethod[] = [
   },
   // 批量操作执行
   {
+    url: '/api/org/:clubId/batch/candidates',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const apps = rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId)
+      return {
+        code: 0,
+        data: {
+          items: apps.map((a) => ({
+            id: a.id,
+            name: a.applicantName,
+            studentId: a.studentId,
+            department: a.preferences.filter((p) => p.order === 1)[0]?.departmentName || '-',
+            status: a.status,
+          })),
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  {
     url: '/api/org/:clubId/batch/execute',
     method: 'post',
     response: ({ body }: { body: { input: { memberIds: string[]; action: string } } }) => {
@@ -1608,6 +1648,26 @@ const platformHandlers: MockMethod[] = [
             { id: 'tpl-002', name: '人事模板', permissions: ['club:dashboard:view', 'club:recruitment:manage', 'club:member:manage', 'club:batch:execute'], version: 1, status: 'published' },
             { id: 'tpl-003', name: '面试官模板', permissions: ['club:interview:view', 'club:interview:evaluate'], version: 1, status: 'draft' },
           ],
+        },
+      }
+    },
+  },
+  // 保存权限模板草稿
+  {
+    url: '/api/admin/config/permission-templates/:templateId/save',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { name?: string; permissions?: string[] } } }) => {
+      const nextVersion = (permissionTemplateVersions.get(query.templateId) ?? 0) + 1
+      permissionTemplateVersions.set(query.templateId, nextVersion)
+      return {
+        code: 0,
+        data: {
+          id: query.templateId,
+          name: body.input?.name,
+          permissions: body.input?.permissions || [],
+          version: nextVersion,
+          status: 'draft',
+          savedAt: new Date().toISOString(),
         },
       }
     },

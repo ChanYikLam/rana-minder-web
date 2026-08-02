@@ -2,10 +2,11 @@
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
+import { Banner } from '@/components/feedback'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Save, Send, Upload, FileWarning } from '@lucide/vue'
+import { Save, Send, Upload } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -222,10 +223,12 @@ onMounted(loadForm)
       </Card>
 
       <!-- FORM-007: 文件检查状态提示 -->
-      <div class="mb-4 rounded-lg bg-warning-subtle p-3 flex items-center gap-2">
-        <FileWarning :size="16" class="text-warning" />
-        <p class="text-xs text-warning">附件正在安全检查中时不可正式提交，但可保存草稿。检查完成后方可提交。</p>
-      </div>
+      <Banner
+        tone="warning"
+        title="附件安全检查中"
+        message="附件正在安全检查中时不可正式提交，但可保存草稿。检查完成后方可提交。"
+        class="mb-4"
+      />
 
       <div class="flex gap-3">
         <button

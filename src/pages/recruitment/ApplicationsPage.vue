@@ -3,10 +3,10 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
-import StateTag from '@/components/business/StateTag.vue'
+import { ApplicantCard, type ApplicantEntry } from '@/components/display'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { ArrowLeft, User, ChevronDown } from '@lucide/vue'
+import { ArrowLeft, ChevronDown } from '@lucide/vue'
 
 interface Application {
   id: string; activityId: string; applicantId: string
@@ -55,15 +55,20 @@ function switchStatus(s: string) {
   loadData()
 }
 
-function formatTime(iso: string | null): string {
-  if (!iso) return '未提交'
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? null : id
   actionError.value[id] = ''
+}
+
+function toApplicantEntry(app: Application): ApplicantEntry {
+  return {
+    id: app.id,
+    name: app.applicantName,
+    studentId: app.applicantStudentId,
+    status: app.status,
+    preferences: app.preferences.map((p, i) => ({ order: p.order || i + 1, departmentName: p.departmentName })),
+    appliedAt: app.submittedAt ?? undefined,
+  }
 }
 
 async function runAppAction(app: Application, action: string, input?: Record<string, unknown>) {
@@ -137,27 +142,7 @@ onMounted(loadData)
 
       <div v-else class="space-y-3">
         <Card v-for="app in items" :key="app.id" padding="p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex items-center gap-3 min-w-0">
-              <div class="flex items-center justify-center w-10 h-10 rounded-full bg-primary-subtle text-primary shrink-0">
-                <User :size="18" />
-              </div>
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-text-primary truncate">{{ app.applicantName }}</p>
-                <p class="text-xs text-text-secondary">{{ app.applicantStudentId }} · 提交于 {{ formatTime(app.submittedAt) }}</p>
-              </div>
-            </div>
-            <StateTag :status="app.status" />
-          </div>
-          <div v-if="app.preferences.length > 0" class="mt-3 flex flex-wrap gap-1.5">
-            <span
-              v-for="pref in app.preferences"
-              :key="pref.order"
-              class="inline-flex items-center px-2 py-0.5 rounded bg-subtle text-xs text-text-secondary"
-            >
-              第{{ pref.order }}志愿 · {{ pref.departmentName }}
-            </span>
-          </div>
+          <ApplicantCard :applicant="toApplicantEntry(app)" />
 
           <!-- 审核操作 -->
           <PermissionGuard permission="club:recruitment:manage">

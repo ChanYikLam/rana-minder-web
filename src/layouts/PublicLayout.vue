@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
+import DegradedBanner from '@/components/business/DegradedBanner.vue'
 import { Search, Bell, User, Building2 } from '@lucide/vue'
 
 const session = useSessionViewStore()
@@ -68,6 +69,7 @@ const notifications = useNotificationViewStore()
     <!-- Main Content -->
     <main id="public-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
       <div class="mx-auto max-w-[1400px] p-4 md:p-6">
+        <div class="mb-4"><DegradedBanner /></div>
         <slot />
       </div>
     </main>

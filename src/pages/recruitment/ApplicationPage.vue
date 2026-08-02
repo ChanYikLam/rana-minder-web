@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
+import { PreferenceSorter, type PreferenceEntry } from '@/components/form'
+import { ObjectPicker, type PickerGroup } from '@/components/form'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send } from '@lucide/vue'
+import { ArrowLeft, Upload, Save, Send } from '@lucide/vue'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -114,16 +116,35 @@ function addPreference(deptId: string, deptName: string) {
   }
 }
 
-function removePreference(index: number) {
-  preferences.value.splice(index, 1)
+const preferenceEntries = computed<PreferenceEntry[]>(() =>
+  preferences.value.map((p) => ({ id: p.departmentId, label: p.departmentName })),
+)
+
+const deptGroups = computed<PickerGroup[]>(() =>
+  activity.value
+    ? [{
+        type: 'department' as const,
+        label: '可选部门',
+        items: activity.value.departments.map((d) => ({ id: d.id, label: d.name })),
+      }]
+    : [],
+)
+
+const selectedDeptIds = computed<string[]>(() => preferences.value.map((p) => p.departmentId))
+
+function onPreferenceChange(entries: PreferenceEntry[]) {
+  preferences.value = entries.map((e) => ({
+    departmentId: e.id,
+    departmentName: activity.value?.departments.find((d) => d.id === e.id)?.name || e.label,
+  }))
 }
 
-function movePreference(index: number, direction: 'up' | 'down') {
-  const target = direction === 'up' ? index - 1 : index + 1
-  if (target < 0 || target >= preferences.value.length) return
-  const temp = preferences.value[index]
-  preferences.value[index] = preferences.value[target]
-  preferences.value[target] = temp
+function onDeptPick(ids: string[]) {
+  const newlyAdded = ids.filter((id) => !preferences.value.find((p) => p.departmentId === id))
+  for (const id of newlyAdded) {
+    const dept = activity.value?.departments.find((d) => d.id === id)
+    if (dept) addPreference(dept.id, dept.name)
+  }
 }
 
 async function handleSaveDraft() {
@@ -136,7 +157,7 @@ async function handleSaveDraft() {
     }
   }
   const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
-    formAnswers: answers,
+    answers,
   })
   savingDraft.value = false
   if (result.kind === 'completed') {
@@ -183,7 +204,7 @@ async function handleSubmit() {
 
   submitting.value = true
   const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
-    formData: answers,
+    answers,
     preferences: preferences.value,
   })
   submitting.value = false
@@ -213,41 +234,15 @@ onMounted(loadData)
       <!-- 意向方向排序 -->
       <Card class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-2">意向方向</h2>
-        <p class="text-xs text-text-secondary mb-3">点击添加意向部门，可拖拽或用按钮调整优先级顺序</p>
+        <p class="text-xs text-text-secondary mb-3">从下方选择意向部门后，可拖动或按键调整优先级顺序</p>
 
-        <div v-if="preferences.length > 0" class="space-y-2 mb-3">
-          <div
-            v-for="(pref, index) in preferences"
-            :key="pref.departmentId"
-            class="flex items-center gap-2 rounded-lg border border-border p-3"
-          >
-            <span class="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-text-on-primary text-xs font-bold">{{ index + 1 }}</span>
-            <span class="flex-1 text-sm text-text-primary">{{ pref.departmentName }}</span>
-            <div class="flex items-center gap-1">
-              <button class="p-1 rounded hover:bg-subtle text-text-secondary" :disabled="index === 0" aria-label="上移" @click="movePreference(index, 'up')">
-                <ChevronUp :size="14" />
-              </button>
-              <button class="p-1 rounded hover:bg-subtle text-text-secondary" :disabled="index === preferences.length - 1" aria-label="下移" @click="movePreference(index, 'down')">
-                <ChevronDown :size="14" />
-              </button>
-              <button class="p-1 rounded hover:bg-subtle text-danger" aria-label="移除" @click="removePreference(index)">
-                <X :size="14" />
-              </button>
-            </div>
-          </div>
-        </div>
+        <ObjectPicker
+          :groups="deptGroups"
+          :model-value="selectedDeptIds"
+          @update:model-value="onDeptPick"
+        />
 
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="dept in activity.departments"
-            :key="dept.id"
-            v-show="!preferences.find((p) => p.departmentId === dept.id)"
-            class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border text-sm text-text-secondary hover:border-primary hover:text-primary transition-colors"
-            @click="addPreference(dept.id, dept.name)"
-          >
-            <Plus :size="14" /> {{ dept.name }}
-          </button>
-        </div>
+        <PreferenceSorter :model-value="preferenceEntries" class="mt-3" @update:model-value="onPreferenceChange" />
       </Card>
 
       <!-- 动态表单 -->
