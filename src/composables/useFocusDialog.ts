@@ -30,7 +30,8 @@ export function useFocusDialog(containerRef: Ref<HTMLElement | null>, open: Ref<
     if (!trapped) return
     el?.removeEventListener('keydown', onKeydown)
     trapped = false
-    previous?.focus()
+    // 触发元素仍在文档中时恢复焦点；若已被销毁（如列表刷新后重渲染）则放弃恢复，避免 focus 抛出
+    if (previous?.isConnected) previous.focus()
     previous = null
   }
 

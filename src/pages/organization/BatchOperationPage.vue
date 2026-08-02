@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import { BatchActionBar, type BatchItem } from '@/components/operation'
+import { PartialSuccess, type PartialResult } from '@/components/operation'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
-import { CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, ChevronRight } from '@lucide/vue'
+import { ArrowRight, ArrowLeft, ChevronRight } from '@lucide/vue'
 
 type BatchType = 'assign_interviewer' | 'schedule_interview' | 'publish_result' | 'send_invitation'
 
@@ -38,11 +40,15 @@ const results = ref<BatchResult[]>([])
 
 const clubId = computed(() => (typeof route.params.clubId === 'string' ? route.params.clubId : null))
 
+let candidatesAbort: AbortController | null = null
+
 async function loadCandidates() {
   if (!clubId.value) return
+  if (candidatesAbort) candidatesAbort.abort()
+  candidatesAbort = new AbortController()
   loadingCandidates.value = true
   try {
-    const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`)
+    const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`, undefined, candidatesAbort.signal)
     if (res.kind === 'completed') candidates.value = res.data.items
     else toast.error('候选人加载失败，请重试')
   } finally {
@@ -51,6 +57,11 @@ async function loadCandidates() {
 }
 
 onMounted(loadCandidates)
+
+onBeforeUnmount(() => {
+  candidatesAbort?.abort()
+  candidatesAbort = null
+})
 
 function selectType(type: BatchType) {
   selectedType.value = type
@@ -121,8 +132,16 @@ function reset() {
   results.value = []
 }
 
-const successCount = computed(() => results.value.filter((r) => r.success).length)
-const failCount = computed(() => results.value.filter((r) => !r.success).length)
+const batchSelected = computed<BatchItem[]>(() =>
+  selectedItems.value.map((id) => {
+    const c = candidates.value.find((a) => a.id === id)
+    return { id, label: c ? `${c.name}（${c.studentId}）` : id }
+  }),
+)
+
+const batchResults = computed<PartialResult[]>(() =>
+  results.value.map((r) => ({ id: r.id, label: r.name, success: r.success, message: r.message })),
+)
 </script>
 
 <template>
@@ -206,13 +225,14 @@ const failCount = computed(() => results.value.filter((r) => !r.success).length)
         <button class="px-4 h-11 rounded-md border border-border text-text-primary hover:bg-subtle" @click="reset">
           <ArrowLeft :size="16" class="inline mr-1" /> 返回
         </button>
-        <button
-          class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
-          :disabled="selectedItems.length === 0"
-          @click="step = 'execute'; execute()"
-        >
-          确认执行（{{ selectedItems.length }} 项）
-        </button>
+        <div class="flex-1">
+          <BatchActionBar
+            :selected="batchSelected"
+            :executing="executing"
+            :action-label="batchTypes.find((b) => b.type === selectedType)?.label || '执行批量操作'"
+            @execute="execute"
+          />
+        </div>
       </div>
     </div>
 
@@ -224,50 +244,14 @@ const failCount = computed(() => results.value.filter((r) => !r.success).length)
 
     <!-- Step 4: 结果 -->
     <div v-else-if="step === 'result'">
-      <Card class="mb-4">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="flex items-center justify-center w-12 h-12 rounded-full" :class="failCount === 0 ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'">
-            <CheckCircle2 v-if="failCount === 0" :size="24" />
-            <AlertTriangle v-else :size="24" />
-          </div>
-          <div>
-            <p class="text-base font-medium text-text-primary">
-              {{ failCount === 0 ? '全部成功' : '部分成功' }}
-            </p>
-            <p class="text-sm text-text-secondary">
-              成功 {{ successCount }} 项{{ failCount > 0 ? `，失败 ${failCount} 项` : '' }}
-            </p>
-          </div>
-        </div>
-
-        <div class="space-y-2">
-          <div
-            v-for="r in results"
-            :key="r.id"
-            class="flex items-center justify-between rounded-lg border border-border p-2.5"
-          >
-            <span class="text-sm text-text-primary">{{ r.name }}</span>
-            <span
-              class="flex items-center gap-1 text-xs"
-              :class="r.success ? 'text-success' : 'text-danger'"
-            >
-              <CheckCircle2 v-if="r.success" :size="14" />
-              <AlertTriangle v-else :size="14" />
-              {{ r.message }}
-            </span>
-          </div>
-        </div>
-      </Card>
+      <PartialSuccess
+        :results="batchResults"
+        :retrying="retrying"
+        class="mb-4"
+        @retry="retryFailed"
+      />
 
       <div class="flex gap-3">
-        <button
-          v-if="failCount > 0"
-          class="flex-1 h-11 rounded-md border border-border text-text-primary hover:bg-subtle disabled:opacity-60"
-          :disabled="retrying"
-          @click="retryFailed"
-        >
-          {{ retrying ? '重试中...' : '重试失败项' }}
-        </button>
         <button
           class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover"
           @click="reset"

@@ -17,16 +17,14 @@ const emit = defineEmits<{
   confirm: []
 }>()
 
-// 二次确认：由父组件配合 HighRiskConfirm/ConfirmScope 使用；
-// 本组件仅负责危险样式 + 触发确认流程，不重复实现弹窗。
-// 若未配合确认组件，则直接用 window.confirm 兜底。
+// 二次确认：父组件可选配 HighRiskConfirm/ConfirmScope 承载弹窗。
+// 未接入确认组件时，以原生 window.confirm 兜底（按 confirmTitle 确认）。
 function onClick() {
   if (props.disabled) return
-  if (!props.confirmTitle) {
-    emit('confirm')
+  const required = !!props.confirmTitle
+  if (required && !window.confirm(props.confirmDescription || `确认要执行「${props.confirmTitle}」吗？`)) {
     return
   }
-  // 简化交互：无独立确认组件时以原生确认兜底
   emit('confirm')
 }
 </script>

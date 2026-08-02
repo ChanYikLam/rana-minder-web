@@ -8,7 +8,7 @@ const emit = defineEmits<{
   'update:modelValue': [files: FileMeta[]]
 }>()
 
-const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+const ACCEPTED_TYPES = ['image/png', 'image/webp', 'image/jpeg', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
 const MAX_SIZE_BYTES = 10 * 1024 * 1024
 
 const files = computed(() => props.modelValue ?? [])

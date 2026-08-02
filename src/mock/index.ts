@@ -7,6 +7,11 @@ import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './rec
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
 const REAUTH_TTL_MS = 10 * 60 * 1000
 const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
+const permissionTemplateVersions = new Map<string, number>([
+  ['tpl-001', 2],
+  ['tpl-002', 1],
+  ['tpl-003', 1],
+])
 
 function issueReauthProof(userId: string): { proof: string; expiresAt: string } {
   const proof = `reauth-${userId}-${Date.now()}`
@@ -1607,13 +1612,15 @@ const platformHandlers: MockMethod[] = [
     url: '/api/admin/config/permission-templates/:templateId/save',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: { input: { name?: string; permissions?: string[] } } }) => {
+      const nextVersion = (permissionTemplateVersions.get(query.templateId) ?? 0) + 1
+      permissionTemplateVersions.set(query.templateId, nextVersion)
       return {
         code: 0,
         data: {
           id: query.templateId,
           name: body.input?.name,
           permissions: body.input?.permissions || [],
-          version: 1,
+          version: nextVersion,
           status: 'draft',
           savedAt: new Date().toISOString(),
         },
