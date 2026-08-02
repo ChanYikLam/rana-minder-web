@@ -120,6 +120,7 @@ async function runAction(action: string, input?: Record<string, unknown>) {
 }
 
 async function handleBook() {
+  if (!validateParams()) return
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
   actionError.value = ''
@@ -226,10 +227,15 @@ async function handleSkipRound() {
     roundError.value = '请选择申请人与填写跳轮原因'
     return
   }
+  const roundId = bookForm.value.roundId || rounds.value[0]?.id
+  if (!roundId) {
+    roundError.value = '没有可用的面试轮次'
+    return
+  }
   if (actionLoading.value) return
   actionLoading.value = true
   roundError.value = ''
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${bookForm.value.roundId || rounds.value[0]?.id}/skip`, {
+  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/skip`, {
     applicantId: skipForm.value.applicantId,
     reason: skipForm.value.reason.trim(),
   })
