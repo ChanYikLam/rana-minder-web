@@ -27,6 +27,7 @@ const savingDraft = ref(false)
 
 interface FileUploadState { file: File | null; status: 'idle' | 'scanning' | 'safe' | 'unsafe'; message: string }
 const fileUploads = reactive<Record<string, FileUploadState>>({})
+const fileContents = reactive<Record<string, { name: string; size: number; type: string; content: string }>>({})
 const fileTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function getFileUpload(fieldId: string): FileUploadState {
@@ -48,6 +49,12 @@ function handleFileSelect(fieldId: string, event: Event) {
   // 清理已有定时器
   const existing = fileTimers.get(fieldId)
   if (existing) clearTimeout(existing)
+  // 模拟真实上传：将文件读取为 base64 内容，供提交时随答案一并发送
+  const reader = new FileReader()
+  reader.onloadend = () => {
+    fileContents[fieldId] = { name: file.name, size: file.size, type: file.type, content: reader.result as string }
+  }
+  reader.readAsDataURL(file)
   // 模拟安全检查；实际应调用后端上传/检查接口
   fileTimers.set(fieldId, setTimeout(() => {
     upload.status = 'safe'
@@ -121,8 +128,15 @@ function movePreference(index: number, direction: 'up' | 'down') {
 
 async function handleSaveDraft() {
   savingDraft.value = true
+  // 草稿同样包含文件元数据
+  const answers: Record<string, unknown> = { ...formData }
+  for (const field of formFields.value) {
+    if (field.type === 'file' && fileContents[field.id]) {
+      answers[field.id] = fileContents[field.id]
+    }
+  }
   const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
-    formAnswers: formData,
+    formAnswers: answers,
   })
   savingDraft.value = false
   if (result.kind === 'completed') {
@@ -159,9 +173,17 @@ async function handleSubmit() {
   }
   if (Object.keys(formErrors.value).length > 0) return
 
+  // 构建提交答案：文本字段取 formData，文件字段附带文件元数据
+  const answers: Record<string, unknown> = { ...formData }
+  for (const field of formFields.value) {
+    if (field.type === 'file' && fileContents[field.id]) {
+      answers[field.id] = fileContents[field.id]
+    }
+  }
+
   submitting.value = true
   const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
-    formData,
+    formData: answers,
     preferences: preferences.value,
   })
   submitting.value = false

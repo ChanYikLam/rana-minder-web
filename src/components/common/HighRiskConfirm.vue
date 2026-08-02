@@ -219,6 +219,8 @@ function handleClose() {
           <p>即将执行：<span class="font-medium text-primary">{{ title }}</span></p>
         </div>
 
+        <slot name="extra" />
+
         <div v-if="error" class="flex items-start gap-2 rounded-md bg-danger-subtle p-3">
           <AlertCircle :size="16" class="text-danger shrink-0 mt-0.5" />
           <p class="text-xs text-danger">{{ error }}</p>

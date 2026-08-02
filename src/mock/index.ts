@@ -896,7 +896,12 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/me/invitations/membership/:invitationId/sync-confirm',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const candidateId = actorCandidateId(user)
+      const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
+      if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       const r = db.confirmInvitationSync(query.invitationId)
       if (!r.ok) return businessError(r.error || '确认失败')
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status } }

@@ -808,7 +808,7 @@ export function cancelRound(activityId: string, roundId: string, reason: string)
 }
 
 /** 预约/改期面试：申请人本人或管理员；原子释放旧时段+占用新时段；全局冲突校验 */
-export function bookInterview(activityId: string, applicantId: string, roundId: string, slotId: string, actorId: string, actorIsAdmin: boolean): { ok: boolean; error?: string; data?: RecInterview } {
+export function bookInterview(activityId: string, applicantId: string, roundId: string, slotId: string, actorId: string, actorIsAdmin: boolean, interviewerIds?: string[]): { ok: boolean; error?: string; data?: RecInterview } {
   void actorId
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
@@ -839,7 +839,7 @@ export function bookInterview(activityId: string, applicantId: string, roundId: 
       id: 'int-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: '',
       roundId, status: 'scheduled', slotId, startAt: slot.startAt, endAt: slot.endAt,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
-      interviewerIds: ['user-interviewer-001'],
+      interviewerIds: interviewerIds || [],
       version: 1,
     }
     recruitmentInterviews.push(existing)

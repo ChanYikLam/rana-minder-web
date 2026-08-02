@@ -178,6 +178,13 @@ function actorInfo(url: string): { memberId: string | null; name: string; role: 
   return { memberId: USER_MEMBER_MAP[user.id] || null, name: user.name, role: ws?.role || 'member' }
 }
 
+/** 根据社团查找具备面试权限的面试官 */
+function findInterviewersForClub(clubId: string): string[] {
+  return Object.values(mockUsers)
+    .filter((u) => u.roles.some((r) => r.clubId === clubId && (r.permissions.includes('club:interview:view') || r.permissions.includes('club:interview:evaluate'))))
+    .map((u) => u.id)
+}
+
 /** 面试详情行（管理视角） */
 function interviewRow(it: rdb.RecInterview) {
   const a = rdb.findAnyActivity(it.activityId)
@@ -205,7 +212,7 @@ const recHandlers: MockMethod[] = [
       if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动不存在或未开放')
       return ok({
         id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, type: 'recruitment',
-        status: a.status === 'in_progress' ? 'published' : a.status, channelStatus: a.channelStatus,
+        status: a.status === 'in_progress' ? 'open' : a.status, channelStatus: a.channelStatus,
         deadline: a.deadline, description: a.description, departments: a.departments, formId: a.formId,
         eligibility: a.eligibility, volunteerRules: a.volunteerRules,
       })
@@ -634,7 +641,7 @@ const recHandlers: MockMethod[] = [
       const a = rdb.findActivity(query.clubId, query.activityId)
       const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === input.slotId)
       if (!slot) return notFound('面试时段不存在')
-      const r = rdb.bookInterview(query.activityId, input.applicantId, slot.roundId, input.slotId, '', true)
+      const r = rdb.bookInterview(query.activityId, input.applicantId, slot.roundId, input.slotId, '', true, findInterviewersForClub(query.clubId))
       return result(r)
     },
   },
@@ -677,7 +684,7 @@ const recHandlers: MockMethod[] = [
       const a = rdb.findAnyActivity(it.activityId)
       const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === input.slotId)
       if (!slot) return notFound('面试时段不存在')
-      const r = rdb.bookInterview(it.activityId, applicantId, slot.roundId, input.slotId, '', false)
+      const r = rdb.bookInterview(it.activityId, applicantId, slot.roundId, input.slotId, '', false, findInterviewersForClub(it.clubId))
       return result(r)
     },
   },

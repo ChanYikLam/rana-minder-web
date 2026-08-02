@@ -43,9 +43,10 @@ export function useRequest<T>(
         state.value = 'normal'
       }
     } else if (result.kind === 'accepted' || result.kind === 'external_uncertain') {
-      // 异步处理中：保持 loading，不展示错误，由调用方展示"处理中"提示
+      // 异步处理中：保持 loading 状态，由调用方展示"处理中"提示
       state.value = 'loading'
-      // external_uncertain 保留 supportId 供调用方在需要时引用（不作为错误展示）
+      // external_uncertain：将 supportId 写入 error 供调用方引用，
+      // 但 state 仍为 loading（非 error），因此不会被 PageStateBoundary 当作错误展示
       error.value = result.kind === 'external_uncertain'
         ? { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
         : null
