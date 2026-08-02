@@ -2,14 +2,16 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
-import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
+import { HighRiskConfirm } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import { NameSearch, type SearchResult } from '@/components/form'
+import WithdrawAction from '@/components/operation/WithdrawAction.vue'
 import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import type { PageState } from '@/types/machine'
-import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, Search, RefreshCw } from '@lucide/vue'
+import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from '@lucide/vue'
 
 interface Invite {
   id: string
@@ -89,6 +91,22 @@ async function searchCandidates() {
   if (r.kind === 'completed') {
     candidates.value = r.data.items
   }
+}
+
+const searchResults = computed<SearchResult[]>(() =>
+  candidates.value.map((c) => ({
+    id: c.id,
+    name: c.name,
+    subtitle: c.isMember ? `${c.studentId} · 已是成员` : c.studentId,
+    group: '候选人',
+    match: 'substring' as const,
+    score: 0,
+  })),
+)
+
+function onSelectCandidate(r: SearchResult) {
+  const found = candidates.value.find((c) => c.id === r.id)
+  if (found) selectedCandidate.value = found
 }
 
 function openSend() {
@@ -204,7 +222,13 @@ onMounted(loadData)
 
           <!-- 管理视角：撤回仅限待处理且未被接受 -->
           <div v-if="isManageView && isActionable(inv) && !isExpired(inv)" class="mt-2">
-            <button class="text-xs text-danger hover:underline" :disabled="actingId === inv.id" @click="handleWithdraw(inv)">{{ actingId === inv.id ? '处理中...' : '撤回邀请' }}</button>
+            <WithdrawAction
+              label="撤回邀请"
+              confirm-text="撤回后该候选人需重新查找并再次邀请。确定要撤回该邀请吗？"
+              :disabled="actingId === inv.id"
+              :loading="actingId === inv.id"
+              @confirm="handleWithdraw(inv)"
+            />
           </div>
 
           <!-- 被邀请人视角：整体接受/整体拒绝（过期不可处理） -->
@@ -245,31 +269,15 @@ onMounted(loadData)
           <div class="space-y-3">
             <div>
               <label class="block text-xs text-text-secondary mb-1">搜索候选人</label>
-              <div class="flex gap-2">
-                <div class="relative flex-1">
-                  <Search :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    v-model="candidateKeyword"
-                    type="search"
-                    placeholder="姓名或学号..."
-                    class="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-                    @input="searchCandidates"
-                  />
-                </div>
-              </div>
-              <div v-if="candidates.length > 0" class="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                <button
-                  v-for="c in candidates"
-                  :key="c.id"
-                  class="w-full flex items-center justify-between rounded-lg p-2 text-left text-sm transition-colors"
-                  :class="selectedCandidate?.id === c.id ? 'bg-primary-subtle' : 'hover:bg-subtle'"
-                  @click="selectedCandidate = c"
-                >
-                  <span class="text-text-primary">{{ c.name }}</span>
-                  <span class="text-xs text-text-secondary">{{ c.studentId }}</span>
-                </button>
-              </div>
-              <p v-else-if="candidateKeyword" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <NameSearch
+                v-model="candidateKeyword"
+                :results="searchResults"
+                :loading="false"
+                placeholder="姓名或学号..."
+                @update:model-value="searchCandidates"
+                @select="onSelectCandidate"
+              />
+              <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>

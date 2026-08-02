@@ -4,13 +4,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import SyncIndicator from '@/components/common/SyncIndicator.vue'
+import { FilterPanel, type FilterField, type FilterOption } from '@/components/display'
+import { StatChart, type ChartSeries } from '@/components/display'
 import { get } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import type { PageState } from '@/types/machine'
 import {
-  Search, UserCircle, ChevronRight, UserPlus, ArrowRightLeft,
+  UserCircle, ChevronRight, UserPlus, ArrowRightLeft,
   LogOut, Users, Mail, RefreshCw, Building2,
 } from '@lucide/vue'
 
@@ -125,6 +127,36 @@ const paged = computed(() => {
 
 watch([keyword, deptFilter, titleFilter, statusFilter], () => { page.value = 1 })
 
+const statusOptions: FilterOption[] = [
+  { value: 'active', label: '活跃' },
+  { value: 'pending_casdor_sync', label: '关系同步中' },
+  { value: 'suspended', label: '已暂停' },
+  { value: 'exiting', label: '退出中' },
+  { value: 'exited', label: '已退出' },
+  { value: 'removed', label: '已移除' },
+]
+
+const filterFields = computed<FilterField[]>(() => {
+  const deptOptions: FilterOption[] = (stats.value?.byDepartment ?? []).map(d => ({ value: d.id, label: d.name }))
+  if (stats.value && stats.value.zeroDepartment > 0) deptOptions.push({ value: 'zero', label: '待分配' })
+  return [
+    { key: 'department', label: '部门', options: deptOptions },
+    { key: 'title', label: '职位', options: allTitles.value.map(t => ({ value: t, label: t })) },
+    { key: 'status', label: '状态', options: statusOptions },
+  ]
+})
+
+function onFilterChange(v: Record<string, string | string[]>) {
+  const single = (key: string) => {
+    const raw = v[key]
+    return Array.isArray(raw) ? raw[0] ?? undefined : raw
+  }
+  keyword.value = typeof v.search === 'string' ? v.search : ''
+  deptFilter.value = single('department') ?? 'all'
+  titleFilter.value = single('title') ?? 'all'
+  statusFilter.value = single('status') ?? 'all'
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}年${d.getMonth() + 1}月`
@@ -137,6 +169,10 @@ function termYear(iso: string): string {
 }
 
 onMounted(loadData)
+
+const deptSeries = computed<ChartSeries[]>(() =>
+  (stats.value?.byDepartment ?? []).map((d) => ({ label: d.name, value: d.count })),
+)
 </script>
 
 <template>
@@ -276,62 +312,28 @@ onMounted(loadData)
       </div>
 
       <!-- 部门分布 -->
-      <div v-if="stats" class="flex flex-wrap items-center gap-2 mb-4">
-        <span class="text-xs text-text-secondary">部门分布：</span>
-        <span
-          v-for="d in stats.byDepartment"
-          :key="d.name"
-          class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-subtle text-text-secondary"
-        >
-          {{ d.name }} ({{ d.count }})
-        </span>
-        <span
-          v-if="stats.zeroDepartment > 0"
-          class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-warning-subtle text-warning"
-        >
-          待分配 ({{ stats.zeroDepartment }})
-        </span>
+      <StatChart
+        v-if="stats && deptSeries.length > 0"
+        title="部门成员分布"
+        unit="人"
+        :series="deptSeries"
+        class="mb-4"
+      />
+      <div
+        v-if="stats && stats.zeroDepartment > 0"
+        class="flex items-center gap-2 text-xs text-warning mb-4"
+      >
+        另有 {{ stats.zeroDepartment }} 名成员待分配部门
       </div>
 
       <!-- 筛选工具栏 -->
-      <div class="flex flex-wrap items-center gap-3 mb-4">
-        <div class="relative flex-1 min-w-[200px]">
-          <Search :size="18" class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-          <input
-            v-model="keyword"
-            type="search"
-            placeholder="搜索姓名或学号..."
-            class="w-full h-10 pl-10 pr-4 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-          />
-        </div>
-        <select
-          v-model="deptFilter"
-          class="h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-        >
-          <option value="all">全部部门</option>
-          <option v-for="d in stats?.byDepartment" :key="d.id" :value="d.id">{{ d.name }}</option>
-          <option value="zero">待分配</option>
-        </select>
-        <select
-          v-model="titleFilter"
-          class="h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-        >
-          <option value="all">全部职位</option>
-          <option v-for="t in allTitles" :key="t" :value="t">{{ t }}</option>
-        </select>
-        <select
-          v-model="statusFilter"
-          class="h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-        >
-          <option value="all">全部状态</option>
-          <option value="active">活跃</option>
-          <option value="pending_casdoor_sync">关系同步中</option>
-          <option value="suspended">已暂停</option>
-          <option value="exiting">退出中</option>
-          <option value="exited">已退出</option>
-          <option value="removed">已移除</option>
-        </select>
-      </div>
+      <FilterPanel
+        class="mb-4"
+        :fields="filterFields"
+        searchable
+        search-placeholder="搜索姓名或学号..."
+        @change="onFilterChange"
+      />
 
       <!-- 成员列表 -->
       <div class="flex items-center justify-between mb-3">
