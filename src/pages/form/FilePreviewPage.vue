@@ -3,11 +3,12 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import { Banner, ErrorState, ProcessingTag } from '@/components/feedback'
 import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Download, FileText, ShieldCheck, ArrowLeft } from '@lucide/vue'
+import { Download, FileText, ArrowLeft } from '@lucide/vue'
 import { openAuthorizedDownload } from '@/services/download'
 
 interface FileMeta {
@@ -20,6 +21,7 @@ const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const file = ref<FileMeta | null>(null)
 const downloading = ref(false)
+const downloadError = ref('')
 
 async function loadFile() {
   state.value = 'loading'
@@ -50,6 +52,7 @@ function formatTime(iso: string): string {
 
 async function handleDownload() {
   downloading.value = true
+  downloadError.value = ''
   const id = route.params.fileId as string
   const result = await post<{ downloadUrl: string }>(`/files/${id}/download`, {})
   downloading.value = false
@@ -57,12 +60,12 @@ async function handleDownload() {
     if (openAuthorizedDownload(result.data.downloadUrl)) {
       toast.success('已开始下载')
     } else {
-      toast.error('下载地址无效，请重新获取')
+      downloadError.value = '下载地址无效，请重新获取'
     }
   } else if (result.kind === 'accepted') {
     toast.info('文件正在处理中，请稍后重试')
   } else {
-    toast.error('下载失败，请稍后重试')
+    downloadError.value = '下载失败，请稍后重试'
   }
 }
 
@@ -101,28 +104,22 @@ onMounted(loadFile)
       </Card>
 
       <!-- 安全检查状态 -->
-      <Card v-if="file.status === 'approved'" class="mb-4 border-success">
-        <div class="flex items-center gap-2 text-success">
-          <ShieldCheck :size="20" />
-          <p class="text-sm font-medium">文件已通过安全检查</p>
-        </div>
-      </Card>
+      <Banner v-if="file.status === 'approved'" tone="success" title="文件已通过安全检查" class="mb-4" />
 
-      <Card v-else-if="file.status === 'checking'" class="mb-4 border-warning">
-        <div class="flex items-center gap-2 text-warning">
-          <div class="w-4 h-4 border-2 border-warning border-t-transparent rounded-full animate-spin" />
-          <p class="text-sm font-medium">文件正在安全检查中...</p>
+      <!-- GOV-008: 检查中期间任何角色均不能预览或下载 -->
+      <Banner
+        v-else-if="file.status === 'checking'"
+        tone="warning"
+        title="文件正在安全检查中"
+        class="mb-4"
+      >
+        <div class="flex items-center gap-2 mt-1">
+          <ProcessingTag status="checking" label="安全检查中" />
+          <span class="text-xs text-warning">检查完成前任何角色均不能预览或下载</span>
         </div>
-        <!-- GOV-008: 检查中期间任何角色均不能预览或下载 -->
-        <p class="text-xs text-warning mt-1">检查完成前任何角色均不能预览或下载</p>
-      </Card>
+      </Banner>
 
-      <Card v-else-if="file.status === 'quarantined'" class="mb-4 border-danger">
-        <div class="flex items-center gap-2 text-danger">
-          <ShieldCheck :size="20" />
-          <p class="text-sm font-medium">文件未通过安全检查，已被隔离</p>
-        </div>
-      </Card>
+      <Banner v-else-if="file.status === 'quarantined'" tone="danger" title="文件未通过安全检查，已被隔离" class="mb-4" />
 
       <!-- 下载按钮 -->
       <button
@@ -134,6 +131,8 @@ onMounted(loadFile)
         <Download :size="18" /> {{ downloading ? '生成中...' : '下载文件' }}
       </button>
       <p v-else class="text-center text-sm text-text-secondary">文件需通过安全检查后方可下载</p>
+
+      <ErrorState v-if="downloadError" title="下载失败" :message="downloadError" class="mb-4" @retry="handleDownload" />
 
       <!-- FORM-008: 水印提示 -->
       <p class="mt-4 text-xs text-text-secondary text-center">

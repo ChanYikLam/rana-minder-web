@@ -128,6 +128,7 @@ onMounted(loadData)
         impact-summary="强制关闭后活动进入平台强制结束状态，不经过社团确认。"
         confirm-label="确认强制关闭"
         :executing="busy"
+        :error="closeError || null"
         @confirm="handleForceClose"
       >
         <template #extra>

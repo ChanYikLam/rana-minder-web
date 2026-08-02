@@ -58,7 +58,7 @@ onMounted(loadClubs)
           {{ workspace.currentClubName?.charAt(0) || '社' }}
         </div>
         <div class="min-w-0 flex-1 text-left">
-          <p class="text-sm font-medium truncate">{{ workspace.currentClubName || '选择社团' }}</p>
+          <p class="text-sm font-medium truncate">{{ workspace.currentClubName || '未选择社团' }}</p>
           <p class="text-xs text-text-secondary truncate">
             {{ workspace.currentRole ? roleLabel(workspace.currentRole) : '未加入社团' }}
           </p>

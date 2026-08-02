@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
+import { DateTimePicker } from '@/components/form'
 import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
@@ -248,7 +249,7 @@ onMounted(loadData)
               预约执行（延迟到指定时间生效）
             </label>
             <div v-if="isScheduled" class="mt-2">
-              <input v-model="scheduledAt" type="datetime-local" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary" aria-label="预约执行时间" />
+              <DateTimePicker v-model="scheduledAt" label="预约执行时间" />
             </div>
           </div>
 
