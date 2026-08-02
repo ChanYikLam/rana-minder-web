@@ -373,14 +373,15 @@ const publicHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      const clubs = [
+        { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', logo: null },
+        { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', logo: null },
+        { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', logo: null },
+      ]
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', memberCount: 128, logo: null },
-            { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', memberCount: 86, logo: null },
-            { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', memberCount: 64, logo: null },
-          ],
+          items: clubs.map((c) => ({ ...c, memberCount: db.listMembers(c.id).filter((m) => m.status === 'active').length })),
           nextCursor: null,
         },
       }
@@ -450,24 +451,26 @@ const organizationHandlers: MockMethod[] = [
       }
       const user = resolveMockUser(url)
       const permissions = getPermissions(user, query.clubId || '')
-      const pendingApplications = db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review').length
-      const pendingInvitations = db.membershipInvitations.filter((i) => i.clubId === query.clubId && (i.status === 'sent' || i.status === 'pending_acceptance')).length
+      const clubId = query.clubId || ''
+      const pendingApplications = db.departmentApplications.filter((a) => a.clubId === clubId && a.status === 'under_review').length
+      const pendingInvitations = db.membershipInvitations.filter((i) => i.clubId === clubId && (i.status === 'sent' || i.status === 'pending_acceptance')).length
+      const pendingInterviews = rdb.recruitmentInterviews.filter((i) => i.clubId === clubId && (i.status === 'scheduled' || i.status === 'pending_selection')).length
       return {
         code: 0,
         data: {
-          club: { id: query.clubId, name: '计算机协会' },
-          role: user.roles.find((r) => r.clubId === query.clubId)?.role || 'member',
+          club: { id: clubId, name: '计算机协会' },
+          role: user.roles.find((r) => r.clubId === clubId)?.role || 'member',
           permissions,
           metrics: {
             pendingReviews: pendingApplications + pendingInvitations,
-            pendingInterviews: 5,
+            pendingInterviews,
             pendingResults: 0,
             syncErrors: 2,
           },
           todos: [
-            { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted').length },
-            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted' && !rdb.recruitmentInterviews.some((i) => i.activityId === a.activityId && i.applicantId === a.applicantId)).length },
-            { id: 'todo-003', type: 'invitation_pending', title: '待发送邀请', count: rdb.recruitmentInvitations.filter((i) => i.clubId === query.clubId && i.status === 'pending_acceptance').length },
+            { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted').length },
+            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted' && !rdb.recruitmentInterviews.some((i) => i.activityId === a.activityId && i.applicantId === a.applicantId)).length },
+            { id: 'todo-003', type: 'invitation_pending', title: '待发送邀请', count: rdb.recruitmentInvitations.filter((i) => i.clubId === clubId && i.status === 'pending_acceptance').length },
           ],
           recentActivities: [],
         },
@@ -530,10 +533,48 @@ const personalHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const user = resolveMockUser(url)
-      const items: { id: string; type: string; title: string; description: string; deadline: string; link: string }[] = [
-        { id: 'todo-1', type: 'invitation', title: '确认录取邀请', description: '计算机协会 - 2025秋季招新', deadline: '2025-08-05T23:59:00+08:00', link: '/me/invitations/recruitment/rinv-001' },
-        { id: 'todo-2', type: 'interview', title: '确认面试时间', description: '嵌入式方向面试', deadline: '2025-08-03T12:00:00+08:00', link: '/me/interviews/recruitment/int-001' },
-      ]
+      const items: { id: string; type: string; title: string; description: string; deadline: string; link: string }[] = []
+      const applicantId = applicantIdOfUrl(url)
+
+      // 招新申请人视角：待处理待办
+      if (applicantId) {
+        const recApp = rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.status === 'submitted')
+        if (recApp) {
+          const act = rdb.findAnyActivity(recApp.activityId)
+          items.push({
+            id: 'todo-rec-' + recApp.id,
+            type: 'application',
+            title: '招新报名审核中',
+            description: `${act?.clubName || ''} · ${act?.title || recApp.activityId}`,
+            deadline: act?.deadline || rdb.daysFromNow(30),
+            link: `/explore/activities/${recApp.activityId}`,
+          })
+        }
+        const interview = rdb.recruitmentInterviews.find((i) => i.applicantId === applicantId && i.status === 'scheduled')
+        if (interview) {
+          const act = rdb.findAnyActivity(interview.activityId)
+          items.push({
+            id: 'todo-int-' + interview.id,
+            type: 'interview',
+            title: '确认面试时间',
+            description: `${act?.clubName || ''} · ${act?.title || interview.activityId}`,
+            deadline: interview.startAt || rdb.daysFromNow(7),
+            link: `/me/interviews/recruitment/${interview.id}`,
+          })
+        }
+        const recInv = rdb.recruitmentInvitations.find((i) => i.applicantId === applicantId && i.status === 'pending_acceptance')
+        if (recInv) {
+          items.push({
+            id: 'todo-rinv-' + recInv.id,
+            type: 'invitation',
+            title: '确认录取邀请',
+            description: '计算机协会 - 2025秋季招新',
+            deadline: recInv.expiredAt,
+            link: `/me/invitations/recruitment/${recInv.id}`,
+          })
+        }
+      }
+
       // 被邀请人视角：常规入社邀请待处理
       const candidateId = actorCandidateId(user)
       if (candidateId) {
@@ -906,7 +947,7 @@ const memberHandlers: MockMethod[] = [
       const candidateId = actorCandidateId(user)
       const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
       if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '邀请不存在', supportId: 'MOCK' } }
-      if (candidateId && inv.candidateId !== candidateId) return forbidden()
+      if (!candidateId || inv.candidateId !== candidateId) return forbidden()
       const r = db.respondInvitation(query.invitationId, body.input?.action === 'accept' ? 'accept' : 'reject')
       if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status, acceptedAt: r.invitation?.acceptedAt } }

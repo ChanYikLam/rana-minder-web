@@ -5,7 +5,7 @@
 import { assertTransition } from './state-machines/transitions'
 
 const now = () => new Date().toISOString()
-function daysFromNow(days: number): string {
+export function daysFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 

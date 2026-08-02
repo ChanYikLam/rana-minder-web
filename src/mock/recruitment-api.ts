@@ -218,6 +218,22 @@ const recHandlers: MockMethod[] = [
       })
     },
   },
+  // 联合活动详情（公开）
+  {
+    url: '/api/explore/joint/:id',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const j = rdb.findJoint(query.id || 'jnt-001')
+      if (!j) return notFound('活动不存在')
+      if (j.status !== 'published') return notFound('活动不存在或未开放')
+      return ok({
+        id: j.id, title: j.title, type: 'joint',
+        status: j.status === 'published' ? 'open' : j.status, channelStatus: j.channelStatus,
+        deadline: j.deadline, description: j.description, formId: j.formId,
+        clubs: j.clubs.map((c) => ({ id: c.clubId, name: c.clubName })),
+      })
+    },
+  },
   // 活动列表（管理视角）
   {
     url: '/api/org/:clubId/recruitment',

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
@@ -16,6 +17,9 @@ const formTitle = ref('')
 const fields = ref<Field[]>([])
 const selectedFieldId = ref<string | null>(null)
 const selectedField = computed(() => fields.value.find((f) => f.id === selectedFieldId.value) || null)
+const riskOpen = ref(false)
+const saving = ref(false)
+const saveError = ref('')
 
 const fieldTypes = [
   { type: 'text', label: '单行文本', icon: Type },
@@ -51,15 +55,23 @@ function removeField(id: string) {
   if (selectedFieldId.value === id) selectedFieldId.value = null
 }
 
+function openSaveConfirm() {
+  saveError.value = ''
+  riskOpen.value = true
+}
+
 async function handleSave() {
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
+  saving.value = true
+  saveError.value = ''
   const result = await post(`${apiScope.prefix}/forms/designer/${formId}`, { fields: fields.value })
+  saving.value = false
   if (result.kind === 'completed') {
     toast.success('保存成功')
-  } else {
-    toast.error('保存失败，请稍后重试')
+  } else if (result.kind === 'rejected' && result.error) {
+    saveError.value = (result.error as { message?: string }).message || '保存失败，请稍后重试'
   }
 }
 
@@ -73,7 +85,13 @@ onMounted(loadData)
         <h1 class="text-2xl font-bold text-text-primary">{{ formTitle }}</h1>
         <div class="flex gap-2">
           <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"><Eye :size="16" /> 预览</button>
-          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="handleSave"><Save :size="16" /> 保存</button>
+          <button
+            class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+            :disabled="saving"
+            @click="openSaveConfirm"
+          >
+            <Save :size="16" /> {{ saving ? '保存中...' : '保存' }}
+          </button>
         </div>
       </div>
 
@@ -146,5 +164,17 @@ onMounted(loadData)
         </Card>
       </div>
     </div>
+
+    <HighRiskConfirm
+      v-model:open="riskOpen"
+      title="保存表单设计"
+      description="保存后将更新表单字段结构，可能影响正在进行的招新活动。"
+      :targets="[{ id: 'form', label: formTitle || '招新报名表', detail: `${fields.length} 个字段` }]"
+      impact-summary="请确认字段配置符合活动要求；错误配置可能导致报名表单展示异常。"
+      confirm-label="确认保存"
+      :executing="saving"
+      :error="saveError || null"
+      @confirm="handleSave"
+    />
   </PageStateBoundary>
 </template>
