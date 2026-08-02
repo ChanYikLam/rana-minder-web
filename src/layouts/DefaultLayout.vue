@@ -5,7 +5,7 @@ import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import {
-  Search, Bell, User, Settings, LogOut, ChevronDown, Menu, X,
+  Search, Bell, User, Settings, LogOut, ChevronDown, Menu, X, Sun, Moon,
   Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Megaphone, Flag,
 } from '@lucide/vue'
 import {
@@ -16,12 +16,17 @@ import {
   Drawer, DrawerContent, DrawerTitle, DrawerDescription,
 } from '@/components/ui/drawer'
 import WorkspaceNav from './components/WorkspaceNav.vue'
+import ClubSwitcher from '@/components/business/ClubSwitcher.vue'
+import Breadcrumbs from '@/components/business/Breadcrumbs.vue'
+import RoleBadge from '@/components/business/RoleBadge.vue'
+import { useTheme } from '@/composables/useTheme'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionViewStore()
 const workspace = useWorkspaceContextStore()
 const notifications = useNotificationViewStore()
+const { theme, toggleTheme } = useTheme()
 
 const currentClubId = computed(() => workspace.currentClubId)
 const clubIdFromRoute = computed(() => (route.params.clubId as string) || currentClubId.value)
@@ -30,29 +35,32 @@ interface NavGroup {
   label: string
   icon: typeof Building2
   prefix: string
-  items: { label: string; path: string }[]
+  items: { label: string; path: string; permission?: string }[]
+  permission?: string
 }
+
+const canAccess = (permission?: string) => !permission || workspace.hasPermission(permission)
 
 const navGroups = computed<NavGroup[]>(() => {
   if (!clubIdFromRoute.value) return []
   const base = `/org/${clubIdFromRoute.value}`
-  return [
+  const groups: NavGroup[] = [
     {
       label: '工作台', icon: BarChart3, prefix: `${base}/dashboard`,
       items: [
-        { label: '管理看板', path: `${base}/dashboard` },
-        { label: '批量操作', path: `${base}/batch` },
+        { label: '管理看板', path: `${base}/dashboard`, permission: 'club:dashboard:view' },
+        { label: '批量操作', path: `${base}/batch`, permission: 'club:batch:execute' },
       ],
     },
     {
-      label: '普通招新', icon: Megaphone, prefix: `${base}/recruitment`,
+      label: '普通招新', icon: Megaphone, prefix: `${base}/recruitment`, permission: 'club:recruitment:manage',
       items: [
         { label: '活动列表', path: `${base}/recruitment` },
         { label: '创建活动', path: `${base}/recruitment/create` },
       ],
     },
     {
-      label: '联合活动', icon: Users, prefix: `${base}/joint`,
+      label: '联合活动', icon: Users, prefix: `${base}/joint`, permission: 'club:joint:manage',
       items: [
         { label: '活动列表', path: `${base}/joint` },
         { label: '发起活动', path: `${base}/joint/create` },
@@ -61,16 +69,16 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       label: '成员与组织', icon: Building2, prefix: `${base}/members`,
       items: [
-        { label: '成员列表', path: `${base}/members` },
-        { label: '部门关系申请', path: `${base}/members/department-apply` },
-        { label: '常规入社邀请', path: `${base}/members/invite` },
-        { label: '任命调岗免职', path: `${base}/members/appointments` },
-        { label: '成员退出与移除', path: `${base}/members/exit` },
-        { label: '换届管理', path: `${base}/members/transition` },
+        { label: '成员列表', path: `${base}/members`, permission: 'club:member:manage' },
+        { label: '部门关系申请', path: `${base}/members/department-apply`, permission: 'club:member:manage' },
+        { label: '常规入社邀请', path: `${base}/members/invite`, permission: 'club:invite:manage' },
+        { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:member:manage' },
+        { label: '成员退出与移除', path: `${base}/members/exit`, permission: 'club:member:manage' },
+        { label: '换届管理', path: `${base}/members/transition`, permission: 'club:transition:manage' },
       ],
     },
     {
-      label: '动态表单', icon: FileText, prefix: `${base}/forms`,
+      label: '动态表单', icon: FileText, prefix: `${base}/forms`, permission: 'club:form:design',
       items: [
         { label: '表单列表', path: `${base}/forms` },
       ],
@@ -78,30 +86,36 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       label: '统计与导出', icon: BarChart3, prefix: `${base}/stat`,
       items: [
-        { label: '数据统计', path: `${base}/stats` },
-        { label: '数据导出', path: `${base}/exports` },
+        { label: '数据统计', path: `${base}/stats`, permission: 'club:stats:view' },
+        { label: '数据导出', path: `${base}/exports`, permission: 'club:export:execute' },
       ],
     },
     {
-      label: '通知配置', icon: Mail, prefix: `${base}/notifications`,
+      label: '通知配置', icon: Mail, prefix: `${base}/notifications`, permission: 'club:config:manage',
       items: [
         { label: '发信配置', path: `${base}/notifications/email-config` },
       ],
     },
     {
-      label: '纠错与审计', icon: ShieldAlert, prefix: `${base}/audit`,
+      label: '纠错与审计', icon: ShieldAlert, prefix: `${base}/audit`, permission: 'club:audit:view',
       items: [
         { label: '事实纠错', path: `${base}/audit/corrections` },
         { label: '审计日志', path: `${base}/audit/logs` },
       ],
     },
     {
-      label: '社团配置', icon: Settings, prefix: `${base}/config`,
+      label: '社团配置', icon: Settings, prefix: `${base}/config`, permission: 'club:config:manage',
       items: [
         { label: '配置管理', path: `${base}/config` },
       ],
     },
   ]
+  return groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccess(item.permission ?? group.permission)),
+    }))
+    .filter((group) => group.items.length > 0)
 })
 
 const adminNavGroups: NavGroup[] = [
@@ -236,6 +250,15 @@ async function handleLogout() {
       </div>
 
       <div class="flex items-center gap-2">
+        <button
+          class="flex items-center justify-center w-9 h-9 rounded-md text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
+          :aria-label="theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
+          @click="toggleTheme"
+        >
+          <Sun v-if="theme === 'dark'" :size="18" />
+          <Moon v-else :size="18" />
+        </button>
+
         <router-link
           to="/me/notifications"
           class="relative flex items-center justify-center w-9 h-9 rounded-md text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
@@ -265,6 +288,9 @@ async function handleLogout() {
             <div class="px-2 py-1.5 border-b">
               <p class="text-sm font-medium">{{ session.user?.name }}</p>
               <p class="text-xs text-text-secondary">{{ session.user?.email }}</p>
+              <div v-if="workspace.currentClubId" class="mt-1.5">
+                <RoleBadge />
+              </div>
             </div>
             <DropdownMenuItem @click="router.push('/me/profile')" class="cursor-pointer">
               <User :size="16" class="mr-2" /> 个人资料
@@ -284,34 +310,66 @@ async function handleLogout() {
     <!-- Body: Sidebar + Content -->
     <div class="flex flex-1">
       <aside
-        v-if="clubIdFromRoute || route.path.startsWith('/admin')"
         class="hidden md:flex flex-col w-56 border-r bg-elevated overflow-y-auto"
         role="complementary"
-        aria-label="工作空间导航"
+        aria-label="主导航"
       >
-        <!-- 社团标识 -->
+        <!-- 社团标识 / 平台标识 -->
         <div v-if="clubIdFromRoute" class="p-3 border-b">
-          <p class="text-xs text-text-secondary mb-1">当前社团</p>
-          <div class="flex items-center gap-2">
-            <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs font-medium">
-              {{ workspace.currentClubName?.charAt(0) || '社' }}
-            </div>
-            <span class="text-sm font-medium">{{ workspace.currentClubName || '计算机协会' }}</span>
-          </div>
+          <p class="text-xs text-text-secondary mb-1 px-2">切换社团</p>
+          <ClubSwitcher />
         </div>
         <div v-else-if="isAdmin" class="p-3 border-b">
           <p class="text-xs text-text-secondary mb-1">管理视角</p>
           <span class="text-sm font-medium text-primary">平台管理</span>
         </div>
 
-        <!-- 折叠式导航 -->
-        <WorkspaceNav v-if="clubIdFromRoute" :groups="navGroups" />
-        <WorkspaceNav v-else-if="isAdmin" :groups="adminNavGroups" />
+        <!-- 发现与个人 -->
+        <nav class="p-2" role="navigation" aria-label="个人导航">
+          <p class="px-3 pt-1 pb-1 text-xs font-medium text-text-secondary">发现与个人</p>
+          <router-link
+            to="/explore"
+            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
+            :class="route.path.startsWith('/explore') ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+          >
+            <Search :size="16" /> 公开发现
+          </router-link>
+          <router-link
+            v-if="clubIdFromRoute"
+            :to="`/org/${clubIdFromRoute}/dashboard`"
+            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
+            :class="route.path.startsWith(`/org/${clubIdFromRoute}/dashboard`) ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+          >
+            <Users :size="16" /> 我的工作台
+          </router-link>
+          <router-link
+            to="/me"
+            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
+            :class="route.path.startsWith('/me') ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+          >
+            <User :size="16" /> 个人空间
+          </router-link>
+        </nav>
+
+        <!-- 社团管理 -->
+        <template v-if="clubIdFromRoute">
+          <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">社团管理</p>
+          <WorkspaceNav :groups="navGroups" />
+        </template>
+
+        <!-- 平台 -->
+        <template v-if="isAdmin">
+          <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">平台</p>
+          <WorkspaceNav :groups="adminNavGroups" />
+        </template>
       </aside>
 
       <!-- Main Content -->
       <main id="default-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
         <div class="mx-auto max-w-[1400px] p-4 md:p-6">
+          <div class="mb-4">
+            <Breadcrumbs />
+          </div>
           <slot />
         </div>
       </main>
@@ -360,20 +418,49 @@ async function handleLogout() {
             </router-link>
           </nav>
           <div v-if="clubIdFromRoute" class="px-4 pt-3">
-            <p class="text-xs text-text-secondary mb-1">当前社团</p>
-            <div class="flex items-center gap-2">
-              <div class="flex items-center justify-center w-8 h-8 rounded-full bg-primary-subtle text-primary text-xs font-medium">
-                {{ workspace.currentClubName?.charAt(0) || '社' }}
-              </div>
-              <span class="text-sm font-medium">{{ workspace.currentClubName || '计算机协会' }}</span>
-            </div>
+            <p class="text-xs text-text-secondary mb-1">切换社团</p>
+            <ClubSwitcher />
           </div>
           <div v-else-if="isAdmin" class="px-4 pt-3">
             <p class="text-xs text-text-secondary mb-1">管理视角</p>
             <span class="text-sm font-medium text-primary">平台管理</span>
           </div>
-          <WorkspaceNav v-if="clubIdFromRoute" :groups="navGroups" />
-          <WorkspaceNav v-else-if="isAdmin" :groups="adminNavGroups" />
+          <nav class="p-2" role="navigation" aria-label="个人导航">
+            <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">发现与个人</p>
+            <router-link
+              to="/explore"
+              class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-subtle transition-colors"
+              :class="route.path.startsWith('/explore') ? 'text-primary font-medium' : ''"
+              @click="closeMobileNav"
+            >
+              <Search :size="16" /> 公开发现
+            </router-link>
+            <router-link
+              v-if="clubIdFromRoute"
+              :to="`/org/${clubIdFromRoute}/dashboard`"
+              class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-subtle transition-colors"
+              :class="route.path.startsWith(`/org/${clubIdFromRoute}/dashboard`) ? 'text-primary font-medium' : ''"
+              @click="closeMobileNav"
+            >
+              <Users :size="16" /> 我的工作台
+            </router-link>
+            <router-link
+              to="/me"
+              class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-subtle transition-colors"
+              :class="route.path.startsWith('/me') ? 'text-primary font-medium' : ''"
+              @click="closeMobileNav"
+            >
+              <User :size="16" /> 个人空间
+            </router-link>
+          </nav>
+          <template v-if="clubIdFromRoute">
+            <p class="px-4 pt-2 pb-1 text-xs font-medium text-text-secondary">社团管理</p>
+            <WorkspaceNav :groups="navGroups" />
+          </template>
+          <template v-if="isAdmin">
+            <p class="px-4 pt-2 pb-1 text-xs font-medium text-text-secondary">平台</p>
+            <WorkspaceNav :groups="adminNavGroups" />
+          </template>
         </div>
       </DrawerContent>
     </Drawer>

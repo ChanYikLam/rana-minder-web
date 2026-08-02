@@ -1,46 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
-
-const WORKSPACE_PERMISSIONS: Record<string, string> = {
-  'P-ORG-02': 'club:dashboard:view',
-  'P-ORG-03': 'club:batch:execute',
-  'P-REC': 'club:recruitment:manage',
-  'P-JNT': 'club:joint:manage',
-  'P-MEM': 'club:member:manage',
-  'P-FORM': 'club:form:design',
-  'P-STAT': 'club:stats:view',
-  'P-EXP': 'club:export:execute',
-  'P-NTF': 'club:config:manage',
-  'P-AUD': 'club:audit:view',
-  'P-CFG': 'club:config:manage',
-}
-
-const ADMIN_PERMISSIONS: Record<string, string> = {
-  'P-FORM-admin-list': 'platform:form:design',
-  'P-FORM-01-admin': 'platform:form:design',
-  'P-FORM-02-admin': 'platform:form:design',
-  'P-JNT-admin-list': 'platform:club:manage',
-  'P-JNT-05-admin': 'platform:club:manage',
-  'P-ORG-01': 'platform:club:manage',
-  'P-NTF-02-platform': 'platform:config:manage',
-  'P-AUD-01-admin': 'platform:audit:view',
-  'P-AUD-02-admin': 'platform:audit:view',
-  'P-STAT-01-admin': 'platform:export:execute',
-  'P-EXP-01-admin': 'platform:export:execute',
-  'P-AUD-03': 'platform:delete:execute',
-  'P-AUD-04': 'platform:delete:execute',
-  'P-CFG-01-admin': 'platform:config:manage',
-  'P-CFG-02': 'platform:config:manage',
-  'P-OPS-01': 'platform:ops:view',
-}
-
-export function workspacePermissionForRoute(routeName: string): string | null {
-  const exact = WORKSPACE_PERMISSIONS[routeName]
-  if (exact) return exact
-  const prefix = Object.keys(WORKSPACE_PERMISSIONS).find((key) => routeName.startsWith(`${key}-`) || routeName === `${key}-list`)
-  return prefix ? WORKSPACE_PERMISSIONS[prefix] : null
-}
+import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
 
 const routes: RouteRecordRaw[] = [
   // ========== A. 公开路由（7条） ==========
@@ -516,6 +477,12 @@ const routes: RouteRecordRaw[] = [
 
   // ========== 通用回退 ==========
   {
+    path: '/',
+    name: 'P-GEN-00-root',
+    component: () => import('@/pages/generic/NotFoundPage.vue'),
+    meta: { layout: 'public', public: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'P-GEN-01',
     component: () => import('@/pages/generic/NotFoundPage.vue'),
@@ -534,6 +501,23 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const session = useSessionViewStore()
   const workspace = useWorkspaceContextStore()
+
+  // 根路径：按会话状态跳转默认落点
+  if (to.path === '/') {
+    if (!session.isAuthenticated) {
+      await session.loadSession()
+    }
+    if (!session.isAuthenticated) {
+      return { name: 'P-IDN-01' }
+    }
+    if (session.workspace?.clubId) {
+      return { path: `/org/${session.workspace.clubId}/dashboard` }
+    }
+    if (session.hasPermission('platform:club:manage')) {
+      return { name: 'P-ORG-01' }
+    }
+    return { name: 'P-IDN-03' }
+  }
 
   const isPublic = to.meta.public === true
 
@@ -563,8 +547,14 @@ router.beforeEach(async (to) => {
       if (!clubId || !permission || !(await workspace.loadWorkspace(clubId)) || !workspace.hasPermission(permission)) {
         return { name: 'P-GEN-02' }
       }
-    } else {
-      workspace.clearWorkspace()
+    } else if (!workspace.hasWorkspace && session.workspace) {
+      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载时按会话初始化
+      workspace.setWorkspace(
+        session.workspace.clubId,
+        session.workspace.clubName,
+        session.workspace.role,
+        session.permissions,
+      )
     }
   }
 

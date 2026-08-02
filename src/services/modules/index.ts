@@ -48,6 +48,8 @@ export const identityApi = {
     post('/auth/profile/sync-conflict', input),
   reauthenticate: (): Promise<ApiResult<{ proof: string; expiresAt: string }>> =>
     post('/auth/reauth', {}),
+  getMyClubs: (): Promise<ApiResult<{ clubs: { clubId: string; clubName: string; role: WorkspaceContext['role'] }[] }>> =>
+    get('/me/clubs'),
 }
 
 export const exploreApi = {

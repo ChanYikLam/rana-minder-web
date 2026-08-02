@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
-import { Calendar, Mail, Phone, Building2, Clock, AlertTriangle, History } from '@lucide/vue'
+import { Calendar, Mail, Phone, Building2, Clock, AlertTriangle, History, ArrowLeft } from '@lucide/vue'
 
 interface MemberDetail {
   id: string; studentId: string; name: string; email: string; phone: string
@@ -17,7 +18,9 @@ interface MemberDetail {
 }
 
 const route = useRoute()
+const router = useRouter()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const member = ref<MemberDetail | null>(null)
 
 async function loadData() {
@@ -27,27 +30,40 @@ async function loadData() {
   const result = await get<MemberDetail>(`/org/${clubId}/members/${memberId}`)
   if (result.kind === 'completed') {
     member.value = result.data
-    state.value = 'normal'
+    if (result.data) {
+      state.value = 'normal'
+    } else {
+      state.value = 'empty'
+    }
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
   } else {
-    state.value = 'error'
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
   }
 }
 
 function formatDate(iso: string): string {
+  if (!iso) return '-'
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '-'
   return `${d.getFullYear()}年${d.getMonth() + 1}月`
 }
 
 function actionLabel(a: string): string {
-  return { join: '加入', leave: '退出', transfer: '调岗' }[a] ?? a
+  return { join: '加入', leave: '退出', transfer: '调岗', appoint: '任命', promote: '晋升', dismiss: '免职' }[a] ?? a
 }
 
 onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="成员经历" @retry="loadData">
+  <PageStateBoundary :state="state" title="成员经历" :error="pageError" @retry="loadData">
     <div v-if="member" class="max-w-2xl mx-auto">
+      <button class="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-4" @click="router.push(`/org/${route.params.clubId}/members`)">
+        <ArrowLeft :size="16" /> 返回成员列表
+      </button>
       <!-- 成员头部 -->
       <Card class="mb-4">
         <div class="flex items-start justify-between mb-4">
@@ -60,6 +76,7 @@ onMounted(loadData)
           </div>
           <StateTag :status="member.status" />
         </div>
+        <p class="text-xs text-text-secondary mb-3">当前成员关系由 Casdoor Group 权威维护，本页面记录任期、异动与审批历史。</p>
         <div class="grid grid-cols-2 gap-3 text-sm">
           <div class="flex items-center gap-2 text-text-secondary"><Mail :size="16" /> {{ member.email }}</div>
           <div class="flex items-center gap-2 text-text-secondary"><Phone :size="16" /> {{ member.phone }}</div>
@@ -77,7 +94,7 @@ onMounted(loadData)
               <Building2 :size="16" class="text-text-secondary" />
               <span class="text-sm text-text-primary">{{ pos.departmentName }} · {{ pos.title }}</span>
               <!-- MEM-012: 计划任期结束不触发自动卸任，在任者仍显示"在任" -->
-              <span class="text-xs text-success">在任</span>
+              <StateTag :status="pos.status === 'active' ? 'active' : pos.status" :label="pos.status === 'active' ? '在任' : undefined" />
             </div>
             <span class="text-xs text-text-secondary">自 {{ formatDate(pos.startDate) }}</span>
           </div>
@@ -98,6 +115,9 @@ onMounted(loadData)
             <p class="text-xs text-text-secondary mt-0.5">发现于 {{ formatDate(an.createdAt) }}</p>
           </div>
         </div>
+        <button class="mt-3 px-3 h-8 rounded-md border border-warning text-warning text-xs hover:bg-warning-subtle" @click="router.push(`/org/${route.params.clubId}/audit/corrections`)">
+          去处理
+        </button>
       </Card>
 
       <!-- 部门经历 -->
