@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
@@ -19,7 +19,14 @@ const state = ref<PageState>('loading')
 const items = ref<ExportTask[]>([])
 const confirmOpen = ref(false)
 const executing = ref(false)
-const actionError = ref('')
+const succeeded = ref(false)
+const errorMessage = ref('')
+const pollingTimers = new Map<string, ReturnType<typeof setInterval>>()
+
+function resetConfirmState() {
+  succeeded.value = false
+  errorMessage.value = ''
+}
 
 async function loadData() {
   state.value = 'loading'
@@ -29,7 +36,48 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: ExportTask[] } }).data.items
     state.value = 'normal'
+    // 启动轮询：仅轮询状态为 generating 的任务
+    items.value.forEach((t) => {
+      if (t.status === 'generating' && !pollingTimers.has(t.id)) {
+        startPolling(t.id, apiScope.prefix)
+      }
+    })
   } else { state.value = 'error' }
+}
+
+function startPolling(taskId: string, prefix: string) {
+  const poll = async () => {
+    const r = await get<{ status: string; downloadUrl: string | null; fileSize: number; completedAt: string | null; expiredAt: string | null }>(`${prefix}/exports/${taskId}/status`)
+    if (r.kind === 'completed') {
+      const data = r.data
+      const idx = items.value.findIndex((t) => t.id === taskId)
+      if (idx === -1) return
+      items.value[idx] = { ...items.value[idx], ...data }
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'expired') {
+        stopPolling(taskId)
+        if (data.status === 'completed') {
+          toast.success('导出已生成完成，可点击下载')
+        } else if (data.status === 'failed') {
+          toast.error('导出失败，请稍后重试')
+        }
+      }
+    }
+  }
+  const handle = setInterval(poll, 2000)
+  pollingTimers.set(taskId, handle)
+}
+
+function stopPolling(taskId: string) {
+  const handle = pollingTimers.get(taskId)
+  if (handle) {
+    clearInterval(handle)
+    pollingTimers.delete(taskId)
+  }
+}
+
+function stopAllPolling() {
+  pollingTimers.forEach((handle) => clearInterval(handle))
+  pollingTimers.clear()
 }
 
 function formatSize(bytes: number): string {
@@ -47,25 +95,62 @@ async function handleCreate() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
   executing.value = true
-  actionError.value = ''
+  succeeded.value = false
+  errorMessage.value = ''
   const result = await post(`${apiScope.prefix}/exports`, { type: '成员名单' })
   executing.value = false
   if (result.kind === 'completed') {
-    await loadData()
-  } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '导出失败，请稍后重试'
+    const task = (result.data as ExportTask) || null
+    if (task) {
+      // 立即把任务插入列表并启动轮询；不在此处立即"完成"
+      items.value = [task, ...items.value]
+      if (task.status === 'generating') {
+        startPolling(task.id, apiScope.prefix)
+      } else if (task.status === 'completed') {
+        toast.success('导出已生成完成，可点击下载')
+      }
+    }
+    succeeded.value = true
+    // 弹窗保留在 done 一段时间后由用户关闭
+  } else {
+    errorMessage.value = (result as { error?: { message?: string } }).error?.message || '创建导出失败，请稍后重试'
   }
 }
 
-async function handleDownload(task: ExportTask) {
-  const apiScope = resolveApiScope(route)
-  if (!apiScope) return
-  const result = await post<{ downloadUrl: string }>(`${apiScope.prefix}/exports/${task.id}/download`, {})
-  if (result.kind === 'completed' && openAuthorizedDownload(result.data.downloadUrl)) return
-  toast.error('下载地址无效或已过期')
+function openCreateConfirm() {
+  confirmOpen.value = true
 }
 
-onMounted(loadData)
+async function handleDownload(task: ExportTask) {
+  if (task.status !== 'completed' || !task.downloadUrl) {
+    toast.info('导出尚未完成，请稍候')
+    return
+  }
+  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/${task.id}/download`, {})
+  if (result.kind === 'completed') {
+    if (openAuthorizedDownload(result.data.downloadUrl)) {
+      toast.success('已开始下载')
+      return
+    }
+    toast.error('下载地址无效，请重新获取')
+    return
+  }
+  if (result.kind === 'accepted') {
+    toast.info('导出正在生成中，请稍后重试')
+    return
+  }
+  toast.error('下载失败，请稍后重试')
+}
+
+const apiScope = ref<string | null>(null)
+
+onMounted(async () => {
+  const scope = resolveApiScope(route)
+  if (scope) apiScope.value = scope.prefix
+  await loadData()
+})
+
+onBeforeUnmount(stopAllPolling)
 </script>
 
 <template>
@@ -74,7 +159,7 @@ onMounted(loadData)
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">导出管理</h1>
         <PermissionGuard permission="club:member:manage">
-          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="confirmOpen = true">
+          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openCreateConfirm">
             <Plus :size="16" /> 新建导出
           </button>
         </PermissionGuard>
@@ -83,7 +168,7 @@ onMounted(loadData)
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无导出任务">
         <template #action>
           <PermissionGuard permission="club:member:manage">
-            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="confirmOpen = true">
+            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openCreateConfirm">
               <Plus :size="16" /> 新建导出
             </button>
           </PermissionGuard>
@@ -146,8 +231,10 @@ onMounted(loadData)
       impact-summary="导出任务生成后 7 天内可下载，过期自动失效；每次下载实时校验权限。"
       confirm-label="开始导出"
       :executing="executing"
-      :error="actionError || null"
+      :succeeded="succeeded"
+      :error-message="errorMessage"
       @confirm="handleCreate"
+      @cancel="resetConfirmState"
     />
   </PageStateBoundary>
 </template>

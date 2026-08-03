@@ -3,6 +3,8 @@ import type { ComputedRef } from 'vue'
 import type { DrawerRootEmits, DrawerRootProps } from 'reka-ui'
 import { DrawerRoot, useForwardPropsEmits } from 'reka-ui'
 
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps<DrawerRootProps>()
 
 const emits = defineEmits<DrawerRootEmits>()
@@ -13,7 +15,6 @@ const forwarded = useForwardPropsEmits(props, emits) as ComputedRef<Record<strin
 <template>
   <DrawerRoot
     v-slot="slotProps"
-    data-slot="drawer"
     v-bind="forwarded"
   >
     <slot v-bind="slotProps" />

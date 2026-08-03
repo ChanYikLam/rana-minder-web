@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount } from 'vue'
-import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound, AlertCircle } from '@lucide/vue'
+import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound, XCircle } from '@lucide/vue'
 import {
   Dialog,
   DialogContent,
@@ -29,7 +29,8 @@ interface Props {
   reauthRequired?: boolean
   reauthDeadline?: number
   executing?: boolean
-  error?: string | null
+  succeeded?: boolean
+  errorMessage?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -38,13 +39,16 @@ const props = withDefaults(defineProps<Props>(), {
   reauthRequired: false,
   reauthDeadline: 10 * 60 * 1000,
   executing: false,
-  error: null,
+  succeeded: false,
+  errorMessage: '',
 })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
+  'update:errorMessage': [value: string]
   confirm: []
   cancel: []
+  retry: []
 }>()
 
 const step = ref<'preview' | 'confirm' | 'executing' | 'done'>('preview')
@@ -53,10 +57,11 @@ const reauthPassword = ref('')
 const reauthError = ref('')
 const reauthBusy = ref(false)
 
-// 重认证倒计时：从弹窗打开起计时，每秒刷新
 const openedAt = ref(Date.now())
 const now = ref(Date.now())
 let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+const isReauthExpired = computed(() => props.reauthRequired && remainingSeconds.value <= 0)
 
 function stopCountdown() {
   if (countdownTimer) {
@@ -64,6 +69,31 @@ function stopCountdown() {
     countdownTimer = null
   }
 }
+
+// 监听外部"已成功"信号：父组件在确认成功后置 succeeded=true → 进入 done
+watch(
+  () => props.succeeded,
+  (succeeded) => {
+    if (succeeded && step.value === 'executing') {
+      step.value = 'done'
+    }
+  }
+)
+
+// 监听外部"执行中"信号：父组件把 executing 从 true 置为 false
+// 只有当 succeeded 也为 true 时才进入 done；否则保持在 executing 并显示错误
+watch(
+  () => props.executing,
+  (executing, wasExecuting) => {
+    if (wasExecuting && !executing && step.value === 'executing') {
+      if (props.succeeded) {
+        step.value = 'done'
+      } else if (props.errorMessage) {
+        // 保持 executing 步骤但显示错误，等待父组件 retry 或关闭
+      }
+    }
+  }
+)
 
 watch(
   () => props.open,
@@ -89,41 +119,14 @@ watch(
 
 onBeforeUnmount(stopCountdown)
 
-// 执行完成后：成功进入完成状态，失败回到确认步骤展示错误
-watch(
-  () => props.executing,
-  (executing, prevExecuting) => {
-    if (prevExecuting && !executing && step.value === 'executing') {
-      if (props.error) {
-        // 失败：回到确认步骤，允许重试
-        step.value = 'confirm'
-      } else {
-        step.value = 'done'
-      }
-    }
-  }
-)
-
-const remainingSeconds = computed(() => {
-  if (!props.reauthRequired) return 0
-  const elapsed = now.value - openedAt.value
-  return Math.max(0, Math.ceil((props.reauthDeadline - elapsed) / 1000))
-})
-
-const isExpired = computed(() => props.reauthRequired && remainingSeconds.value <= 0)
-
 function handleNext() {
   if (step.value === 'preview') {
-    if (isExpired.value) {
-      reauthError.value = '认证已过期，请重新打开确认'
-      return
-    }
     step.value = 'confirm'
   }
 }
 
 async function handleConfirm() {
-  if (props.reauthRequired && isExpired.value) {
+  if (isReauthExpired.value) {
     reauthError.value = '认证已过期，请重新打开确认'
     return
   }
@@ -157,19 +160,23 @@ function handleCancel() {
   emit('update:open', false)
 }
 
-function handleClose() {
-  emit('update:open', false)
+function handleRetry() {
+  emit('update:errorMessage', '')
+  reauthError.value = ''
+  emit('retry')
+  step.value = 'confirm'
 }
+
+const remainingSeconds = computed(() => {
+  if (!props.reauthRequired) return 0
+  const elapsed = now.value - openedAt.value
+  return Math.max(0, Math.ceil((props.reauthDeadline - elapsed) / 1000))
+})
 </script>
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent
-      class="max-w-[480px]"
-      :show-close-button="false"
-      @pointer-down-outside.prevent
-      @escape-keydown.prevent
-    >
+    <DialogContent class="max-w-[480px]" @pointerdown-outside.prevent @escape-key-down.prevent>
       <DialogHeader>
         <div class="flex items-center gap-2 mb-1">
           <div class="flex items-center justify-center w-8 h-8 rounded-full bg-warning-subtle text-warning">
@@ -198,15 +205,10 @@ function handleClose() {
           <p class="text-xs text-warning mt-2">{{ impactSummary }}</p>
         </div>
 
-        <div
-          v-if="reauthRequired"
-          class="flex items-center gap-2 text-xs text-warning bg-warning-subtle rounded-md px-3 py-2"
-          :class="isExpired ? 'opacity-60' : ''"
-        >
+        <div v-if="reauthRequired" class="flex items-center gap-2 text-xs text-warning bg-warning-subtle rounded-md px-3 py-2">
           <ShieldAlert :size="14" />
-          <span>{{ isExpired ? '认证已过期，请重新打开确认' : `此操作需要重新认证（剩余 ${remainingSeconds} 秒）` }}</span>
+          <span>此操作需要重新认证（剩余 {{ remainingSeconds }} 秒）</span>
         </div>
-        <p v-if="step === 'preview' && reauthError" class="text-xs text-danger" role="alert">{{ reauthError }}</p>
       </div>
 
       <!-- Step: Confirm -->
@@ -219,13 +221,6 @@ function handleClose() {
           <p>即将执行：<span class="font-medium text-primary">{{ title }}</span></p>
         </div>
 
-        <slot name="extra" />
-
-        <div v-if="error" class="flex items-start gap-2 rounded-md bg-danger-subtle p-3">
-          <AlertCircle :size="16" class="text-danger shrink-0 mt-0.5" />
-          <p class="text-xs text-danger">{{ error }}</p>
-        </div>
-
         <div v-if="reauthRequired" class="space-y-2">
           <label class="block text-sm font-medium text-text-primary flex items-center gap-1.5">
             <KeyRound :size="14" /> 重新认证（剩余 {{ remainingSeconds }} 秒）
@@ -236,17 +231,23 @@ function handleClose() {
             class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             :class="reauthError ? 'border-danger' : ''"
             placeholder="请输入登录密码"
-            :disabled="isExpired"
             @keyup.enter="handleConfirm"
           />
           <p v-if="reauthError" class="text-xs text-danger" role="alert">{{ reauthError }}</p>
         </div>
       </div>
 
-      <!-- Step: Executing -->
+      <!-- Step: Executing（含失败错误状态） -->
       <div v-else-if="step === 'executing'" class="py-8 text-center">
-        <RefreshCw class="animate-spin text-primary mx-auto mb-3" :size="32" />
-        <p class="text-sm text-text-secondary">正在执行...</p>
+        <template v-if="!executing && errorMessage">
+          <XCircle class="text-danger mx-auto mb-3" :size="32" />
+          <p class="text-sm font-medium text-danger mb-2">操作失败</p>
+          <p class="text-xs text-text-secondary">{{ errorMessage }}</p>
+        </template>
+        <template v-else>
+          <RefreshCw class="animate-spin text-primary mx-auto mb-3" :size="32" />
+          <p class="text-sm text-text-secondary">正在执行...</p>
+        </template>
       </div>
 
       <!-- Step: Done -->
@@ -257,20 +258,13 @@ function handleClose() {
 
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
-        <Button v-if="step === 'preview'" :disabled="isExpired" @click="handleNext">下一步</Button>
-        <Button
-          v-else
-          variant="destructive"
-          :loading="executing || reauthBusy"
-          :disabled="isExpired"
-          @click="handleConfirm"
-        >
-          {{ reauthRequired ? '验证并执行' : confirmLabel }}
-        </Button>
+        <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>
+        <Button v-else variant="destructive" :loading="executing || reauthBusy" :disabled="isReauthExpired" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
       </DialogFooter>
 
-      <DialogFooter v-else-if="step === 'done'">
-        <Button @click="handleClose">知道了</Button>
+      <DialogFooter v-else-if="step === 'executing' && !executing && errorMessage">
+        <Button variant="outline" @click="emit('update:open', false)">关闭</Button>
+        <Button variant="destructive" @click="handleRetry">重试</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

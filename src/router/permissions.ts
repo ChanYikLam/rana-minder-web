@@ -22,6 +22,7 @@ export const ADMIN_PERMISSIONS: Record<string, string> = {
   'P-FORM-02-admin': 'platform:form:design',
   'P-JNT-admin-list': 'platform:club:manage',
   'P-JNT-05-admin': 'platform:club:manage',
+  'P-REC-admin-list': 'platform:club:manage',
   'P-ORG-01': 'platform:club:manage',
   'P-NTF-02-platform': 'platform:config:manage',
   'P-AUD-01-admin': 'platform:audit:view',

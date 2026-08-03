@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { workspacePermissionForRoute } from './permissions'
+import { workspacePermissionForRoute, ADMIN_PERMISSIONS } from './permissions'
+
+describe('ADMIN_PERMISSIONS', () => {
+  it('maps all admin route names to a permission', () => {
+    expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:club:manage')
+    expect(ADMIN_PERMISSIONS['P-ORG-01']).toBe('platform:club:manage')
+    expect(ADMIN_PERMISSIONS['P-OPS-01']).toBe('platform:ops:view')
+  })
+})
 
 describe('workspacePermissionForRoute', () => {
   it('maps member routes to club:member:manage', () => {

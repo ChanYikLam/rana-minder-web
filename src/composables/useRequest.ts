@@ -42,14 +42,10 @@ export function useRequest<T>(
       } else {
         state.value = 'normal'
       }
-    } else if (result.kind === 'accepted' || result.kind === 'external_uncertain') {
-      // 异步处理中：保持 loading 状态，由调用方展示"处理中"提示
+    } else if (result.kind === 'accepted') {
       state.value = 'loading'
-      // external_uncertain：将 supportId 写入 error 供调用方引用，
-      // 但 state 仍为 loading（非 error），因此不会被 PageStateBoundary 当作错误展示
-      error.value = result.kind === 'external_uncertain'
-        ? { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
-        : null
+    } else if (result.kind === 'external_uncertain') {
+      state.value = 'loading'
     } else if (result.kind === 'concurrency_conflict') {
       state.value = 'error'
       error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }

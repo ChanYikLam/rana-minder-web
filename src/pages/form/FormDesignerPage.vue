@@ -2,10 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
-import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
-import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
+import type { PageState } from '@/types/machine'
 import { Type, AlignLeft, List, FileUp, Calendar, CheckSquare, Plus, X, GripVertical, Save, Eye } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
@@ -14,12 +13,16 @@ interface Field { id: string; type: string; label: string; required: boolean; re
 const route = useRoute()
 const state = ref<PageState>('loading')
 const formTitle = ref('')
+const formId = ref('')
+const currentVersion = ref(1)
 const fields = ref<Field[]>([])
 const selectedFieldId = ref<string | null>(null)
-const selectedField = computed(() => fields.value.find((f) => f.id === selectedFieldId.value) || null)
-const riskOpen = ref(false)
 const saving = ref(false)
-const saveError = ref('')
+
+const selectedField = computed(() => {
+  if (!selectedFieldId.value) return null
+  return fields.value.find((f) => f.id === selectedFieldId.value) || null
+})
 
 const fieldTypes = [
   { type: 'text', label: '单行文本', icon: Type },
@@ -32,22 +35,26 @@ const fieldTypes = [
 
 async function loadData() {
   state.value = 'loading'
-  const formId = route.params.formId as string
+  const id = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) { state.value = 'error'; return }
-  const result = await get<{ title: string; fields: Field[] }>(`${apiScope.prefix}/forms/designer/${formId}`)
+  const result = await get<{ id: string; title: string; fields: Field[]; version: number }>(`${apiScope.prefix}/forms/designer/${id}`)
   if (result.kind === 'completed') {
     formTitle.value = result.data.title
     fields.value = result.data.fields
+    formId.value = result.data.id || id
+    currentVersion.value = typeof result.data.version === 'number' ? result.data.version : 1
     state.value = 'normal'
   } else { state.value = 'error' }
 }
 
 function addField(type: string) {
-  fields.value.push({
+  const newField: Field = {
     id: `f-${Date.now()}`, type, label: '新字段', required: false, readonly: false,
     permission: 'read_write', options: null, description: null,
-  })
+  }
+  fields.value.push(newField)
+  selectedFieldId.value = newField.id
 }
 
 function removeField(id: string) {
@@ -55,23 +62,37 @@ function removeField(id: string) {
   if (selectedFieldId.value === id) selectedFieldId.value = null
 }
 
-function openSaveConfirm() {
-  saveError.value = ''
-  riskOpen.value = true
+function selectField(id: string) {
+  selectedFieldId.value = id
+}
+
+function updateSelectedField(updates: Partial<Field>) {
+  if (!selectedField.value) return
+  const idx = fields.value.findIndex((f) => f.id === selectedField.value!.id)
+  if (idx !== -1) {
+    fields.value[idx] = { ...fields.value[idx], ...updates }
+  }
 }
 
 async function handleSave() {
-  const formId = route.params.formId as string
-  const apiScope = resolveApiScope(route)
-  if (!apiScope) return
   saving.value = true
-  saveError.value = ''
-  const result = await post(`${apiScope.prefix}/forms/designer/${formId}`, { fields: fields.value })
+  const id = (formId.value || (route.params.formId as string))
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { saving.value = false; return }
+  const nextVersion = currentVersion.value + 1
+  const result = await post(`${apiScope.prefix}/forms/designer/${id}/save`, {
+    fields: fields.value,
+    version: nextVersion,
+    expectedVersion: currentVersion.value,
+  })
   saving.value = false
   if (result.kind === 'completed') {
-    toast.success('保存成功')
-  } else if (result.kind === 'rejected' && result.error) {
-    saveError.value = (result.error as { message?: string }).message || '保存失败，请稍后重试'
+    const data = result.data as { version?: number; status?: string }
+    if (typeof data?.version === 'number') currentVersion.value = data.version
+    else currentVersion.value = nextVersion
+    toast.success(`表单已保存（v${currentVersion.value}）`)
+  } else {
+    toast.error('保存失败，请稍后重试')
   }
 }
 
@@ -88,7 +109,7 @@ onMounted(loadData)
           <button
             class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
             :disabled="saving"
-            @click="openSaveConfirm"
+            @click="handleSave"
           >
             <Save :size="16" /> {{ saving ? '保存中...' : '保存' }}
           </button>
@@ -96,7 +117,6 @@ onMounted(loadData)
       </div>
 
       <div class="grid lg:grid-cols-[200px_1fr_280px] gap-4">
-        <!-- 左：字段库 -->
         <Card class="h-fit">
           <p class="text-sm font-medium text-text-primary mb-3">字段库</p>
           <div class="space-y-1">
@@ -112,7 +132,6 @@ onMounted(loadData)
           </div>
         </Card>
 
-        <!-- 中：画布 -->
         <Card>
           <p class="text-sm font-medium text-text-secondary mb-3">表单画布</p>
           <div v-if="fields.length === 0" class="flex flex-col items-center justify-center py-12 text-text-secondary">
@@ -123,9 +142,9 @@ onMounted(loadData)
             <div
               v-for="(field, index) in fields"
               :key="field.id"
-              class="flex items-center gap-2 rounded-lg border p-3 cursor-pointer"
-              :class="selectedFieldId === field.id ? 'border-primary bg-primary-subtle' : 'border-border hover:border-border-strong'"
-              @click="selectedFieldId = field.id"
+              class="flex items-center gap-2 rounded-lg border cursor-pointer p-3 hover:border-primary transition-colors"
+              :class="selectedFieldId === field.id ? 'border-primary bg-primary-subtle' : 'border-border'"
+              @click="selectField(field.id)"
             >
               <GripVertical :size="16" class="text-muted-foreground cursor-grab" />
               <span class="text-xs text-text-secondary w-6">{{ index + 1 }}</span>
@@ -138,43 +157,52 @@ onMounted(loadData)
           </div>
         </Card>
 
-        <!-- 右：属性面板 -->
         <Card class="h-fit">
           <p class="text-sm font-medium text-text-primary mb-3">属性配置</p>
           <div v-if="selectedField" class="space-y-3 text-sm">
             <div>
               <label class="block text-xs text-text-secondary mb-1">字段标签</label>
-              <input v-model="selectedField.label" type="text" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary" placeholder="字段标签" />
+              <input
+                type="text"
+                :value="selectedField.label"
+                class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
+                @input="updateSelectedField({ label: ($event.target as HTMLInputElement).value })"
+              />
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">描述说明</label>
-              <input v-model="selectedField.description" type="text" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary" placeholder="可选" />
+              <input
+                type="text"
+                :value="selectedField.description || ''"
+                class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
+                placeholder="可选"
+                @input="updateSelectedField({ description: ($event.target as HTMLInputElement).value || null })"
+              />
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">字段权限</label>
-              <select v-model="selectedField.permission" class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary">
+              <select
+                :value="selectedField.permission"
+                class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary"
+                @change="updateSelectedField({ permission: ($event.target as HTMLSelectElement).value })"
+              >
                 <option value="read_write">可读可写</option>
                 <option value="read_only">只读</option>
                 <option value="hidden">隐藏</option>
               </select>
             </div>
-            <label class="flex items-center gap-2"><input v-model="selectedField.required" type="checkbox" class="rounded border-border" /> 必填</label>
+            <label class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                class="rounded border-border"
+                :checked="selectedField.required"
+                @change="updateSelectedField({ required: ($event.target as HTMLInputElement).checked })"
+              /> 必填
+            </label>
           </div>
-          <p v-else class="text-xs text-text-secondary">选择字段后编辑属性</p>
+          <p v-else class="text-xs text-text-secondary">请从画布中选择一个字段进行编辑</p>
         </Card>
       </div>
     </div>
-
-    <HighRiskConfirm
-      v-model:open="riskOpen"
-      title="保存表单设计"
-      description="保存后将更新表单字段结构，可能影响正在进行的招新活动。"
-      :targets="[{ id: 'form', label: formTitle || '招新报名表', detail: `${fields.length} 个字段` }]"
-      impact-summary="请确认字段配置符合活动要求；错误配置可能导致报名表单展示异常。"
-      confirm-label="确认保存"
-      :executing="saving"
-      :error="saveError || null"
-      @confirm="handleSave"
-    />
   </PageStateBoundary>
 </template>

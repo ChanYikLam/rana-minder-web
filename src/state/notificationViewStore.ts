@@ -18,15 +18,21 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
 
   async function loadNotifications(cursor?: string) {
     loading.value = true
-    const result = await notificationApi.list({ cursor })
-    loading.value = false
-    if (result.kind === 'completed') {
-      const data = result.data as { items: typeof items.value; nextCursor: string | null }
-      if (cursor) {
-        items.value.push(...data.items)
+    try {
+      const result = await notificationApi.list({ cursor })
+      if (result.kind === 'completed') {
+        const data = result.data as { items: typeof items.value; nextCursor: string | null }
+        if (cursor) {
+          items.value.push(...data.items)
+        } else {
+          items.value = data.items
+        }
       } else {
-        items.value = data.items
+        // 失败时显式抛出，让上层 try/catch 能感知到错误
+        throw new Error('load notifications failed')
       }
+    } finally {
+      loading.value = false
     }
   }
 
@@ -38,6 +44,8 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
         item.read = true
         unreadCount.value = Math.max(0, unreadCount.value - 1)
       }
+    } else {
+      throw new Error('mark read failed')
     }
   }
 
@@ -46,6 +54,8 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     if (result.kind === 'completed') {
       items.value.forEach((n) => { n.read = true })
       unreadCount.value = 0
+    } else {
+      throw new Error('mark all read failed')
     }
   }
 

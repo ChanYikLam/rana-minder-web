@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post, put } from '@/services/client'
-import { ScheduleView, type ScheduleSlot } from '@/components/display'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw } from '@lucide/vue'
 
@@ -37,10 +36,26 @@ const roundError = ref('')
 const skipForm = ref({ applicantId: '', reason: '' })
 const updatingRound = ref<string | null>(null)
 const newRoundDeadline = ref('')
+const cancelRoundId = ref<string | null>(null)
+const cancelRoundReason = ref('')
+const cancelRoundError = ref('')
 
-const clubId = computed(() => route.params.clubId as string)
-const actId = computed(() => route.params.activityId as string)
-const hasRequiredParams = computed(() => Boolean(clubId.value && actId.value))
+const clubId = computed(() => (route.params.clubId as string) || '')
+const actId = computed(() => (route.params.activityId as string) || '')
+
+watch([clubId, actId], ([cid, aid]) => {
+  if (!cid || !aid) {
+    state.value = 'error'
+  }
+}, { immediate: true })
+
+function validateParams(): boolean {
+  if (!clubId.value || !actId.value) {
+    state.value = 'error'
+    return false
+  }
+  return true
+}
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
@@ -51,6 +66,7 @@ const columns = [
 
 async function loadInterviews() {
   state.value = 'loading'
+  if (!validateParams()) return
   const result = await get<{ items: InterviewRow[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviews`)
   if (result.kind === 'completed') {
     items.value = result.data.items
@@ -64,6 +80,7 @@ async function loadInterviews() {
 }
 
 async function loadBookOptions() {
+  if (!validateParams()) return
   const [r, a] = await Promise.all([
     get<{ items: RoundItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/rounds`),
     get<{ items: AppItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/applications`),
@@ -87,6 +104,7 @@ function formatTime(iso: string): string {
 
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!selected.value || actionLoading.value) return
+  if (!validateParams()) return
   actionLoading.value = true
   actionError.value = ''
   const result = await post(
@@ -102,6 +120,7 @@ async function runAction(action: string, input?: Record<string, unknown>) {
 }
 
 async function handleBook() {
+  if (!validateParams()) return
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
   actionError.value = ''
@@ -124,22 +143,13 @@ const selectedRoundSlots = computed(() => {
   return round ? round.slots : []
 })
 
-function roundSlots(roundId: string): ScheduleSlot[] {
-  const round = rounds.value.find((r) => r.id === roundId)
-  return (round?.slots ?? []).map((s) => ({
-    id: s.id,
-    title: s.available > 0 ? `剩余 ${s.available}` : '已满',
-    startAt: s.startAt,
-    endAt: s.endAt,
-  }))
-}
-
 async function loadRounds() {
   const r = await get<{ items: RoundItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/rounds`)
   if (r.kind === 'completed') rounds.value = r.data.items
 }
 
 async function handleCreateRound() {
+  if (!validateParams()) return
   if (!roundForm.value.name || !roundForm.value.deadline || !roundForm.value.slotStart || !roundForm.value.slotEnd) {
     roundError.value = '请完整填写轮次名称、截止时间与面试时段'
     return
@@ -164,6 +174,7 @@ async function handleCreateRound() {
 }
 
 async function handleUpdateRound(roundId: string) {
+  if (!validateParams()) return
   if (!newRoundDeadline.value) return
   if (actionLoading.value) return
   actionLoading.value = true
@@ -182,29 +193,50 @@ async function handleUpdateRound(roundId: string) {
 }
 
 async function handleCancelRound(roundId: string) {
+  if (!validateParams()) return
+  if (!cancelRoundReason.value.trim()) {
+    cancelRoundError.value = '请填写取消原因'
+    return
+  }
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
+  cancelRoundError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/cancel`, {
-    reason: '管理员取消轮次',
+    reason: cancelRoundReason.value.trim(),
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
+    cancelRoundId.value = null
+    cancelRoundReason.value = ''
+    cancelRoundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '取消失败'
+    cancelRoundError.value = (result.error as { message?: string }).message || '取消失败'
   }
 }
 
+function openCancelRound(roundId: string) {
+  cancelRoundId.value = roundId
+  cancelRoundReason.value = ''
+  cancelRoundError.value = ''
+  actionError.value = ''
+}
+
 async function handleSkipRound() {
+  if (!validateParams()) return
   if (!skipForm.value.applicantId || !skipForm.value.reason.trim()) {
     roundError.value = '请选择申请人与填写跳轮原因'
+    return
+  }
+  const roundId = bookForm.value.roundId || rounds.value[0]?.id
+  if (!roundId) {
+    roundError.value = '没有可用的面试轮次'
     return
   }
   if (actionLoading.value) return
   actionLoading.value = true
   roundError.value = ''
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${bookForm.value.roundId || rounds.value[0]?.id}/skip`, {
+  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/skip`, {
     applicantId: skipForm.value.applicantId,
     reason: skipForm.value.reason.trim(),
   })
@@ -227,13 +259,17 @@ const canInvalidate = computed(() => {
 })
 
 onMounted(async () => {
-  if (!hasRequiredParams.value) {
-    state.value = 'error'
-    return
-  }
   await loadInterviews()
   await loadBookOptions()
 })
+
+watch(
+  () => [route.params.clubId, route.params.activityId],
+  () => {
+    validateParams()
+    if (state.value !== 'error') loadInterviews()
+  }
+)
 </script>
 
 <template>
@@ -354,12 +390,6 @@ onMounted(async () => {
                     {{ r.name }} <StateTag :status="r.status" />
                   </p>
                   <p class="text-xs text-text-secondary mt-0.5">{{ r.slots.length }} 个时段 · 已约 {{ r.bookedCount }} 人</p>
-                  <ScheduleView
-                    v-if="roundSlots(r.id).length > 0"
-                    :items="roundSlots(r.id)"
-                    mode="list"
-                    class="mt-2"
-                  />
                 </div>
                 <div class="flex items-center gap-2">
                   <template v-if="updatingRound === r.id">
@@ -378,7 +408,7 @@ onMounted(async () => {
                     v-if="r.status === 'open'"
                     class="flex items-center gap-1 px-2 h-8 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
                     :disabled="actionLoading"
-                    @click="handleCancelRound(r.id)"
+                    @click="openCancelRound(r.id)"
                   >
                     <XCircle :size="12" /> 取消轮次
                   </button>
@@ -402,6 +432,28 @@ onMounted(async () => {
                     {{ actionLoading ? '处理中...' : '执行跳轮' }}
                   </button>
                 </div>
+              </div>
+
+              <!-- 取消轮次原因 -->
+              <div v-if="cancelRoundId" class="rounded-lg border border-danger bg-danger-subtle p-3">
+                <p class="text-sm font-medium text-danger mb-2">取消轮次</p>
+                <div class="flex items-center gap-2">
+                  <input v-model="cancelRoundReason" class="flex-1 px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" placeholder="请填写取消原因（必填）" />
+                  <button
+                    class="px-3 h-9 rounded-md bg-destructive text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                    :disabled="actionLoading || !cancelRoundReason.trim()"
+                    @click="handleCancelRound(cancelRoundId)"
+                  >
+                    {{ actionLoading ? '取消中...' : '确认取消' }}
+                  </button>
+                  <button
+                    class="px-3 h-9 rounded-md border border-border text-text-primary text-sm hover:bg-subtle"
+                    @click="cancelRoundId = null; cancelRoundReason = ''; cancelRoundError = ''"
+                  >
+                    取消
+                  </button>
+                </div>
+                <p v-if="cancelRoundError" class="text-xs text-destructive mt-1">{{ cancelRoundError }}</p>
               </div>
             </div>
           </div>

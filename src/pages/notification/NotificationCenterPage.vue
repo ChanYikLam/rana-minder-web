@@ -41,8 +41,24 @@ function onDetailAction(key: string) {
 
 async function loadNotifications() {
   state.value = 'loading'
-  await notifStore.loadNotifications()
-  state.value = 'normal'
+  try {
+    await notifStore.loadNotifications()
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  } catch (error) {
+    state.value = 'error'
+    console.error('加载通知失败:', error)
+  }
+}
+
+async function handleMarkAllRead() {
+  state.value = 'loading'
+  try {
+    await notifStore.markAllRead()
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  } catch (error) {
+    state.value = 'error'
+    console.error('标记已读失败:', error)
+  }
 }
 
 function formatTime(iso: string): string {
@@ -69,7 +85,7 @@ onMounted(loadNotifications)
         <button
           v-if="notifStore.hasUnread"
           class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle"
-          @click="notifStore.markAllRead()"
+          @click="handleMarkAllRead"
         >
           <CheckCheck :size="16" /> 全部已读
         </button>

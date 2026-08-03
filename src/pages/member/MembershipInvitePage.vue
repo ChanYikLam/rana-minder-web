@@ -56,12 +56,50 @@ const actionableStatuses = ['sent', 'pending_acceptance']
 
 // 接受邀请高风险确认
 const acceptTarget = ref<Invite | null>(null)
+const acceptExecuting = ref(false)
+const acceptSucceeded = ref(false)
+const acceptError = ref('')
+
+function resetAcceptState() {
+  acceptSucceeded.value = false
+  acceptError.value = ''
+}
 
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const path = isManageView.value ? `/org/${clubId}/members/invite` : `/me/invitations/membership`
-  const result = await get<{ items: Invite[]; departments?: Dept[] }>(path)
+  if (isManageView.value) {
+    const result = await get<{ items: Invite[]; departments?: Dept[] }>(`/org/${clubId}/members/invite`)
+    if (result.kind === 'completed') {
+      items.value = result.data.items
+      if (result.data.departments) departments.value = result.data.departments
+      state.value = 'normal'
+    } else if (result.kind === 'accepted') {
+      state.value = 'loading'
+    } else {
+      const code = result.error.code as ErrorCode
+      pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+      state.value = errorToPageState(code)
+    }
+    return
+  }
+  // 被邀请人视角：优先按路由参数加载单条；无参数时加载列表
+  const invitationId = route.params.invitationId as string | undefined
+  if (invitationId) {
+    const result = await get<Invite>(`/me/invitations/membership/${invitationId}`)
+    if (result.kind === 'completed') {
+      items.value = [result.data]
+      state.value = 'normal'
+    } else if (result.kind === 'accepted') {
+      state.value = 'loading'
+    } else {
+      const code = result.error.code as ErrorCode
+      pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+      state.value = errorToPageState(code)
+    }
+    return
+  }
+  const result = await get<{ items: Invite[]; departments?: Dept[] }>(`/me/invitations/membership`)
   if (result.kind === 'completed') {
     items.value = result.data.items
     if (result.data.departments) departments.value = result.data.departments
@@ -128,6 +166,7 @@ async function handleSend() {
     sendError.value = '请选择目标候选人'
     return
   }
+  sendError.value = ''
   sendSubmitting.value = true
   const clubId = route.params.clubId as string
   const r = await post(`/org/${clubId}/members/invite`, {
@@ -159,11 +198,29 @@ async function handleWithdraw(inv: Invite) {
 }
 
 async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
+  if (action === 'accept') {
+    // 接受邀请走 HighRiskConfirm 流程：成功后才显示 done
+    acceptExecuting.value = true
+    acceptSucceeded.value = false
+    acceptError.value = ''
+    const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
+    acceptExecuting.value = false
+    if (r.kind === 'completed') {
+      acceptSucceeded.value = true
+      acceptTarget.value = null
+      toast.success('已整体接受邀请')
+      await loadData()
+    } else {
+      acceptError.value = (r as { error?: { message?: string } }).error?.message || '操作失败，请稍后重试'
+    }
+    return
+  }
   actingId.value = inv.id
   const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
   actingId.value = null
   if (r.kind === 'completed') {
-    toast.success(action === 'accept' ? '已整体接受邀请' : '已拒绝邀请')
+    acceptTarget.value = null
+    toast.success('已拒绝邀请')
     await loadData()
   } else {
     toastError(r, '操作失败，请重试')
@@ -311,9 +368,12 @@ onMounted(loadData)
         ] : []"
         impact-summary="接受后将创建成员生效任务。系统完成 Casdoor Group 写入并可信回读前，不会开放成员权限。"
         confirm-label="确认接受"
-        :executing="acceptTarget !== null && actingId === acceptTarget.id"
+        :executing="acceptExecuting"
+        :succeeded="acceptSucceeded"
+        :error-message="acceptError"
         @confirm="acceptTarget && handleRespond(acceptTarget, 'accept')"
-        @update:open="(v) => { if (!v) acceptTarget = null }"
+        @update:open="(v) => { if (!v) { acceptTarget = null; resetAcceptState() } }"
+        @cancel="resetAcceptState"
       />
     </div>
   </PageStateBoundary>

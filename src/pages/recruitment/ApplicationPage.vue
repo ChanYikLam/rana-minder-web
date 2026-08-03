@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
-import { PreferenceSorter, type PreferenceEntry } from '@/components/form'
-import { ObjectPicker, type PickerGroup } from '@/components/form'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Upload, Save, Send } from '@lucide/vue'
+import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning } from '@lucide/vue'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -20,6 +18,8 @@ const activity = ref<ActivityDetail | null>(null)
 const formFields = ref<FormField[]>([])
 
 const formData = reactive<Record<string, string>>({})
+interface FormFile { fileId: string; name: string; size: number; checking: boolean; error: boolean }
+const formFiles = reactive<Record<string, FormFile | null>>({})
 const formErrors = ref<Record<string, string>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
@@ -27,55 +27,39 @@ const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
 const savingDraft = ref(false)
 
-interface FileUploadState { file: File | null; status: 'idle' | 'scanning' | 'safe' | 'unsafe'; message: string }
-const fileUploads = reactive<Record<string, FileUploadState>>({})
-const fileContents = reactive<Record<string, { name: string; size: number; type: string; content: string }>>({})
-const fileTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
-function getFileUpload(fieldId: string): FileUploadState {
-  if (!fileUploads[fieldId]) {
-    fileUploads[fieldId] = { file: null, status: 'idle', message: '' }
+async function uploadFile(fieldId: string, file: File): Promise<void> {
+  formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: true, error: false }
+  const uploadForm = new FormData()
+  uploadForm.append('file', file)
+  uploadForm.append('purpose', 'application')
+  try {
+    const result = await post<{ fileId: string; status: string }>('/files/upload', uploadForm)
+    if (result.kind === 'completed') {
+      const data = result.data as { fileId: string; status?: string }
+      if (data.status === 'failed') {
+        formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
+        toast.error('文件安全检查未通过，请重新上传')
+        return
+      }
+      formFiles[fieldId] = { fileId: data.fileId, name: file.name, size: file.size, checking: false, error: false }
+      formData[fieldId] = data.fileId
+    } else {
+      formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
+      toast.error('文件上传失败，请重试')
+    }
+  } catch {
+    formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
+    toast.error('文件上传失败，请重试')
   }
-  return fileUploads[fieldId]
 }
 
-function handleFileSelect(fieldId: string, event: Event) {
-  const input = event.target as HTMLInputElement
+async function handleFileChange(e: Event, fieldId: string) {
+  const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  const upload = getFileUpload(fieldId)
-  upload.file = file
-  upload.status = 'scanning'
-  upload.message = '文件正在安全检查中...'
-  formData[fieldId] = file.name
-  // 清理已有定时器
-  const existing = fileTimers.get(fieldId)
-  if (existing) clearTimeout(existing)
-  // 模拟真实上传：将文件读取为 base64 内容，供提交时随答案一并发送
-  const reader = new FileReader()
-  reader.onloadend = () => {
-    fileContents[fieldId] = { name: file.name, size: file.size, type: file.type, content: reader.result as string }
-  }
-  reader.readAsDataURL(file)
-  // 模拟安全检查；实际应调用后端上传/检查接口
-  fileTimers.set(fieldId, setTimeout(() => {
-    upload.status = 'safe'
-    upload.message = '文件安全检查通过'
-    fileTimers.delete(fieldId)
-  }, 2000))
-  // 允许重选同一文件
+  await uploadFile(fieldId, file)
   input.value = ''
 }
-
-function handleFileClick(fieldId: string) {
-  const input = document.getElementById(`file-input-${fieldId}`) as HTMLInputElement | null
-  input?.click()
-}
-
-onBeforeUnmount(() => {
-  fileTimers.forEach((t) => clearTimeout(t))
-  fileTimers.clear()
-})
 
 function getFieldDescriptionId(fieldId: string): string {
   return `field-${fieldId}-description`
@@ -116,48 +100,22 @@ function addPreference(deptId: string, deptName: string) {
   }
 }
 
-const preferenceEntries = computed<PreferenceEntry[]>(() =>
-  preferences.value.map((p) => ({ id: p.departmentId, label: p.departmentName })),
-)
-
-const deptGroups = computed<PickerGroup[]>(() =>
-  activity.value
-    ? [{
-        type: 'department' as const,
-        label: '可选部门',
-        items: activity.value.departments.map((d) => ({ id: d.id, label: d.name })),
-      }]
-    : [],
-)
-
-const selectedDeptIds = computed<string[]>(() => preferences.value.map((p) => p.departmentId))
-
-function onPreferenceChange(entries: PreferenceEntry[]) {
-  preferences.value = entries.map((e) => ({
-    departmentId: e.id,
-    departmentName: activity.value?.departments.find((d) => d.id === e.id)?.name || e.label,
-  }))
+function removePreference(index: number) {
+  preferences.value.splice(index, 1)
 }
 
-function onDeptPick(ids: string[]) {
-  const newlyAdded = ids.filter((id) => !preferences.value.find((p) => p.departmentId === id))
-  for (const id of newlyAdded) {
-    const dept = activity.value?.departments.find((d) => d.id === id)
-    if (dept) addPreference(dept.id, dept.name)
-  }
+function movePreference(index: number, direction: 'up' | 'down') {
+  const target = direction === 'up' ? index - 1 : index + 1
+  if (target < 0 || target >= preferences.value.length) return
+  const temp = preferences.value[index]
+  preferences.value[index] = preferences.value[target]
+  preferences.value[target] = temp
 }
 
 async function handleSaveDraft() {
   savingDraft.value = true
-  // 草稿同样包含文件元数据
-  const answers: Record<string, unknown> = { ...formData }
-  for (const field of formFields.value) {
-    if (field.type === 'file' && fileContents[field.id]) {
-      answers[field.id] = fileContents[field.id]
-    }
-  }
   const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
-    answers,
+    formAnswers: formData,
   })
   savingDraft.value = false
   if (result.kind === 'completed') {
@@ -175,17 +133,16 @@ async function handleSubmit() {
   submitError.value = null
 
   for (const field of formFields.value) {
-    if (field.type === 'file') {
-      const upload = getFileUpload(field.id)
-      if (field.required && !upload.file) {
-        formErrors.value[field.id] = `${field.label}为必填项`
-      } else if (upload.file && upload.status === 'scanning') {
-        formErrors.value[field.id] = `${field.label}附件安全检查中，请稍后提交`
-      } else if (upload.file && upload.status === 'unsafe') {
-        formErrors.value[field.id] = `${field.label}附件未通过安全检查`
-      }
-    } else if (field.required && !formData[field.id]) {
+    if (field.required && !formData[field.id]) {
       formErrors.value[field.id] = `${field.label}为必填项`
+    }
+    if (field.type === 'file') {
+      const f = formFiles[field.id]
+      if (f?.checking) {
+        formErrors.value[field.id] = '文件安全检查中，请稍候再提交'
+      } else if (f?.error) {
+        formErrors.value[field.id] = '文件上传失败，请重新上传'
+      }
     }
   }
   if (preferences.value.length === 0) {
@@ -194,17 +151,9 @@ async function handleSubmit() {
   }
   if (Object.keys(formErrors.value).length > 0) return
 
-  // 构建提交答案：文本字段取 formData，文件字段附带文件元数据
-  const answers: Record<string, unknown> = { ...formData }
-  for (const field of formFields.value) {
-    if (field.type === 'file' && fileContents[field.id]) {
-      answers[field.id] = fileContents[field.id]
-    }
-  }
-
   submitting.value = true
   const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
-    answers,
+    formData,
     preferences: preferences.value,
   })
   submitting.value = false
@@ -234,15 +183,41 @@ onMounted(loadData)
       <!-- 意向方向排序 -->
       <Card class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-2">意向方向</h2>
-        <p class="text-xs text-text-secondary mb-3">从下方选择意向部门后，可拖动或按键调整优先级顺序</p>
+        <p class="text-xs text-text-secondary mb-3">点击添加意向部门，可拖拽或用按钮调整优先级顺序</p>
 
-        <ObjectPicker
-          :groups="deptGroups"
-          :model-value="selectedDeptIds"
-          @update:model-value="onDeptPick"
-        />
+        <div v-if="preferences.length > 0" class="space-y-2 mb-3">
+          <div
+            v-for="(pref, index) in preferences"
+            :key="pref.departmentId"
+            class="flex items-center gap-2 rounded-lg border border-border p-3"
+          >
+            <span class="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-text-on-primary text-xs font-bold">{{ index + 1 }}</span>
+            <span class="flex-1 text-sm text-text-primary">{{ pref.departmentName }}</span>
+            <div class="flex items-center gap-1">
+              <button class="p-1 rounded hover:bg-subtle text-text-secondary" :disabled="index === 0" aria-label="上移" @click="movePreference(index, 'up')">
+                <ChevronUp :size="14" />
+              </button>
+              <button class="p-1 rounded hover:bg-subtle text-text-secondary" :disabled="index === preferences.length - 1" aria-label="下移" @click="movePreference(index, 'down')">
+                <ChevronDown :size="14" />
+              </button>
+              <button class="p-1 rounded hover:bg-subtle text-danger" aria-label="移除" @click="removePreference(index)">
+                <X :size="14" />
+              </button>
+            </div>
+          </div>
+        </div>
 
-        <PreferenceSorter :model-value="preferenceEntries" class="mt-3" @update:model-value="onPreferenceChange" />
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="dept in activity.departments"
+            :key="dept.id"
+            v-show="!preferences.find((p) => p.departmentId === dept.id)"
+            class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border text-sm text-text-secondary hover:border-primary hover:text-primary transition-colors"
+            @click="addPreference(dept.id, dept.name)"
+          >
+            <Plus :size="14" /> {{ dept.name }}
+          </button>
+        </div>
       </Card>
 
       <!-- 动态表单 -->
@@ -296,32 +271,37 @@ onMounted(loadData)
               <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
             </select>
 
-            <div v-else-if="field.type === 'file'" class="relative">
-              <input
-                :id="`file-input-${field.id}`"
-                type="file"
-                class="hidden"
-                @change="handleFileSelect(field.id, $event)"
-              />
-              <button
-                :id="field.id"
-                type="button"
-                class="w-full h-24 rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
-                :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
-                :aria-invalid="Boolean(formErrors[field.id])"
-                :aria-describedby="getFieldDescribedBy(field)"
-                @click="handleFileClick(field.id)"
-              >
+            <div
+              v-else-if="field.type === 'file'"
+              :id="field.id"
+              :class="[formErrors[field.id] || formFiles[field.id]?.error ? 'border-danger' : 'border-border']"
+              class="w-full rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
+              :aria-invalid="Boolean(formErrors[field.id])"
+              :aria-describedby="getFieldDescribedBy(field)"
+            >
+              <template v-if="formFiles[field.id]">
+                <div class="flex items-center gap-2 p-3">
+                  <FileWarning v-if="formFiles[field.id]!.checking" :size="16" class="text-warning" />
+                  <Upload v-else-if="!formFiles[field.id]!.error" :size="16" class="text-success" />
+                  <FileWarning v-else :size="16" class="text-danger" />
+                  <span class="text-xs text-text-primary">{{ formFiles[field.id]!.name }}</span>
+                  <span class="text-xs text-text-secondary">({{ (formFiles[field.id]!.size / 1024).toFixed(1) }} KB)</span>
+                  <span v-if="formFiles[field.id]!.checking" class="text-xs text-warning">检查中...</span>
+                  <span v-else-if="formFiles[field.id]!.error" class="text-xs text-danger">上传失败</span>
+                  <span v-else class="text-xs text-success">已上传</span>
+                  <button type="button" class="text-xs text-danger hover:underline" :disabled="formFiles[field.id]!.checking" @click="formFiles[field.id] = null; formData[field.id] = ''">移除</button>
+                </div>
+              </template>
+              <label v-else class="flex flex-col items-center justify-center gap-1 py-6 cursor-pointer w-full h-full">
                 <Upload :size="20" />
-                <span class="text-xs">{{ getFileUpload(field.id).file ? getFileUpload(field.id).file!.name : '点击上传文件' }}</span>
-              </button>
-              <p
-                v-if="getFileUpload(field.id).message"
-                class="text-xs mt-1"
-                :class="getFileUpload(field.id).status === 'safe' ? 'text-success' : 'text-warning'"
-              >
-                {{ getFileUpload(field.id).message }}
-              </p>
+                <span class="text-xs">点击上传文件</span>
+                <input
+                  type="file"
+                  class="hidden"
+                  :aria-label="`上传${field.label}`"
+                  @change="(e) => handleFileChange(e as Event, field.id)"
+                />
+              </label>
             </div>
 
             <p v-if="formErrors[field.id]" :id="getFieldErrorId(field.id)" class="mt-1 text-xs text-danger" role="alert">
