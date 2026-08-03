@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { Wrench, Compass, RefreshCw } from '@lucide/vue'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 
+const session = useSessionViewStore()
 const retrying = ref(false)
+
+const remainingMinutes = computed(() => {
+  const ms = session.degradedWindowRemainingMs
+  if (ms <= 0) return 0
+  return Math.ceil(ms / 1000 / 60)
+})
 
 async function handleRetry() {
   if (retrying.value) return
@@ -25,8 +33,15 @@ async function handleRetry() {
       <p class="text-sm text-text-secondary mb-1">
         统一身份认证服务暂时不可用，部分功能已暂停
       </p>
-      <p class="text-xs text-muted-foreground mb-8">
+      <p class="text-xs text-muted-foreground mb-4">
         受影响的范围：登录、报名、邀请确认等需要身份核验的操作
+      </p>
+
+      <p
+        v-if="session.degraded && session.inDegradedWindow"
+        class="text-xs text-warning bg-warning-subtle rounded-md px-3 py-2 mb-4"
+      >
+        降级最小白名单剩余 {{ remainingMinutes }} 分钟（可查看本人资料与既有草稿）
       </p>
 
       <div class="rounded-lg border border-border bg-elevated p-4 mb-6 text-left">

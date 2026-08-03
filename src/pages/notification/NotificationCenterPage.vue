@@ -1,17 +1,64 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import { NotificationBadge } from '@/components/feedback'
+import { NotificationDetail, type NotificationDetailData } from '@/components/feedback'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import type { PageState } from '@/types/machine'
 import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
 
 const notifStore = useNotificationViewStore()
 const state = ref<PageState>('loading')
+const selectedId = ref<string | null>(null)
+
+const selected = computed<NotificationDetailData | null>(() => {
+  const item = notifStore.items.find((n) => n.id === selectedId.value)
+  if (!item) return null
+  return {
+    id: item.id,
+    title: item.title,
+    body: item.body,
+    createdAt: item.createdAt,
+    type: item.type,
+    read: item.read,
+    link: item.link,
+    actions: item.link ? [{ label: '前往查看', key: 'navigate', primary: true }] : undefined,
+  }
+})
+
+function openDetail(id: string) {
+  const item = notifStore.items.find((n) => n.id === id)
+  if (!item) return
+  if (!item.read) notifStore.markRead(id)
+  selectedId.value = id
+}
+
+function onDetailAction(key: string) {
+  if (key === 'navigate' && selected.value?.link) {
+    window.location.href = selected.value.link
+  }
+}
 
 async function loadNotifications() {
   state.value = 'loading'
-  await notifStore.loadNotifications()
-  state.value = 'normal'
+  try {
+    await notifStore.loadNotifications()
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  } catch (error) {
+    state.value = 'error'
+    console.error('加载通知失败:', error)
+  }
+}
+
+async function handleMarkAllRead() {
+  state.value = 'loading'
+  try {
+    await notifStore.markAllRead()
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  } catch (error) {
+    state.value = 'error'
+    console.error('标记已读失败:', error)
+  }
 }
 
 function formatTime(iso: string): string {
@@ -31,15 +78,28 @@ onMounted(loadNotifications)
   <PageStateBoundary :state="state" title="站内信" @retry="loadNotifications">
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-text-primary">站内信</h1>
+        <div class="flex items-center gap-2">
+          <h1 class="text-2xl font-bold text-text-primary">站内信</h1>
+          <NotificationBadge v-if="notifStore.hasUnread" :count="notifStore.unreadCount" />
+        </div>
         <button
           v-if="notifStore.hasUnread"
           class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle"
-          @click="notifStore.markAllRead()"
+          @click="handleMarkAllRead"
         >
           <CheckCheck :size="16" /> 全部已读
         </button>
       </div>
+
+      <NotificationDetail
+        v-if="selected"
+        :notification="selected"
+        class="mb-4"
+        @back="selectedId = null"
+        @action="onDetailAction"
+      />
+
+      <template v-else>
 
       <EmptyState
         v-if="notifStore.items.length === 0"
@@ -54,7 +114,7 @@ onMounted(loadNotifications)
           :key="item.id"
           class="cursor-pointer"
           :selected="!item.read"
-          @click="!item.read && notifStore.markRead(item.id); item.link && $router.push(item.link)"
+          @click="openDetail(item.id)"
         >
           <div class="flex items-start gap-3">
             <div
@@ -75,6 +135,7 @@ onMounted(loadNotifications)
           </div>
         </Card>
       </div>
+      </template>
     </div>
   </PageStateBoundary>
 </template>

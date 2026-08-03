@@ -23,6 +23,8 @@ export interface SessionInfo {
   user: User
   profileGate: ProfileGate
   degraded: boolean
+  /** 降级窗口起点（SRS-FAIL-001，15 分钟）。仅 degraded=true 时有效 */
+  degradedSince?: string | null
   permissions: string[]
   workspace: WorkspaceInfo | null
 }
@@ -32,4 +34,11 @@ export interface ProfileGate {
   emailVerified: boolean
 }
 
-export type ProfileSyncStatus = 'synced' | 'syncing' | 'sync_failed' | 'conflict_pending' | 'conflict_resolved'
+/** 与 SM-IDN-003 资料同步状态词表一致（来源：state-machines/transitions.ts） */
+export type ProfileSyncStatus =
+  | 'synced'
+  | 'pending_sync'
+  | 'retrying'
+  | 'pending_readback'
+  | 'rolled_back'
+  | 'conflict_pending'

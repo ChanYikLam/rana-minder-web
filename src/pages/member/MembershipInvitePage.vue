@@ -2,11 +2,16 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import { HighRiskConfirm } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import { NameSearch, type SearchResult } from '@/components/form'
+import WithdrawAction from '@/components/operation/WithdrawAction.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import type { PageState } from '@/types/machine'
-import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, Search, RefreshCw } from '@lucide/vue'
+import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from '@lucide/vue'
 
 interface Invite {
   id: string
@@ -27,9 +32,15 @@ interface Dept { id: string; name: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<Invite[]>([])
 const departments = ref<Dept[]>([])
 const isManageView = computed(() => route.meta.view === 'manage')
+const invitationId = computed(() => route.params.invitationId as string | undefined)
+const displayItems = computed(() => {
+  if (isManageView.value || !invitationId.value) return items.value
+  return items.value.filter((i) => i.id === invitationId.value)
+})
 const actingId = ref<string | null>(null)
 
 // 发送邀请弹窗
@@ -43,16 +54,63 @@ const sendSubmitting = ref(false)
 
 const actionableStatuses = ['sent', 'pending_acceptance']
 
+// 接受邀请高风险确认
+const acceptTarget = ref<Invite | null>(null)
+const acceptExecuting = ref(false)
+const acceptSucceeded = ref(false)
+const acceptError = ref('')
+
+function resetAcceptState() {
+  acceptSucceeded.value = false
+  acceptError.value = ''
+}
+
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const path = isManageView.value ? `/org/${clubId}/members/invite` : `/me/invitations/membership`
-  const result = await get<{ items: Invite[]; departments?: Dept[] }>(path)
+  if (isManageView.value) {
+    const result = await get<{ items: Invite[]; departments?: Dept[] }>(`/org/${clubId}/members/invite`)
+    if (result.kind === 'completed') {
+      items.value = result.data.items
+      if (result.data.departments) departments.value = result.data.departments
+      state.value = 'normal'
+    } else if (result.kind === 'accepted') {
+      state.value = 'loading'
+    } else {
+      const code = result.error.code as ErrorCode
+      pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+      state.value = errorToPageState(code)
+    }
+    return
+  }
+  // 被邀请人视角：优先按路由参数加载单条；无参数时加载列表
+  const invitationId = route.params.invitationId as string | undefined
+  if (invitationId) {
+    const result = await get<Invite>(`/me/invitations/membership/${invitationId}`)
+    if (result.kind === 'completed') {
+      items.value = [result.data]
+      state.value = 'normal'
+    } else if (result.kind === 'accepted') {
+      state.value = 'loading'
+    } else {
+      const code = result.error.code as ErrorCode
+      pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+      state.value = errorToPageState(code)
+    }
+    return
+  }
+  const result = await get<{ items: Invite[]; departments?: Dept[] }>(`/me/invitations/membership`)
   if (result.kind === 'completed') {
     items.value = result.data.items
     if (result.data.departments) departments.value = result.data.departments
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
+  } else {
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
+  }
 }
 
 function formatDate(iso: string): string {
@@ -78,6 +136,22 @@ async function searchCandidates() {
   }
 }
 
+const searchResults = computed<SearchResult[]>(() =>
+  candidates.value.map((c) => ({
+    id: c.id,
+    name: c.name,
+    subtitle: c.isMember ? `${c.studentId} · 已是成员` : c.studentId,
+    group: '候选人',
+    match: 'substring' as const,
+    score: 0,
+  })),
+)
+
+function onSelectCandidate(r: SearchResult) {
+  const found = candidates.value.find((c) => c.id === r.id)
+  if (found) selectedCandidate.value = found
+}
+
 function openSend() {
   candidateKeyword.value = ''
   candidates.value = []
@@ -92,6 +166,7 @@ async function handleSend() {
     sendError.value = '请选择目标候选人'
     return
   }
+  sendError.value = ''
   sendSubmitting.value = true
   const clubId = route.params.clubId as string
   const r = await post(`/org/${clubId}/members/invite`, {
@@ -118,19 +193,37 @@ async function handleWithdraw(inv: Invite) {
     toast.success('邀请已撤回')
     await loadData()
   } else {
-    toast.error('撤回失败，请重试')
+    toastError(r, '撤回失败，请重试')
   }
 }
 
 async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
+  if (action === 'accept') {
+    // 接受邀请走 HighRiskConfirm 流程：成功后才显示 done
+    acceptExecuting.value = true
+    acceptSucceeded.value = false
+    acceptError.value = ''
+    const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
+    acceptExecuting.value = false
+    if (r.kind === 'completed') {
+      acceptSucceeded.value = true
+      acceptTarget.value = null
+      toast.success('已整体接受邀请')
+      await loadData()
+    } else {
+      acceptError.value = (r as { error?: { message?: string } }).error?.message || '操作失败，请稍后重试'
+    }
+    return
+  }
   actingId.value = inv.id
   const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
   actingId.value = null
   if (r.kind === 'completed') {
-    toast.success(action === 'accept' ? '已整体接受邀请' : '已拒绝邀请')
+    acceptTarget.value = null
+    toast.success('已拒绝邀请')
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -143,7 +236,7 @@ async function handleSyncConfirm(inv: Invite) {
     toast.success('已确认生效')
     await loadData()
   } else {
-    toast.error('确认失败，请重试')
+    toastError(r, '确认失败，请重试')
   }
 }
 
@@ -151,7 +244,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="常规入社邀请" @retry="loadData">
+  <PageStateBoundary :state="state" title="常规入社邀请" :error="pageError" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">{{ isManageView ? '常规入社邀请' : '我的入社邀请' }}</h1>
@@ -160,10 +253,10 @@ onMounted(loadData)
         </button>
       </div>
 
-      <EmptyState v-if="items.length === 0" type="no_data" :title="isManageView ? '暂无入社邀请' : '暂无待处理的入社邀请'" :description="isManageView ? '发出的入社邀请将显示在这里' : '收到邀请后将在这里处理'" />
+      <EmptyState v-if="displayItems.length === 0" type="no_data" :title="isManageView ? '暂无入社邀请' : '暂无待处理的入社邀请'" :description="isManageView ? '发出的入社邀请将显示在这里' : '收到邀请后将在这里处理'" />
 
       <div v-else class="space-y-3">
-        <Card v-for="inv in items" :key="inv.id">
+        <Card v-for="inv in displayItems" :key="inv.id">
           <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
               <div class="flex items-center justify-center w-10 h-10 rounded-full bg-primary-subtle text-primary">
@@ -191,7 +284,13 @@ onMounted(loadData)
 
           <!-- 管理视角：撤回仅限待处理且未被接受 -->
           <div v-if="isManageView && isActionable(inv) && !isExpired(inv)" class="mt-2">
-            <button class="text-xs text-danger hover:underline" :disabled="actingId === inv.id" @click="handleWithdraw(inv)">{{ actingId === inv.id ? '处理中...' : '撤回邀请' }}</button>
+            <WithdrawAction
+              label="撤回邀请"
+              confirm-text="撤回后该候选人需重新查找并再次邀请。确定要撤回该邀请吗？"
+              :disabled="actingId === inv.id"
+              :loading="actingId === inv.id"
+              @confirm="handleWithdraw(inv)"
+            />
           </div>
 
           <!-- 被邀请人视角：整体接受/整体拒绝（过期不可处理） -->
@@ -200,8 +299,8 @@ onMounted(loadData)
               <p class="text-xs text-warning">接受邀请将同时加入社团{{ inv.departmentName ? `和「${inv.departmentName}」部门` : '' }}，不可拆分接受</p>
             </div>
             <div class="flex gap-2">
-              <button class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="handleRespond(inv, 'accept')">
-                <CheckCircle2 :size="16" /> {{ actingId === inv.id ? '处理中...' : '整体接受' }}
+              <button class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="acceptTarget = inv">
+                <CheckCircle2 :size="16" /> 整体接受
               </button>
               <button class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md border border-danger text-danger text-sm hover:bg-danger-subtle" :disabled="actingId === inv.id" @click="handleRespond(inv, 'reject')">
                 <XCircle :size="16" /> 拒绝
@@ -232,31 +331,15 @@ onMounted(loadData)
           <div class="space-y-3">
             <div>
               <label class="block text-xs text-text-secondary mb-1">搜索候选人</label>
-              <div class="flex gap-2">
-                <div class="relative flex-1">
-                  <Search :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    v-model="candidateKeyword"
-                    type="search"
-                    placeholder="姓名或学号..."
-                    class="w-full h-9 pl-9 pr-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-                    @input="searchCandidates"
-                  />
-                </div>
-              </div>
-              <div v-if="candidates.length > 0" class="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                <button
-                  v-for="c in candidates"
-                  :key="c.id"
-                  class="w-full flex items-center justify-between rounded-lg p-2 text-left text-sm transition-colors"
-                  :class="selectedCandidate?.id === c.id ? 'bg-primary-subtle' : 'hover:bg-subtle'"
-                  @click="selectedCandidate = c"
-                >
-                  <span class="text-text-primary">{{ c.name }}</span>
-                  <span class="text-xs text-text-secondary">{{ c.studentId }}</span>
-                </button>
-              </div>
-              <p v-else-if="candidateKeyword" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <NameSearch
+                v-model="candidateKeyword"
+                :results="searchResults"
+                :loading="false"
+                placeholder="姓名或学号..."
+                @update:model-value="searchCandidates"
+                @select="onSelectCandidate"
+              />
+              <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
@@ -273,6 +356,25 @@ onMounted(loadData)
           </div>
         </div>
       </div>
+
+      <HighRiskConfirm
+        :open="!!acceptTarget"
+        title="确认接受入社邀请"
+        description="接受后将建立该社团的成员关系，以及邀请中指定的部门关系。"
+        :targets="acceptTarget ? [
+          { id: 'club', label: '目标社团', detail: acceptTarget.clubName ?? '该社团' },
+          { id: 'dept', label: '加入部门', detail: acceptTarget.departmentName ?? '不指定' },
+          { id: 'status', label: '当前状态', detail: '待处理邀请' },
+        ] : []"
+        impact-summary="接受后将创建成员生效任务。系统完成 Casdoor Group 写入并可信回读前，不会开放成员权限。"
+        confirm-label="确认接受"
+        :executing="acceptExecuting"
+        :succeeded="acceptSucceeded"
+        :error-message="acceptError"
+        @confirm="acceptTarget && handleRespond(acceptTarget, 'accept')"
+        @update:open="(v) => { if (!v) { acceptTarget = null; resetAcceptState() } }"
+        @cancel="resetAcceptState"
+      />
     </div>
   </PageStateBoundary>
 </template>

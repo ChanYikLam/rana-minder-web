@@ -73,17 +73,20 @@ const displaySupportId = computed(() => props.supportId || props.error?.supportI
     <!-- Loading -->
     <div
       v-else-if="state === 'loading'"
-      class="flex flex-col items-center justify-center py-12"
       role="status"
       aria-live="polite"
     >
-      <Loader2 :size="32" class="animate-spin text-primary mb-3" />
-      <p class="text-sm text-text-secondary">加载中...</p>
-      <div v-if="loadingSkeleton" class="w-full mt-6 space-y-3">
-        <div class="h-4 bg-muted rounded animate-pulse" />
-        <div class="h-4 bg-muted rounded animate-pulse w-4/5" />
-        <div class="h-4 bg-muted rounded animate-pulse w-3/5" />
-      </div>
+      <slot name="loading">
+        <div class="flex flex-col items-center justify-center py-12">
+          <Loader2 :size="32" class="animate-spin text-primary mb-3" />
+          <p class="text-sm text-text-secondary">加载中...</p>
+          <div v-if="loadingSkeleton" class="w-full mt-6 space-y-3">
+            <div class="h-4 bg-muted rounded animate-pulse" />
+            <div class="h-4 bg-muted rounded animate-pulse w-4/5" />
+            <div class="h-4 bg-muted rounded animate-pulse w-3/5" />
+          </div>
+        </div>
+      </slot>
     </div>
 
     <!-- Empty -->

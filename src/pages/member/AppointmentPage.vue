@@ -2,10 +2,15 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
+import { DateTimePicker } from '@/components/form'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import { useSessionViewStore } from '@/state/sessionViewStore'
+import { useLastLeaderGuard } from '@/composables/useLastLeaderGuard'
 import type { PageState } from '@/types/machine'
 import { Crown, ArrowRightLeft, UserMinus, AlertTriangle, CalendarClock, RefreshCw } from '@lucide/vue'
 
@@ -23,6 +28,7 @@ interface Command {
 const route = useRoute()
 const session = useSessionViewStore()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const members = ref<AppointMember[]>([])
 const departments = ref<Dept[]>([])
 const titles = ref<string[]>([])
@@ -35,6 +41,7 @@ const isScheduled = ref(false)
 const scheduledAt = ref('')
 const submitting = ref(false)
 const actingId = ref<string | null>(null)
+const showDismissConfirm = ref(false)
 
 const actions = [
   { key: 'appoint' as const, label: '任命', icon: Crown, desc: '为成员分配新职位' },
@@ -52,8 +59,12 @@ async function loadData() {
     titles.value = result.data.titles
     commands.value = result.data.commands
     state.value = 'normal'
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
   } else {
-    state.value = 'error'
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
   }
 }
 
@@ -69,10 +80,10 @@ function selectMember(m: AppointMember) {
 const isSelf = computed(() => selectedMember.value?.id === session.workspace?.memberId)
 
 // 末位负责人不可免职（需先交接）
+const { isLastLeader: isLastLeaderGuard } = useLastLeaderGuard(members)
 const isLastLeader = computed(() => {
   if (!selectedMember.value || action.value !== 'dismiss') return false
-  return selectedMember.value.title === '负责人' &&
-    members.value.filter((m) => m.title === '负责人' && m.status === 'active').length <= 1
+  return isLastLeaderGuard(selectedMember.value)
 })
 
 const canExecute = computed(() => {
@@ -82,6 +93,16 @@ const canExecute = computed(() => {
   if (isScheduled.value && !scheduledAt.value) return false
   return true
 })
+
+// 免职为不可逆操作，先经过高风险确认
+function onExecuteClick() {
+  if (!selectedMember.value || !canExecute.value) return
+  if (action.value === 'dismiss') {
+    showDismissConfirm.value = true
+  } else {
+    handleExecute()
+  }
+}
 
 async function handleExecute() {
   if (!selectedMember.value || !canExecute.value) return
@@ -100,7 +121,7 @@ async function handleExecute() {
     selectedMember.value = null
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    toastError(r, '操作失败，请重试')
   }
 }
 
@@ -113,7 +134,7 @@ async function handleCancel(cmd: Command) {
   if (r.kind === 'completed') {
     toast.success('预约已取消')
     await loadData()
-  } else { toast.error('取消失败') }
+  } else { toastError(r, '取消失败') }
 }
 
 // 重新确认预约命令（失权后恢复）
@@ -125,7 +146,7 @@ async function handleReconfirm(cmd: Command) {
   if (r.kind === 'completed') {
     toast.success('已重新确认')
     await loadData()
-  } else { toast.error('重新确认失败') }
+  } else { toastError(r, '重新确认失败') }
 }
 
 // 执行预约命令（首次可能失败，失败后可重试）
@@ -141,7 +162,7 @@ async function handleExecuteCommand(cmd: Command) {
       toast.success('已执行生效')
     }
     await loadData()
-  } else { toast.error('执行失败') }
+  } else { toastError(r, '执行失败') }
 }
 
 function actionLabel(a: string): string {
@@ -158,7 +179,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="任命调岗免职" @retry="loadData">
+  <PageStateBoundary :state="state" title="任命调岗免职" :error="pageError" @retry="loadData">
     <div class="max-w-3xl mx-auto">
       <h1 class="text-2xl font-bold text-text-primary mb-6">任命 / 调岗 / 免职</h1>
 
@@ -228,7 +249,7 @@ onMounted(loadData)
               预约执行（延迟到指定时间生效）
             </label>
             <div v-if="isScheduled" class="mt-2">
-              <input v-model="scheduledAt" type="datetime-local" class="w-full h-9 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary" aria-label="预约执行时间" />
+              <DateTimePicker v-model="scheduledAt" label="预约执行时间" />
             </div>
           </div>
 
@@ -241,7 +262,7 @@ onMounted(loadData)
             <p class="text-xs text-warning">最后一位负责人，需先交接方可免职</p>
           </div>
 
-          <button class="w-full mt-4 h-9 rounded-md text-sm font-medium text-text-on-primary disabled:opacity-40 disabled:cursor-not-allowed" :class="action === 'dismiss' ? 'bg-danger' : 'bg-primary'" :disabled="!canExecute || submitting" @click="handleExecute">
+          <button class="w-full mt-4 h-9 rounded-md text-sm font-medium text-text-on-primary disabled:opacity-40 disabled:cursor-not-allowed" :class="action === 'dismiss' ? 'bg-danger' : 'bg-primary'" :disabled="!canExecute || submitting" @click="onExecuteClick">
             {{ submitting ? '处理中...' : '确认' + (actions.find((a) => a.key === action)?.label ?? '') }}
           </button>
         </Card>
@@ -273,7 +294,7 @@ onMounted(loadData)
               </div>
               <div class="flex items-center gap-2">
                 <StateTag :status="cmd.status" />
-                <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed'" class="text-xs text-danger hover:underline" :disabled="actingId === cmd.id" @click="handleCancel(cmd)">取消</button>
+                <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed' || cmd.status === 'initiator_lost_rights'" class="text-xs text-danger hover:underline" :disabled="actingId === cmd.id" @click="handleCancel(cmd)">取消</button>
                 <button v-if="cmd.status === 'initiator_lost_rights'" class="text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleReconfirm(cmd)">重新确认</button>
                 <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed' || cmd.status === 'exec_failed'" class="flex items-center gap-1 text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleExecuteCommand(cmd)">
                   <RefreshCw :size="12" /> {{ cmd.status === 'exec_failed' ? '重试' : '执行' }}
@@ -284,6 +305,18 @@ onMounted(loadData)
         </div>
       </div>
       <EmptyState v-else type="no_data" title="暂无预约命令" description="发起预约执行的任命/调岗/免职将显示在这里" />
+
+      <HighRiskConfirm
+        :open="showDismissConfirm"
+        title="确认免职"
+        description="免职后将移除该成员的当前职位，此操作不可撤销。"
+        :targets="selectedMember ? [{ id: selectedMember.id, label: selectedMember.name, detail: `${selectedMember.department} · ${selectedMember.title}` }] : []"
+        impact-summary="免职后该成员将不再担任当前职位，但保留社团成员身份。"
+        confirm-label="确认免职"
+        :executing="submitting"
+        @confirm="showDismissConfirm = false; handleExecute()"
+        @update:open="(v) => { if (!v) showDismissConfirm = false }"
+      />
     </div>
   </PageStateBoundary>
 </template>

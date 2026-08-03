@@ -2,8 +2,11 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import type { PageState } from '@/types/machine'
 import { Crown, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Users, Plus, Trash2, RefreshCw } from '@lucide/vue'
 
@@ -21,11 +24,13 @@ interface Member { id: string; name: string; studentId: string; department: stri
 const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
+const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const data = ref<TransitionData | null>(null)
 const members = ref<Member[]>([])
 const executing = ref(false)
 const saving = ref(false)
 const showEditor = ref(false)
+const showExecuteConfirm = ref(false)
 
 // 编辑方案表单
 const editList = ref<'candidates' | 'appointments'>('candidates')
@@ -40,8 +45,12 @@ async function loadData() {
   if (result.kind === 'completed') {
     data.value = result.data
     state.value = 'normal'
+  } else if (result.kind === 'accepted') {
+    state.value = 'loading'
   } else {
-    state.value = 'error'
+    const code = result.error.code as ErrorCode
+    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
+    state.value = errorToPageState(code)
   }
 }
 
@@ -91,7 +100,7 @@ async function savePlan() {
     showEditor.value = false
     await loadData()
   } else {
-    toast.error('保存失败，请重试')
+    toastError(r, '保存失败，请重试')
   }
 }
 
@@ -108,7 +117,7 @@ async function handleExecute() {
     const failed = r.data.results.filter((x) => !x.success)
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
   } else {
-    toast.error('换届执行失败，请重试')
+    toastError(r, '换届执行失败，请重试')
   }
 }
 
@@ -122,7 +131,7 @@ async function handleRetry() {
     data.value.results = r.data.results
     toast.success('失败项已重试成功')
   } else {
-    toast.error('重试失败，请重试')
+    toastError(r, '重试失败，请重试')
   }
 }
 
@@ -133,7 +142,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="换届管理" @retry="loadData">
+  <PageStateBoundary :state="state" title="换届管理" :error="pageError" @retry="loadData">
     <div v-if="data" class="max-w-2xl mx-auto">
       <button class="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-4" @click="router.back()">
         <ArrowLeft :size="16" /> 返回
@@ -231,7 +240,7 @@ onMounted(async () => {
             <ShieldAlert :size="20" class="text-warning mt-0.5 shrink-0" />
             <div class="text-sm">
               <p class="font-medium text-warning">换届操作需重新认证</p>
-              <p class="text-xs text-text-secondary mt-1">新任失败将撤回，旧任部分失败保留新任持续重试。部分失败不回滚已成功新任。</p>
+              <p class="text-xs text-text-secondary mt-1">系统先确认新任生效，再移除旧任；任何时刻均保持至少一名有效社团负责人。新任失败将撤回，旧任部分失败保留新任持续重试，部分失败不回滚已成功新任。</p>
             </div>
           </div>
         </Card>
@@ -239,10 +248,11 @@ onMounted(async () => {
         <button
           class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
           :disabled="executing || !data.canExecute"
-          @click="handleExecute"
+          @click="showExecuteConfirm = true"
         >
           <ShieldAlert :size="18" /> {{ executing ? '执行中...' : '确认执行换届' }}
         </button>
+        <p v-if="!data.canExecute" class="text-xs text-text-secondary mt-2 text-center">需先保存包含至少一项晋升或任命的换届方案，且换届未执行</p>
       </template>
 
       <!-- 执行结果 -->
@@ -278,6 +288,23 @@ onMounted(async () => {
           返回工作台
         </button>
       </template>
+
+      <HighRiskConfirm
+        :open="showExecuteConfirm"
+        title="确认执行换届"
+        description="系统先确认新任生效，再移除旧任；任何时刻均保持至少一名有效社团负责人。"
+        :targets="data ? [
+          { id: data.currentLeader.id, label: data.currentLeader.name, detail: `${data.currentLeader.title}（现任负责人）` },
+          ...data.candidates.map((c) => ({ id: `c-${c.memberId}`, label: c.name, detail: `${c.currentTitle} → ${c.proposedTitle}` })),
+          ...data.appointments.map((a) => ({ id: `a-${a.memberId}`, label: a.name, detail: `${a.currentTitle} → ${a.proposedTitle}` })),
+        ] : []"
+        impact-summary="新任失败将撤回，旧任部分失败保留新任持续重试；部分失败不回滚已成功新任。"
+        confirm-label="确认执行换届"
+        reauth-required
+        :executing="executing"
+        @confirm="showExecuteConfirm = false; handleExecute()"
+        @update:open="(v) => { if (!v) showExecuteConfirm = false }"
+      />
     </div>
   </PageStateBoundary>
 </template>

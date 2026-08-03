@@ -75,7 +75,27 @@ export const mockUsers: Record<string, MockUser> = {
           'club:recruitment:manage',
           'club:joint:manage',
           'club:member:manage',
+          'club:invite:manage',
+          'club:transition:manage',
           'club:form:design',
+          'club:stats:view',
+          'club:export:execute',
+          'club:audit:view',
+          'club:config:manage',
+          'club:batch:execute',
+        ],
+      },
+      {
+        clubId: 'club-002',
+        clubName: '网络协会',
+        role: 'hr',
+        permissions: [
+          'club:dashboard:view',
+          'club:recruitment:manage',
+          'club:joint:manage',
+          'club:member:manage',
+          'club:invite:manage',
+          'club:transition:manage',
           'club:stats:view',
           'club:export:execute',
           'club:audit:view',
@@ -105,8 +125,14 @@ export const mockUsers: Record<string, MockUser> = {
         permissions: [
           'club:dashboard:view',
           'club:recruitment:manage',
+          'club:joint:manage',
           'club:member:manage',
+          'club:invite:manage',
+          'club:transition:manage',
           'club:stats:view',
+          'club:export:execute',
+          'club:audit:view',
+          'club:config:manage',
           'club:batch:execute',
         ],
       },
@@ -132,6 +158,30 @@ export const mockUsers: Record<string, MockUser> = {
         permissions: [
           'club:interview:view',
           'club:interview:evaluate',
+        ],
+      },
+    ],
+  },
+
+  /** 部门负责人（数据范围仅限本部门） */
+  deptleader: {
+    id: 'user-deptleader-001',
+    studentId: '20210006',
+    name: '林晓薇',
+    email: 'deptleader@example.edu.cn',
+    phone: '13800000007',
+    avatar: null,
+    emailVerified: true,
+    profileComplete: true,
+    currentClubId: 'club-001',
+    roles: [
+      {
+        clubId: 'club-001',
+        clubName: '计算机协会',
+        role: 'department_leader',
+        permissions: [
+          'club:dashboard:view',
+          'club:member:manage',
         ],
       },
     ],
@@ -247,6 +297,44 @@ export const mockUsers: Record<string, MockUser> = {
 
 let activeMockUserKey: string | null = null
 
+/** 演示登录身份目录（由 mockUsers 派生，MOCK 模式登录页按此渲染，避免与 mock 数据漂移） */
+export interface DemoRoleInfo {
+  key: string
+  role: MockRole['role']
+  label: string
+  desc: string
+}
+
+const ROLE_LABELS: Record<MockRole['role'], string> = {
+  super_admin: '超级管理员',
+  club_leader: '社团负责人',
+  hr: '人事',
+  department_leader: '部门负责人',
+  interviewer: '面试官',
+  member: '普通成员',
+  applicant: '申请人',
+}
+
+const ROLE_HINTS: Record<MockRole['role'], string> = {
+  super_admin: '平台全局管理',
+  club_leader: '社团管理全部功能',
+  hr: '招新与成员管理',
+  department_leader: '成员管理（仅本部门范围）',
+  interviewer: '面试评价',
+  member: '查看本人信息',
+  applicant: '报名与查看邀请',
+}
+
+export const DEMO_ROLES: DemoRoleInfo[] = Object.entries(mockUsers).map(([key, u]) => {
+  const role = u.roles[0]?.role ?? 'applicant'
+  return {
+    key,
+    role,
+    label: ROLE_LABELS[role],
+    desc: u.roles[0]?.clubName ? `${ROLE_HINTS[role]} · ${u.roles[0].clubName}` : ROLE_HINTS[role],
+  }
+})
+
 export function resolveMockSessionUser(url: string): MockUser | null {
   const u = new URL(url, 'http://localhost')
   const requestedKey = u.searchParams.get('_mock_user')
@@ -292,6 +380,7 @@ export const USER_MEMBER_MAP: Record<string, string> = {
   'user-hr-001': 'mem-003',
   'user-interviewer-001': 'mem-002',
   'user-member-001': 'mem-001',
+  'user-deptleader-001': 'mem-006',
 }
 
 /** 获取当前用户的默认工作空间（有社团归属时返回） */

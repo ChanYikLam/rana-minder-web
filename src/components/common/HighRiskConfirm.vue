@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount } from 'vue'
-import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound } from '@lucide/vue'
+import { ShieldAlert, ArrowRight, CheckCircle2, RefreshCw, KeyRound, XCircle } from '@lucide/vue'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,8 @@ interface Props {
   reauthRequired?: boolean
   reauthDeadline?: number
   executing?: boolean
+  succeeded?: boolean
+  errorMessage?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -37,12 +39,16 @@ const props = withDefaults(defineProps<Props>(), {
   reauthRequired: false,
   reauthDeadline: 10 * 60 * 1000,
   executing: false,
+  succeeded: false,
+  errorMessage: '',
 })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
+  'update:errorMessage': [value: string]
   confirm: []
   cancel: []
+  retry: []
 }>()
 
 const step = ref<'preview' | 'confirm' | 'executing' | 'done'>('preview')
@@ -51,10 +57,11 @@ const reauthPassword = ref('')
 const reauthError = ref('')
 const reauthBusy = ref(false)
 
-// 重认证倒计时：从弹窗打开起计时，每秒刷新
 const openedAt = ref(Date.now())
 const now = ref(Date.now())
 let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+const isReauthExpired = computed(() => props.reauthRequired && remainingSeconds.value <= 0)
 
 function stopCountdown() {
   if (countdownTimer) {
@@ -62,6 +69,31 @@ function stopCountdown() {
     countdownTimer = null
   }
 }
+
+// 监听外部"已成功"信号：父组件在确认成功后置 succeeded=true → 进入 done
+watch(
+  () => props.succeeded,
+  (succeeded) => {
+    if (succeeded && step.value === 'executing') {
+      step.value = 'done'
+    }
+  }
+)
+
+// 监听外部"执行中"信号：父组件把 executing 从 true 置为 false
+// 只有当 succeeded 也为 true 时才进入 done；否则保持在 executing 并显示错误
+watch(
+  () => props.executing,
+  (executing, wasExecuting) => {
+    if (wasExecuting && !executing && step.value === 'executing') {
+      if (props.succeeded) {
+        step.value = 'done'
+      } else if (props.errorMessage) {
+        // 保持 executing 步骤但显示错误，等待父组件 retry 或关闭
+      }
+    }
+  }
+)
 
 watch(
   () => props.open,
@@ -94,6 +126,10 @@ function handleNext() {
 }
 
 async function handleConfirm() {
+  if (isReauthExpired.value) {
+    reauthError.value = '认证已过期，请重新打开确认'
+    return
+  }
   if (!props.reauthRequired) {
     step.value = 'executing'
     emit('confirm')
@@ -124,6 +160,13 @@ function handleCancel() {
   emit('update:open', false)
 }
 
+function handleRetry() {
+  emit('update:errorMessage', '')
+  reauthError.value = ''
+  emit('retry')
+  step.value = 'confirm'
+}
+
 const remainingSeconds = computed(() => {
   if (!props.reauthRequired) return 0
   const elapsed = now.value - openedAt.value
@@ -133,7 +176,7 @@ const remainingSeconds = computed(() => {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-[480px]">
+    <DialogContent class="max-w-[480px]" @pointerdown-outside.prevent @escape-key-down.prevent>
       <DialogHeader>
         <div class="flex items-center gap-2 mb-1">
           <div class="flex items-center justify-center w-8 h-8 rounded-full bg-warning-subtle text-warning">
@@ -196,10 +239,17 @@ const remainingSeconds = computed(() => {
         </div>
       </div>
 
-      <!-- Step: Executing -->
+      <!-- Step: Executing（含失败错误状态） -->
       <div v-else-if="step === 'executing'" class="py-8 text-center">
-        <RefreshCw class="animate-spin text-primary mx-auto mb-3" :size="32" />
-        <p class="text-sm text-text-secondary">正在执行...</p>
+        <template v-if="!executing && errorMessage">
+          <XCircle class="text-danger mx-auto mb-3" :size="32" />
+          <p class="text-sm font-medium text-danger mb-2">操作失败</p>
+          <p class="text-xs text-text-secondary">{{ errorMessage }}</p>
+        </template>
+        <template v-else>
+          <RefreshCw class="animate-spin text-primary mx-auto mb-3" :size="32" />
+          <p class="text-sm text-text-secondary">正在执行...</p>
+        </template>
       </div>
 
       <!-- Step: Done -->
@@ -211,7 +261,12 @@ const remainingSeconds = computed(() => {
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
         <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>
-        <Button v-else variant="destructive" :loading="executing || reauthBusy" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
+        <Button v-else variant="destructive" :loading="executing || reauthBusy" :disabled="isReauthExpired" @click="handleConfirm">{{ reauthRequired ? '验证并执行' : confirmLabel }}</Button>
+      </DialogFooter>
+
+      <DialogFooter v-else-if="step === 'executing' && !executing && errorMessage">
+        <Button variant="outline" @click="emit('update:open', false)">关闭</Button>
+        <Button variant="destructive" @click="handleRetry">重试</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

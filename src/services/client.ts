@@ -75,14 +75,19 @@ async function request<T>(path: string, options: RequestOptions<T> = {}): Promis
     schema,
   } = options
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+  const headers: Record<string, string> = {}
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json'
   }
 
-  let requestBody: string | undefined
+  let requestBody: BodyInit | undefined
   let intentFingerprint: string | null = null
 
-  if (method !== 'GET') {
+  if (isFormData) {
+    // 文件上传：直接发送 FormData，不包装 ApiRequest；boundary 由浏览器自动生成
+    requestBody = body as unknown as BodyInit
+  } else if (method !== 'GET') {
     const input = body === undefined ? {} : body
     intentFingerprint = JSON.stringify({ method, path, action, targetId, expectedVersion, input })
     const apiRequest: ApiRequest = {

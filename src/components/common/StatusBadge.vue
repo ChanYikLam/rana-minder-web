@@ -15,6 +15,7 @@ const badgeVariant = cva(
         info: 'bg-info-subtle text-info',
         neutral: 'bg-muted text-text-secondary',
         selected: 'bg-primary-subtle text-primary',
+        primary: 'bg-primary-subtle text-primary',
       },
     },
     defaultVariants: {
@@ -43,6 +44,7 @@ const defaultIcon = computed(() => ({
   info: Info,
   neutral: Circle,
   selected: ShieldCheck,
+  primary: ShieldCheck,
 }[props.variant ?? 'neutral']))
 </script>
 

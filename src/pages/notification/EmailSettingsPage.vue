@@ -2,18 +2,31 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
+import { Banner, ErrorState } from '@/components/feedback'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Save, Send, CheckCircle2 } from '@lucide/vue'
+import { Save, Send } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 
 const route = useRoute()
+const session = useSessionViewStore()
 const state = ref<PageState>('loading')
 const config = ref({ smtpHost: '', smtpPort: 465, smtpUser: '', fromName: '', encryption: 'ssl', verified: false })
 const testing = ref(false)
 const testResult = ref<string | null>(null)
+const testError = ref<string | null>(null)
 const saving = ref(false)
+const savingPrefs = ref(false)
+const refilling = ref(false)
+
+const preferences = ref({
+  applicationStatus: true,
+  interviewNotify: true,
+  admissionInvite: true,
+  systemMaintenance: false,
+})
 
 const scope = computed(() => (route.meta.scope as string) || 'personal')
 const scopeLabel = computed(() => {
@@ -38,14 +51,51 @@ async function loadData() {
 async function handleTest() {
   testing.value = true
   testResult.value = null
+  testError.value = null
   const apiScope = resolveApiScope(route)
   if (!apiScope) { testing.value = false; return }
-  const result = await post(`${apiScope.prefix}/notifications/email-config/test`, {})
+  const result = await post(`${apiScope.prefix}/notifications/email-config/test`, {
+    scope: scope.value,
+    recipient: session.user?.email || config.value.smtpUser,
+    smtpHost: config.value.smtpHost,
+    smtpPort: config.value.smtpPort,
+    smtpUser: config.value.smtpUser,
+    fromName: config.value.fromName,
+    encryption: config.value.encryption,
+  })
   testing.value = false
   if (result.kind === 'completed') {
-    testResult.value = '测试邮件已发送至 ' + config.value.smtpUser + '，请查收'
+    testResult.value = '测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收'
   } else {
-    toast.error('测试邮件发送失败，请稍后重试')
+    testError.value = '测试邮件发送失败，请稍后重试'
+  }
+}
+
+async function handleSavePreferences() {
+  savingPrefs.value = true
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { savingPrefs.value = false; return }
+  const result = await post(`${apiScope.prefix}/notifications/preferences`, {
+    ...preferences.value,
+  })
+  savingPrefs.value = false
+  if (result.kind === 'completed') {
+    toast.success('偏好已保存')
+  } else {
+    toast.error('偏好保存失败，请稍后重试')
+  }
+}
+
+async function handleRefillKey() {
+  refilling.value = true
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { refilling.value = false; return }
+  const result = await post(`${apiScope.prefix}/notifications/email-config/rotate-key`, {})
+  refilling.value = false
+  if (result.kind === 'completed') {
+    toast.success('密钥已轮换，请重新填写')
+  } else {
+    toast.error('密钥轮换失败，请稍后重试')
   }
 }
 
@@ -83,22 +133,28 @@ onMounted(loadData)
         <div class="space-y-3">
           <label class="flex items-center justify-between">
             <span class="text-sm text-text-primary">报名状态变更</span>
-            <input type="checkbox" checked class="rounded border-border" />
+            <input type="checkbox" v-model="preferences.applicationStatus" class="rounded border-border" />
           </label>
           <label class="flex items-center justify-between">
             <span class="text-sm text-text-primary">面试安排通知</span>
-            <input type="checkbox" checked class="rounded border-border" />
+            <input type="checkbox" v-model="preferences.interviewNotify" class="rounded border-border" />
           </label>
           <label class="flex items-center justify-between">
             <span class="text-sm text-text-primary">录取邀请通知</span>
-            <input type="checkbox" checked class="rounded border-border" />
+            <input type="checkbox" v-model="preferences.admissionInvite" class="rounded border-border" />
           </label>
           <label class="flex items-center justify-between">
             <span class="text-sm text-text-primary">系统维护通知</span>
-            <input type="checkbox" class="rounded border-border" />
+            <input type="checkbox" v-model="preferences.systemMaintenance" class="rounded border-border" />
           </label>
         </div>
-        <button class="w-full mt-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover">保存偏好</button>
+        <button
+          class="w-full mt-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+          :disabled="savingPrefs"
+          @click="handleSavePreferences"
+        >
+          {{ savingPrefs ? '保存中...' : '保存偏好' }}
+        </button>
       </Card>
 
       <!-- 社团/平台发信配置 -->
@@ -140,7 +196,13 @@ onMounted(loadData)
                   readonly
                   aria-label="发信密钥（已脱敏）"
                 />
-                <button class="px-3 h-10 rounded-md border border-border text-sm text-text-primary hover:bg-subtle">重新填写</button>
+                <button
+                  class="px-3 h-10 rounded-md border border-border text-sm text-text-primary hover:bg-subtle disabled:opacity-60"
+                  :disabled="refilling"
+                  @click="handleRefillKey"
+                >
+                  {{ refilling ? '处理中...' : '重新填写' }}
+                </button>
               </div>
               <p class="text-xs text-text-secondary mt-1">密钥不明文回显，只能重新填写或轮换</p>
             </div>
@@ -151,14 +213,18 @@ onMounted(loadData)
           </div>
         </Card>
 
-        <Card v-if="config.verified" class="mb-4 border-success">
-          <div class="flex items-center gap-2 text-success">
-            <CheckCircle2 :size="18" />
-            <span class="text-sm font-medium">发信配置已验证</span>
-          </div>
-        </Card>
+        <Banner v-if="config.verified" tone="success" title="发信配置已验证" class="mb-4" />
 
         <p v-if="testResult" class="text-sm text-success mb-4" role="status">{{ testResult }}</p>
+
+        <ErrorState
+          v-if="testError"
+          title="测试发送失败"
+          :message="testError"
+          compact
+          class="mb-4"
+          @retry="handleTest"
+        />
 
         <div class="flex gap-3">
           <button class="flex items-center gap-1.5 px-4 h-10 rounded-md border border-border text-text-primary hover:bg-subtle" :disabled="testing" @click="handleTest">
