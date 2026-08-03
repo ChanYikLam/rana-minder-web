@@ -10,7 +10,7 @@ import { Calendar, Clock, ChevronRight, ClipboardList, Hourglass, History, XCirc
 interface TodoItem { id: string; type: string; title: string; description: string; deadline: string; link: string }
 interface OngoingItem { id: string; type: string; title: string; description: string; submittedAt: string; link: string; activityId?: string; status?: string }
 interface HistoryItem { id: string; type: string; title: string; result: string; completedAt: string }
-interface ScheduleItem { id: string; title: string; activityTitle: string; time: string; location: string; interviewerName: string; status: string }
+interface ScheduleItem { id: string; title: string; activityTitle: string; time: string; location: string; interviewerName: string; status: string; role?: 'applicant' | 'interviewer'; applicantName?: string }
 
 type TabKey = 'todo' | 'ongoing' | 'history' | 'schedule'
 
@@ -229,9 +229,20 @@ onMounted(loadData)
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary">{{ item.activityTitle }}</p>
                 <p class="text-xs text-text-secondary mt-1">
-                  {{ formatTime(item.time) }} · {{ item.location }} · 面试官：{{ item.interviewerName }}
+                  <template v-if="item.role === 'interviewer'">
+                    {{ formatTime(item.time) }} · 面试对象：{{ item.applicantName }}
+                  </template>
+                  <template v-else>
+                    {{ formatTime(item.time) }} · {{ item.location }} · 面试官：{{ item.interviewerName }}
+                  </template>
                 </p>
               </div>
+              <span
+                v-if="item.role === 'interviewer'"
+                class="ml-auto shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs bg-warning-subtle text-warning"
+              >
+                我的任务
+              </span>
             </div>
           </Card>
         </div>

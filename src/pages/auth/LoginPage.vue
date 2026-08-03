@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
-import { LogIn, Compass, ShieldCheck, Users, UserCog, ClipboardCheck, User, GraduationCap } from '@lucide/vue'
+import { DEMO_ROLES } from '@/mock/auth'
+import type { MockRole } from '@/mock/auth'
+import {
+  ShieldCheck, Users, UserCog, Building2, ClipboardCheck, User, GraduationCap,
+  LogIn, Compass,
+} from '@lucide/vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -13,26 +18,44 @@ const loggingIn = ref(false)
 const loginError = ref<string | null>(null)
 const selectedRole = ref('leader')
 
-const mockRoles = [
-  { key: 'admin', label: '超级管理员', desc: '平台全局管理', icon: ShieldCheck },
-  { key: 'leader', label: '社团负责人', desc: '社团管理全部功能', icon: Users },
-  { key: 'hr', label: '人事', desc: '招新与成员管理', icon: UserCog },
-  { key: 'interviewer', label: '面试官', desc: '面试评价', icon: ClipboardCheck },
-  { key: 'member', label: '普通成员', desc: '查看本人信息', icon: User },
-  { key: 'applicant', label: '申请人', desc: '报名与查看邀请', icon: GraduationCap },
-]
+const roleIcons: Record<MockRole['role'], typeof ShieldCheck> = {
+  super_admin: ShieldCheck,
+  club_leader: Users,
+  hr: UserCog,
+  department_leader: Building2,
+  interviewer: ClipboardCheck,
+  member: User,
+  applicant: GraduationCap,
+}
 
-function getRedirect(): string {
+const mockRoles = DEMO_ROLES.map((r) => ({ ...r, icon: roleIcons[r.role] }))
+
+function getRequestedRedirect(): string | null {
   const redirect = route.query.redirect
-  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return '/me'
+  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return null
 
   try {
     const target = new URL(redirect, window.location.origin)
-    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : '/me'
+    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : null
   } catch {
-    return '/me'
+    return null
   }
 }
+
+function resolveTargetAfterLogin(): string {
+  const requested = getRequestedRedirect()
+  if (requested) return requested
+  if (session.workspace?.clubId) return `/org/${session.workspace.clubId}/dashboard`
+  if (session.hasPermission('platform:club:manage')) return '/admin/clubs'
+  return '/me'
+}
+
+onMounted(async () => {
+  await session.loadSession()
+  if (session.isAuthenticated) {
+    await router.replace(resolveTargetAfterLogin())
+  }
+})
 
 async function handleLogin() {
   if (loggingIn.value || authMode === 'disabled') return
@@ -40,7 +63,7 @@ async function handleLogin() {
   loginError.value = null
 
   try {
-    const result = await startLogin(getRedirect(), selectedRole.value)
+    const result = await startLogin(getRequestedRedirect() ?? '/me', selectedRole.value)
     if (result === 'redirected') return
     if (result === 'disabled') {
       loginError.value = '统一认证尚未配置，当前无法登录'
@@ -53,7 +76,7 @@ async function handleLogin() {
       return
     }
 
-    await router.push(getRedirect())
+    await router.push(resolveTargetAfterLogin())
   } catch {
     loginError.value = '登录失败，请稍后重试'
   } finally {

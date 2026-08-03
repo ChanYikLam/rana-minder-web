@@ -5,13 +5,15 @@ import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Calendar, Users, AlertTriangle, Play, CheckCircle2, XCircle, Clock3, CalendarPlus } from '@lucide/vue'
+import { Calendar, Users, AlertTriangle, Play, CheckCircle2, XCircle, Clock3, CalendarPlus, Star } from '@lucide/vue'
 
 interface JointInterview {
   id: string; jointId: string; applicantId: string; applicantName: string
   status: string; scheduledTime: string; attendance: string; invalidReason: string | null; attempt: number
+  reviews: { clubId: string; clubName: string; rating: number; comment: string; concludedAt: string }[]
 }
 interface JointApp { applicantId: string; applicantName: string; status: string }
 interface Slot { id: string; startAt: string; capacity: number; available: number }
@@ -27,8 +29,8 @@ const actionError = ref('')
 const bookOpen = ref(false)
 const bookForm = ref({ applicantId: '', slotId: '' })
 
-const clubId = computed(() => (route.params.clubId as string) || 'club-001')
-const jointId = computed(() => (route.params.jointId as string) || 'jnt-001')
+const clubId = computed(() => (route.params.clubId as string) || '')
+const jointId = computed(() => (route.params.jointId as string) || '')
 
 async function loadData() {
   state.value = 'loading'
@@ -36,9 +38,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     interviews.value = result.data.items
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function loadOptions() {
@@ -186,6 +186,20 @@ onMounted(async () => {
             <div class="flex items-center justify-between mb-2">
               <p class="text-xs text-text-secondary">跨社评价（实时互见）</p>
               <span class="text-xs text-info">各社团评价实时互相可见</span>
+            </div>
+            <div v-if="iv.reviews.length === 0" class="rounded-md bg-subtle px-3 py-2">
+              <p class="text-xs text-text-secondary">尚未有社团提交评价</p>
+            </div>
+            <div v-else class="space-y-2">
+              <div v-for="rv in iv.reviews" :key="rv.clubId" class="rounded-md bg-subtle px-3 py-2">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-xs font-medium text-text-primary">{{ rv.clubName }}</span>
+                  <span class="flex items-center gap-1 text-xs text-warning">
+                    <Star :size="12" class="fill-warning" /> {{ rv.rating }}
+                  </span>
+                </div>
+                <p v-if="rv.comment" class="text-xs text-text-secondary">{{ rv.comment }}</p>
+              </div>
             </div>
             <p class="text-xs text-text-secondary mt-2">注：只能修改本人提交的评语，活动结束后锁定</p>
           </div>

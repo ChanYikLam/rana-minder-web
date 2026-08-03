@@ -6,6 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import {
   Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck,
@@ -31,7 +32,7 @@ const submitting = ref(false)
 // 管理操作
 const actionLoading = ref(false)
 const actionError = ref('')
-const newDeadline = ref('2026-09-16T23:59:00+08:00')
+const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 
 async function loadDetail() {
@@ -43,9 +44,7 @@ async function loadDetail() {
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function runAction(action: string, input?: Record<string, unknown>) {
@@ -91,7 +90,7 @@ const clubOptions = [
 ]
 const adjustOpen = ref(false)
 const selectedClubs = ref<string[]>([])
-const newConfirmDeadline = ref('2026-09-30T23:59:00+08:00')
+const newConfirmDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 
 async function openAdjust() {
   adjustOpen.value = true

@@ -1,5 +1,5 @@
 import type { MockMethod } from './types'
-import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, type MockUser } from './auth'
+import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, mockUsers, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
@@ -59,10 +59,24 @@ function canManageMembers(user: MockUser, clubId: string): boolean {
   return getPermissions(user, clubId).includes('club:member:manage')
 }
 
+/** 部门负责人的数据范围：其当前任职部门名；其余角色返回 null（全社团） */
+function departmentScopeFor(user: MockUser, clubId: string): string | null {
+  if (user.roles.find((r) => r.clubId === clubId)?.role !== 'department_leader') return null
+  const memberId = actorMemberId(user)
+  const member = memberId ? db.findMember(clubId, memberId) : undefined
+  return member?.positions.find((p) => p.status === 'active')?.departmentName ?? null
+}
+
+/** 仅社团负责人/人事管理员（不含部门负责人）可执行的成员管理操作 */
+function canManageMembersFull(user: MockUser, clubId: string): boolean {
+  if (!canManageMembers(user, clubId)) return false
+  return user.roles.find((r) => r.clubId === clubId)?.role !== 'department_leader'
+}
+
 /** 导出任务（内存态；POST 创建后模拟异步完成） */
 interface ExportTask { id: string; clubId: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number }
 const exportTasks: ExportTask[] = [
-  { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576 },
+  { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-07-29T10:00:00+08:00', downloadUrl: '#', fileSize: 24576 },
   { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 },
 ]
 
@@ -130,6 +144,36 @@ const identityHandlers: MockMethod[] = [
           degraded: false,
           permissions: getPermissions(user, user.currentClubId || ''),
           workspace: getWorkspace(user),
+        },
+      }
+    },
+  },
+  {
+    url: '/api/auth/logout',
+    method: 'delete',
+    response: () => {
+      return { code: 0, data: null }
+    },
+  },
+  {
+    url: '/api/me/clubs',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const user = resolveMockUser(url)
+      return {
+        code: 0,
+        data: {
+          clubs: user.roles
+            .filter((r) => r.clubId)
+            .map((r) => ({
+              clubId: r.clubId,
+              clubName: r.clubName,
+              role: r.role,
+            })),
         },
       }
     },
@@ -300,6 +344,79 @@ const identityHandlers: MockMethod[] = [
 ]
 
 /** 公开目录处理器 */
+
+/** 社团种子：平台接入管理（admin/clubs）与公开目录（explore/clubs）共用同一数据源 */
+const mockClubs: { id: string; name: string; description: string; status: string; createdAt: string; groupMapped: boolean }[] = [
+  { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'approved', createdAt: '2022-09-01', groupMapped: true },
+  { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', status: 'approved', createdAt: '2022-09-01', groupMapped: true },
+  { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'approved', createdAt: '2023-03-15', groupMapped: true },
+  { id: 'club-004', name: '摄影协会', description: '摄影艺术与后期制作', status: 'pending_review', createdAt: '2025-07-28', groupMapped: false },
+]
+
+const clubMemberCount = (id: string) => db.getMemberStats(id).total
+
+/** Casdoor Group 目录（虚拟）：接入向导分层搜索与绑定校验数据源；本系统不创建/改名/移动真实 Group */
+interface CasdoorGroup {
+  id: string
+  path: string
+  name: string
+  parentPath: string | null
+  kind: 'org' | 'club' | 'dept' | 'role'
+  memberCount: number
+  boundClubId: string | null
+}
+
+const casdoorGroups: CasdoorGroup[] = [
+  { id: 'g-cs', path: '/cs', name: '计算机学院', parentPath: null, kind: 'org', memberCount: 1200, boundClubId: null },
+  { id: 'g-cs-cc', path: '/cs/computer-club', name: '计算机协会', parentPath: '/cs', kind: 'club', memberCount: 5, boundClubId: 'club-001' },
+  { id: 'g-cs-cc-dev', path: '/cs/computer-club/dept-dev', name: '开发部', parentPath: '/cs/computer-club', kind: 'dept', memberCount: 3, boundClubId: 'club-001' },
+  { id: 'g-cs-cc-prod', path: '/cs/computer-club/dept-prod', name: '宣传部', parentPath: '/cs/computer-club', kind: 'dept', memberCount: 2, boundClubId: 'club-001' },
+  { id: 'g-cs-cc-leader', path: '/cs/computer-club/role-leader', name: '负责人', parentPath: '/cs/computer-club', kind: 'role', memberCount: 1, boundClubId: 'club-001' },
+  { id: 'g-cs-cc-member', path: '/cs/computer-club/role-member', name: '成员', parentPath: '/cs/computer-club', kind: 'role', memberCount: 4, boundClubId: 'club-001' },
+  { id: 'g-cs-ec', path: '/cs/electronics-club', name: '电子设计协会', parentPath: '/cs', kind: 'club', memberCount: 86, boundClubId: 'club-002' },
+  { id: 'g-cs-mc', path: '/cs/math-club', name: '数学建模协会', parentPath: '/cs', kind: 'club', memberCount: 64, boundClubId: 'club-003' },
+  { id: 'g-cs-pc', path: '/cs/photography-club', name: '摄影协会', parentPath: '/cs', kind: 'club', memberCount: 42, boundClubId: 'club-004' },
+  { id: 'g-cs-pc-leader', path: '/cs/photography-club/role-leader', name: '负责人', parentPath: '/cs/photography-club', kind: 'role', memberCount: 1, boundClubId: 'club-004' },
+  { id: 'g-cs-ai', path: '/cs/ai-club', name: '人工智能协会', parentPath: '/cs', kind: 'club', memberCount: 31, boundClubId: null },
+  { id: 'g-cs-ai-dev', path: '/cs/ai-club/dept-algo', name: '算法部', parentPath: '/cs/ai-club', kind: 'dept', memberCount: 12, boundClubId: null },
+  { id: 'g-cs-ai-op', path: '/cs/ai-club/dept-op', name: '运营部', parentPath: '/cs/ai-club', kind: 'dept', memberCount: 8, boundClubId: null },
+  { id: 'g-cs-ai-leader', path: '/cs/ai-club/role-leader', name: '负责人', parentPath: '/cs/ai-club', kind: 'role', memberCount: 1, boundClubId: null },
+  { id: 'g-cs-ai-member', path: '/cs/ai-club/role-member', name: '成员', parentPath: '/cs/ai-club', kind: 'role', memberCount: 30, boundClubId: null },
+  { id: 'g-cs-staff', path: '/cs/staff-ops', name: '学院行政', parentPath: '/cs', kind: 'role', memberCount: 8, boundClubId: null },
+]
+
+let nextClubSeq = 5
+
+function editDistance(a: string, b: string): number {
+  const dp: number[] = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0]
+    dp[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const cur = dp[j]
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(dp[j], dp[j - 1], prev)
+      prev = cur
+    }
+  }
+  return dp[b.length]
+}
+
+/** 分层搜索：精确 -> 子串 -> 近似；不足 3 个有效字符仅做精确与子串 */
+function searchCasdoorGroups(keyword: string): CasdoorGroup[] {
+  const kw = keyword.trim()
+  if (!kw) return casdoorGroups.filter((g) => g.kind === 'club')
+  const valid = kw.replace(/[\s\u3000]/g, '')
+  const exact: CasdoorGroup[] = []
+  const substring: CasdoorGroup[] = []
+  const fuzzy: CasdoorGroup[] = []
+  for (const g of casdoorGroups) {
+    if (g.name === kw || g.path === kw) exact.push(g)
+    else if (g.name.includes(kw) || g.path.includes(kw)) substring.push(g)
+    else if (valid.length >= 3 && editDistance(g.name, valid) <= 1) fuzzy.push(g)
+  }
+  return [...exact, ...substring, ...fuzzy]
+}
+
 const publicHandlers: MockMethod[] = [
   {
     url: '/api/explore/clubs',
@@ -312,11 +429,15 @@ const publicHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', memberCount: 128, logo: null },
-            { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', memberCount: 86, logo: null },
-            { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', memberCount: 64, logo: null },
-          ],
+          items: mockClubs
+            .filter((c) => c.status === 'approved')
+            .map((c) => ({
+              id: c.id,
+              name: c.name,
+              description: c.description,
+              memberCount: clubMemberCount(c.id),
+              logo: null,
+            })),
           nextCursor: null,
         },
       }
@@ -333,28 +454,18 @@ const publicHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
-          items: [
-            {
-              id: 'act-001',
-              clubId: 'club-001',
-              clubName: '计算机协会',
-              title: '2025 秋季招新',
+          items: rdb.recruitmentActivities
+            .filter((a) => a.status === 'in_progress' || a.status === 'paused')
+            .map((a) => ({
+              id: a.id,
+              clubId: a.clubId,
+              clubName: a.clubName,
+              title: a.title,
               type: 'recruitment',
-              status: 'open',
-              deadline: '2025-09-15T23:59:00+08:00',
-              description: '面向全校新生的秋季招新活动',
-            },
-            {
-              id: 'act-002',
-              clubId: 'club-002',
-              clubName: '电子设计协会',
-              title: '嵌入式方向招新',
-              type: 'recruitment',
-              status: 'open',
-              deadline: '2025-09-20T23:59:00+08:00',
-              description: '嵌入式开发方向招新',
-            },
-          ],
+              status: a.status === 'paused' ? 'paused' : a.channelStatus === 'open' ? 'open' : 'closed',
+              deadline: a.deadline,
+              description: a.description,
+            })),
           nextCursor: null,
         },
       }
@@ -398,16 +509,28 @@ const organizationHandlers: MockMethod[] = [
       }
       const user = resolveMockUser(url)
       const permissions = getPermissions(user, query.clubId || '')
+      const pendingApplications = db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review').length
+      const pendingInvitations = db.membershipInvitations.filter((i) => i.clubId === query.clubId && (i.status === 'sent' || i.status === 'pending_acceptance')).length
+      const membership = user.roles.find((r) => r.clubId === query.clubId)
+      const submittedApps = rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted').length
+      const scheduledInterviews = rdb.recruitmentInterviews.filter((i) => i.clubId === query.clubId && (i.status === 'scheduled' || i.status === 'pending_selection')).length
+      const pendingRecInvitations = rdb.recruitmentInvitations.filter((i) => i.clubId === query.clubId && i.status === 'pending_acceptance').length
       return {
         code: 0,
         data: {
-          club: { id: query.clubId, name: '计算机协会' },
-          role: user.roles.find((r) => r.clubId === query.clubId)?.role || 'member',
+          club: { id: query.clubId, name: membership?.clubName || query.clubId },
+          role: membership?.role || 'member',
           permissions,
+          metrics: {
+            pendingReviews: submittedApps + pendingApplications + pendingInvitations,
+            pendingInterviews: Math.max(0, submittedApps - scheduledInterviews),
+            pendingResults: 0,
+            syncErrors: 2,
+          },
           todos: [
-            { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: 12 },
-            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: 5 },
-            { id: 'todo-003', type: 'invitation_pending', title: '待发送邀请', count: 3 },
+            { id: 'todo-001', type: 'application_review', title: '待审核报名申请', count: submittedApps },
+            { id: 'todo-002', type: 'interview_schedule', title: '待安排面试', count: Math.max(0, submittedApps - scheduledInterviews) },
+            { id: 'todo-003', type: 'invitation_pending', title: '待确认录取邀请', count: pendingRecInvitations },
           ],
           recentActivities: [],
         },
@@ -429,7 +552,7 @@ const notificationHandlers: MockMethod[] = [
       const allItems = [
         { id: 'ntf-001', type: 'application', title: '报名申请已提交', body: '您的报名申请已提交，请等待审核。', read: false, createdAt: '2025-08-01T10:00:00+08:00', link: '/me/todo' },
         { id: 'ntf-002', type: 'interview', title: '面试已排期', body: '您的面试已安排，请查看日程。', read: false, createdAt: '2025-08-01T09:00:00+08:00', link: '/me/schedule' },
-        { id: 'ntf-003', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/inv-001' },
+        { id: 'ntf-003', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/rinv-001' },
         { id: 'ntf-004', type: 'system', title: '系统维护通知', body: '系统将于本周六凌晨进行维护。', read: true, createdAt: '2025-07-30T18:00:00+08:00', link: null },
       ]
       const items = query.unreadOnly === 'true' ? allItems.filter((n) => !n.read) : allItems
@@ -471,7 +594,7 @@ const personalHandlers: MockMethod[] = [
       }
       const user = resolveMockUser(url)
       const items: { id: string; type: string; title: string; description: string; deadline: string; link: string }[] = [
-        { id: 'todo-1', type: 'invitation', title: '确认录取邀请', description: '计算机协会 - 2025秋季招新', deadline: '2025-08-05T23:59:00+08:00', link: '/me/invitations/recruitment/inv-001' },
+        { id: 'todo-1', type: 'invitation', title: '确认录取邀请', description: '计算机协会 - 2025秋季招新', deadline: '2025-08-05T23:59:00+08:00', link: '/me/invitations/recruitment/rinv-001' },
         { id: 'todo-2', type: 'interview', title: '确认面试时间', description: '嵌入式方向面试', deadline: '2025-08-03T12:00:00+08:00', link: '/me/schedule' },
       ]
       // 被邀请人视角：常规入社邀请待处理
@@ -487,7 +610,7 @@ const personalHandlers: MockMethod[] = [
             title: '处理常规入社邀请',
             description: '计算机协会' + (pending.departmentName ? ` · 加入「${pending.departmentName}」` : ''),
             deadline: pending.expiredAt,
-            link: '/me/invitations/membership',
+            link: '/me/invitations/membership/' + pending.id,
           })
         }
       }
@@ -512,7 +635,7 @@ const personalHandlers: MockMethod[] = [
           return {
             id: a.id, type: 'application', title: `招新报名：${act?.title || a.activityId}`,
             description: `${act?.clubName || ''} · ${a.status === 'identity_anomaly' ? '身份异常待处理' : a.status === 'revision_requested' ? '补充材料待处理' : '报名审核中'}`,
-            submittedAt: a.submittedAt, link: `/explore/activities/${a.activityId}`,
+            submittedAt: a.submittedAt, link: `/activity/recruitment/${a.activityId}`,
             activityId: a.activityId, status: a.status,
           }
         })
@@ -522,11 +645,11 @@ const personalHandlers: MockMethod[] = [
           return {
             id: a.id, type: 'joint', title: `联合报名：${ja?.title || a.jointId}`,
             description: '联合活动报名进行中',
-            submittedAt: a.submittedAt, link: `/explore/activities/act-001`,
+            submittedAt: a.submittedAt, link: `/activity/joint/${a.jointId}`,
             activityId: '', status: a.status,
           }
         })
-      const items = [...recItems, ...jointItems].filter((i) => ['submitted', 'revision_requested', 'identity_anomaly', 'accepted', 'pending_selection'].includes(i.status))
+      const items = [...recItems, ...jointItems].filter((i) => ['submitted', 'revision_requested', 'identity_anomaly'].includes(i.status))
       return {
         code: 0,
         data: { items, nextCursor: null },
@@ -541,12 +664,23 @@ const personalHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      const applicantId = applicantIdOfUrl(url)
+      const recItems = (applicantId ? rdb.recruitmentApplications.filter((a) => a.applicantId === applicantId) : [])
+        .filter((a) => ['exited', 'not_qualified'].includes(a.status))
+        .map((a) => {
+          const act = rdb.findAnyActivity(a.activityId)
+          return {
+            id: 'his-' + a.id,
+            type: 'application',
+            title: `${act?.clubName || ''} ${act?.title || a.activityId}`,
+            result: a.status === 'not_qualified' ? '未通过' : '已退出',
+            completedAt: a.withdrawnAt || a.submittedAt || '',
+          }
+        })
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'his-1', type: 'application', title: '数学建模协会招新', result: '未录取', completedAt: '2024-09-20T15:00:00+08:00' },
-          ],
+          items: recItems,
           nextCursor: null,
         },
       }
@@ -560,14 +694,46 @@ const personalHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
+      const applicantId = applicantIdOfUrl(url)
+      const me = resolveMockUser(url)
+      const meId = me?.id || ''
+      const items = (applicantId ? rdb.recruitmentInterviews.filter((i) => i.applicantId === applicantId) : [])
+        .filter((i) => i.status === 'scheduled' || i.status === 'pending_selection')
+        .map((i) => {
+          const act = rdb.findAnyActivity(i.activityId)
+          const slot = act?.rounds.flatMap((r) => r.slots).find((s) => s.id === i.slotId)
+          return {
+            id: i.id,
+            title: i.roundId ? `第 ${i.roundId.replace('rd-', '')} 轮面试` : '面试',
+            activityTitle: act?.title || i.activityId,
+            time: slot?.startAt || i.startAt,
+            location: '待定',
+            interviewerName: i.interviewerIds.map((id) => mockUsers[id]?.name || '面试官').join('、') || '待定',
+            status: i.status,
+            role: 'applicant' as const,
+            applicantName: '',
+          }
+        })
+      const interviewerTasks = (meId ? rdb.recruitmentInterviews.filter((i) => i.interviewerIds.includes(meId)) : [])
+        .filter((i) => i.status === 'scheduled' || i.status === 'in_progress' || i.status === 'leave' || i.status === 'late')
+        .map((i) => {
+          const act = rdb.findAnyActivity(i.activityId)
+          const slot = act?.rounds.flatMap((r) => r.slots).find((s) => s.id === i.slotId)
+          return {
+            id: 't-' + i.id,
+            title: i.roundId ? `第 ${i.roundId.replace('rd-', '')} 轮面试官任务` : '面试官任务',
+            activityTitle: act?.title || i.activityId,
+            time: slot?.startAt || i.startAt,
+            location: '待定',
+            interviewerName: '',
+            status: i.status,
+            role: 'interviewer' as const,
+            applicantName: i.applicantName,
+          }
+        })
       return {
         code: 0,
-        data: {
-          items: [
-            { id: 'sch-1', title: '技术部面试', activityTitle: '2025秋季招新', time: '2025-08-03T14:00:00+08:00', location: '教学楼A301', interviewerName: '王浩然', status: 'scheduled' },
-          ],
-          nextCursor: null,
-        },
+        data: { items: [...items, ...interviewerTasks], nextCursor: null },
       }
     },
   },
@@ -581,24 +747,59 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
-      const list = db.listMembers(query.clubId)
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const scope = departmentScopeFor(user, query.clubId)
+      const all = db.listMembers(query.clubId)
+      const list = scope
+        ? all.filter((m) => m.positions.some((p) => p.status === 'active' && p.departmentName === scope))
+        : all
       const search = query.search
-      const items = search
+      const filtered = search
         ? list.filter((m) => m.name.includes(search) || m.studentId === search)
         : list
+      const activeMembers = list.filter((m) => m.status === 'active')
+      const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
+      const deptSource = scope ? db.departments.filter((d) => d.name === scope) : db.departments
+      const byDepartment = deptSource.map((d) => ({
+        id: d.id,
+        name: d.name,
+        count: activeMembers.filter((m) => m.positions.some((p) => p.departmentId === d.id && p.status === 'active')).length,
+      }))
+      const zeroDeptCount = activeMembers.filter((m) => !m.positions.some((p) => p.status === 'active')).length
+      const pendingCounts = {
+        departmentApply: db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review' && (!scope || a.targetDeptName === scope)).length,
+        appointments: db.appointmentCommands.filter((c) => c.clubId === query.clubId && (c.status === 'pending_exec' || c.status === 'initiator_lost_rights' || c.status === 'reconfirmed') && (!scope || c.departmentName === scope)).length,
+        transition: !scope && db.transitionState.candidates.length + db.transitionState.appointments.length > 0 && db.transitionState.executedAt === null ? 1 : 0,
+      }
       return {
         code: 0,
         data: {
-          items: items.map((m) => {
-            const active = m.positions.find((p) => p.status === 'active')
+          items: filtered.map((m) => {
+            const activePositions = m.positions.filter((p) => p.status === 'active')
             return {
               id: m.id, name: m.name, studentId: m.studentId,
-              department: active?.departmentName || '-', title: active?.title || '成员',
+              email: m.email, phone: m.phone,
+              positions: activePositions.map((p) => ({
+                departmentId: p.departmentId,
+                departmentName: p.departmentName,
+                title: p.title,
+                status: p.status,
+              })),
+              department: activePositions.map((p) => p.departmentName).join(' + ') || '待分配',
+              title: activePositions[0]?.title || '成员',
               status: m.status, joinedAt: m.joinedAt.slice(0, 10),
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
             }
           }),
+          stats: {
+            total: list.length,
+            active: activeMembers.length,
+            exited: exitedMembers.length,
+            byDepartment,
+            zeroDepartment: zeroDeptCount,
+          },
+          pendingCounts,
           nextCursor: null,
         },
       }
@@ -607,11 +808,14 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/department-apply',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const scope = departmentScopeFor(user, query.clubId)
+      const list = db.departmentApplications.filter((a) => a.clubId === query.clubId && (!scope || a.targetDeptName === scope))
       return {
         code: 0,
         data: {
-          items: db.departmentApplications.filter((a) => a.clubId === query.clubId).map((a) => ({
+          items: list.map((a) => ({
             id: a.id, applicantId: a.applicantId, applicantName: a.applicantName,
             type: a.type, currentDept: a.currentDept,
             targetDeptId: a.targetDeptId, targetDeptName: a.targetDeptName,
@@ -668,7 +872,11 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
+      const scope = departmentScopeFor(user, query.clubId)
       if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      const app = db.departmentApplications.find((a) => a.id === query.applicationId)
+      if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '申请不存在', supportId: 'MOCK' } }
+      if (scope && app.targetDeptName !== scope) return forbidden()
       const r = db.decideDepartmentApplication(query.applicationId, body.input?.decision === 'approve' ? 'approve' : 'reject', member.id, member.name, body.input?.rejectReason)
       if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { id: r.app?.id, status: r.app?.status } }
@@ -681,6 +889,9 @@ const memberHandlers: MockMethod[] = [
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       if (!canManageMembers(user, query.clubId)) return forbidden()
+      const scope = departmentScopeFor(user, query.clubId)
+      const app = db.departmentApplications.find((a) => a.id === query.applicationId)
+      if (scope && app && app.targetDeptName !== scope) return forbidden()
       const r = db.executeDepartmentApplication(query.applicationId)
       if (!r.ok) {
         if (r.app) return { code: 0, data: { id: r.app.id, status: r.app.status, failed: true, message: r.error } }
@@ -724,7 +935,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
-      if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      if (!member || !canManageMembersFull(user, query.clubId)) return forbidden()
       const r = db.createMembershipInvitation(query.clubId, {
         candidateId: body.input?.candidateId, departmentId: body.input?.departmentId || null,
         expireDays: body.input?.expireDays || 7, actorId: member.id, actorName: member.name,
@@ -739,7 +950,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canManageMembersFull(user, query.clubId)) return forbidden()
       const r = db.withdrawInvitation(query.invitationId)
       if (!r.ok) return businessError(r.error || '撤回失败')
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status, withdrawnAt: r.invitation?.withdrawnAt } }
@@ -763,6 +974,34 @@ const memberHandlers: MockMethod[] = [
               }))
             : [],
           nextCursor: null,
+        },
+      }
+    },
+  },
+  // 被邀请人：单条入社邀请详情（路由参数化后的入口）
+  {
+    url: '/api/me/invitations/membership/:invitationId',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const candidateId = actorCandidateId(user)
+      const inv = db.membershipInvitations.find((i) => i.id === query.invitationId)
+      if (!inv) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '邀请不存在', supportId: 'MOCK' } }
+      if (candidateId && inv.candidateId !== candidateId) return forbidden()
+      return {
+        code: 0,
+        data: {
+          id: inv.id,
+          clubId: inv.clubId,
+          clubName: '计算机协会',
+          candidateId: inv.candidateId,
+          candidateName: inv.candidateName,
+          departmentId: inv.departmentId,
+          departmentName: inv.departmentName,
+          status: inv.status,
+          sentAt: inv.sentAt,
+          expiredAt: inv.expiredAt,
+          acceptedAt: inv.acceptedAt,
         },
       }
     },
@@ -792,23 +1031,37 @@ const memberHandlers: MockMethod[] = [
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status } }
     },
   },
+  // 个人通知偏好
+  {
+    url: '/api/me/notifications/preferences',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    },
+  },
   // 任命/调岗/免职：候选成员 + 预约命令列表
   {
     url: '/api/org/:clubId/members/appointments',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const scope = departmentScopeFor(user, query.clubId)
+      const all = db.listMembers(query.clubId)
+      const candidates = scope
+        ? all.filter((m) => m.positions.some((p) => p.status === 'active' && p.departmentName === scope))
+        : all
       return {
         code: 0,
         data: {
-          items: db.listMembers(query.clubId)
+          items: candidates
             .filter((m) => m.status === 'active')
             .map((m) => {
               const active = m.positions.find((p) => p.status === 'active')
               return { id: m.id, name: m.name, studentId: m.studentId, department: active?.departmentName || '-', title: active?.title || '成员', status: m.status }
             }),
-          departments: db.departments,
-          titles: ['干事', '副部长', '部长', '副负责人'],
-          commands: db.appointmentCommands.filter((c) => c.clubId === query.clubId).map((c) => ({
+          departments: scope ? db.departments.filter((d) => d.name === scope) : db.departments,
+          titles: scope ? ['干事'] : ['干事', '副部长', '部长', '副负责人'],
+          commands: db.appointmentCommands.filter((c) => c.clubId === query.clubId && (!scope || c.departmentName === scope)).map((c) => ({
             id: c.id, action: c.action, memberId: c.memberId, memberName: c.memberName,
             departmentId: c.departmentId, departmentName: c.departmentName, title: c.title,
             scheduledAt: c.scheduledAt, status: c.status, createdAt: c.createdAt, createdBy: c.createdBy,
@@ -827,8 +1080,14 @@ const memberHandlers: MockMethod[] = [
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      const scope = departmentScopeFor(user, query.clubId)
       const target = db.findMember(query.clubId, body.input?.memberId)
       if (!target) return businessError('目标成员不存在')
+      if (scope) {
+        const inScope = target.positions.some((p) => p.status === 'active' && p.departmentName === scope)
+        if (!inScope) return forbidden()
+        if (body.input?.title && body.input.title !== '干事') return businessError('部门负责人仅可任命普通职位')
+      }
       const r = db.createAppointmentCommand(query.clubId, {
         action: body.input?.action as 'appoint' | 'transfer' | 'dismiss',
         memberId: target.id, memberName: target.name,
@@ -929,6 +1188,9 @@ const memberHandlers: MockMethod[] = [
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      const scope = departmentScopeFor(user, query.clubId)
+      const req = db.resignationRequests.find((r) => r.id === query.requestId)
+      if (scope && req && req.departmentName !== scope) return forbidden()
       const decision = body.input?.decision === 'approve' ? 'approve' : 'reject'
       const r = db.decideResignationRequest(query.requestId, decision, member.name)
       if (!r.ok) return businessError(r.error || '操作失败')
@@ -939,11 +1201,16 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/exit',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const scope = departmentScopeFor(user, query.clubId)
+      const list = db.listMembers(query.clubId).filter((m) =>
+        !scope || m.positions.some((p) => p.departmentName === scope),
+      )
       return {
         code: 0,
         data: {
-          items: db.listMembers(query.clubId).map((m) => {
+          items: list.map((m) => {
             const active = m.positions.find((p) => p.status === 'active')
             return {
               id: m.id, name: m.name, studentId: m.studentId,
@@ -952,7 +1219,7 @@ const memberHandlers: MockMethod[] = [
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
             }
           }),
-          resignations: db.resignationRequests.filter((r) => r.clubId === query.clubId),
+          resignations: db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope)),
           nextCursor: null,
         },
       }
@@ -962,14 +1229,17 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/exit',
     method: 'post',
-    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; reason?: string } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       if (!actor || !canManageMembers(user, query.clubId)) return forbidden()
       const memberId = body.input?.memberId
+      if (!body.input?.reason?.trim()) return businessError('移除成员必须填写原因')
       if (memberId === actor) return businessError('不能移除自己')
       const member = db.findMember(query.clubId, memberId)
       if (!member) return businessError('成员不存在')
+      const scope = departmentScopeFor(user, query.clubId)
+      if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden()
       if (db.isLastLeader(query.clubId, memberId)) return businessError('最后一名负责人不能无交接离任，请先安排交接')
       member.status = 'removed'
       member.exitedAt = new Date().toISOString()
@@ -1005,7 +1275,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { candidates?: { memberId: string; name: string; currentTitle: string; proposedTitle: string; department: string }[]; appointments?: { memberId: string; name: string; currentTitle: string; proposedTitle: string; department: string }[] } } }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canManageMembersFull(user, query.clubId)) return forbidden()
       if (body.input?.candidates) db.transitionState.candidates = body.input.candidates
       if (body.input?.appointments) db.transitionState.appointments = body.input.appointments
       return { code: 0, data: { saved: true } }
@@ -1017,7 +1287,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canManageMembersFull(user, query.clubId)) return forbidden()
       const t = db.transitionState
       if (t.executedAt) return businessError('换届已执行，请勿重复提交')
       if (t.candidates.length + t.appointments.length === 0) return businessError('无职位变化，无需执行换届')
@@ -1054,7 +1324,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canManageMembersFull(user, query.clubId)) return forbidden()
       const t = db.transitionState
       if (!t.executedAt) return businessError('换届尚未执行')
       let changed = false
@@ -1073,9 +1343,14 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/:memberId',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
       const member = db.getMemberProfile(query.clubId, query.memberId)
       if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '成员不存在', supportId: 'MOCK' } }
+      const scope = departmentScopeFor(user, query.clubId)
+      if (scope && !member.positions.some((p) => p.departmentName === scope)) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '成员不存在', supportId: 'MOCK' } }
+      }
       return {
         code: 0,
         data: {
@@ -1102,11 +1377,14 @@ const platformHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', status: 'approved', memberCount: 128, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-002', name: '电子设计协会', status: 'approved', memberCount: 86, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-004', name: '摄影协会', status: 'pending_review', memberCount: 0, createdAt: '2025-07-28', groupMapped: false },
-          ],
+          items: mockClubs.map((c) => ({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            memberCount: clubMemberCount(c.id),
+            createdAt: c.createdAt,
+            groupMapped: c.groupMapped,
+          })),
           nextCursor: null,
         },
       }
@@ -1170,17 +1448,71 @@ const platformHandlers: MockMethod[] = [
       return { code: 0, data: { ...body.input, version: 2, savedAt: new Date().toISOString() } }
     },
   },
-  // 批量操作执行
+  // 批量候选列表（受控批量：仅限 club:batch:execute 权限，复用招新申请里可在本批次执行的对象）
+  {
+    url: '/api/org/:clubId/batch/candidates',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:batch:execute')) return forbidden()
+      const items = rdb.recruitmentApplications
+        .filter((a) => a.clubId === query.clubId && ['submitted', 'revision_requested'].includes(a.status))
+        .map((a) => ({
+          id: a.applicantId,
+          name: a.applicantName,
+          studentId: a.studentId,
+          department: a.preferences[0]?.departmentName || '-',
+          status: a.status,
+        }))
+      return { code: 0, data: { items, nextCursor: null } }
+    },
+  },
+  // 批量操作面试官候选（assign_interviewer 目标选择）
+  {
+    url: '/api/org/:clubId/batch/interviewers',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:batch:execute')) return forbidden()
+      const items = Object.values(mockUsers)
+        .filter((u) => u.roles.some((r) => r.clubId === query.clubId && (r.permissions.includes('club:interview:view') || r.permissions.includes('club:recruitment:view'))))
+        .map((u) => ({ id: u.id, name: u.name }))
+      return { code: 0, data: { items } }
+    },
+  },
+  // 批量操作执行（鉴权 + 确定性逐项结果，替代此前 index 伪随机失败）
   {
     url: '/api/org/:clubId/batch/execute',
     method: 'post',
-    response: ({ body }: { body: { input: { memberIds: string[]; action: string } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberIds: string[]; action: string; interviewerId?: string } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:batch:execute')) return forbidden()
+      const action = body.input?.action
+      const memberIds = body.input?.memberIds || []
+      let results: { memberId: string; success: boolean; message: string }[]
+      if (action === 'assign_interviewer') {
+        const interviewerId = body.input?.interviewerId
+        results = memberIds.map((id: string) => {
+          const app = rdb.recruitmentApplications.find((a) => a.applicantId === id && a.clubId === query.clubId)
+          if (app?.status === 'identity_anomaly') return { memberId: id, success: false, message: '申请人存在身份异常，请先处理' }
+          const it = rdb.recruitmentInterviews.find((i) => i.activityId === app?.activityId && i.applicantId === id && ['scheduled', 'in_progress', 'leave', 'late'].includes(i.status))
+          if (!it) return { memberId: id, success: false, message: '申请人尚未排期面试，无法分配面试官' }
+          if (!interviewerId) return { memberId: id, success: false, message: '未指定面试官' }
+          it.interviewerIds = [interviewerId]
+          it.version += 1
+          return { memberId: id, success: true, message: '已分配面试官' }
+        })
+      } else {
+        results = memberIds.map((id: string) => {
+          const app = rdb.recruitmentApplications.find((a) => a.applicantId === id && a.clubId === query.clubId)
+          const blocked = app?.status === 'identity_anomaly'
+          return { memberId: id, success: !blocked, message: blocked ? '申请人存在身份异常，请先处理' : '成功' }
+        })
+      }
       return {
         code: 0,
         data: {
-          results: (body.input?.memberIds || []).map((id: string, i: number) => ({
-            memberId: id, success: i % 3 !== 2, message: i % 3 === 2 ? '目标职位已存在' : '成功',
-          })),
+          results,
           completedAt: new Date().toISOString(),
         },
       }
@@ -1205,6 +1537,26 @@ const platformHandlers: MockMethod[] = [
           fileId: query.fileId, status: 'downloaded',
           downloadUrl: '/mock-files/' + query.fileId,
           expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+      }
+    },
+  },
+  // 文件上传（FORM/REC：附件走此端点，3 秒后完成安全检查并返回 fileId）
+  {
+    url: '/api/files/upload',
+    method: 'post',
+    response: ({ body }: { body: { input?: { purpose?: string; name?: string } } }) => {
+      const fileId = 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+      const name = body.input?.name || 'upload.bin'
+      return {
+        code: 0,
+        data: {
+          fileId,
+          name,
+          size: 1024 * (8 + Math.floor(Math.random() * 32)),
+          mimeType: 'application/octet-stream',
+          status: 'clean',
+          uploadedAt: new Date().toISOString(),
         },
       }
     },
@@ -1264,7 +1616,7 @@ const platformHandlers: MockMethod[] = [
         { id: 'log-001', actorName: '张明远', action: '发布招新活动', targetType: '活动', targetId: 'act-001', detail: '2025 秋季招新', createdAt: '2025-08-01T10:30:00+08:00' },
         { id: 'log-002', actorName: '李思颖', action: '审批部门申请', targetType: '成员', targetId: 'mem-001', detail: '陈雨桐 技术->运营', createdAt: '2025-07-29T14:00:00+08:00' },
         { id: 'log-003', actorName: '王浩然', action: '提交评价', targetType: '申请', targetId: 'app-003', detail: '王梓涵 4分', createdAt: '2025-08-04T11:00:00+08:00' },
-        { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'inv-001', detail: '王梓涵 技术部', createdAt: '2025-08-04T12:00:00+08:00' },
+        { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'rinv-001', detail: '王梓涵 技术部', createdAt: '2025-08-04T12:00:00+08:00' },
       ]
       const search = query.search
       const items = search ? allLogs.filter((l) => l.actorName.includes(search) || l.action.includes(search) || l.detail.includes(search)) : allLogs
@@ -1299,9 +1651,9 @@ const platformHandlers: MockMethod[] = [
         code: 0,
         data: {
           policies: [
-            { id: 'rp-001', scope: '已退出成员数据', retentionDays: 365, action: 'auto_delete', status: 'active', updatedAt: '2025-07-01' },
-            { id: 'rp-002', scope: '过期招新活动', retentionDays: 730, action: 'archive', status: 'active', updatedAt: '2025-07-01' },
-            { id: 'rp-003', scope: '审计日志', retentionDays: 1095, action: 'keep', status: 'active', updatedAt: '2025-07-01' },
+            { id: 'rp-001', scope: '草稿及其附件', retentionDays: 30, action: 'clean', status: 'active', updatedAt: '2025-07-01' },
+            { id: 'rp-002', scope: '成功导出文件', retentionDays: 1, action: 'clean', status: 'active', updatedAt: '2025-07-01' },
+            { id: 'rp-003', scope: '正式业务数据（长期保留，不自动删除）', retentionDays: 36500, action: 'keep', status: 'active', updatedAt: '2025-07-01' },
           ],
           draftVersion: null,
         },
@@ -1314,6 +1666,14 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ body }: { body: { input: Record<string, unknown> } }) => {
       return { code: 0, data: { id: 'rp-draft-' + Date.now(), status: 'draft', updatedAt: new Date().toISOString(), ...body.input } }
+    },
+  },
+  // 发布保留策略（高风险）
+  {
+    url: '/api/admin/retention/:policyId/publish',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return { code: 0, data: { id: query.policyId, status: 'active', publishedAt: new Date().toISOString() } }
     },
   },
   // 正式删除执行
@@ -1349,22 +1709,29 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/stats',
     method: 'get',
-    response: () => {
+    response: ({ query }: { query: Record<string, string> }) => {
+      const members = db.listMembers(query.clubId)
+      const active = members.filter((m) => m.status === 'active')
+      const thisMonth = new Date().getMonth()
+      const deptCounts = new Map<string, number>()
+      active.forEach((m) =>
+        m.positions.filter((p) => p.status === 'active').forEach((p) => {
+          deptCounts.set(p.departmentName, (deptCounts.get(p.departmentName) || 0) + 1)
+        }),
+      )
+      const pendingApps = rdb.recruitmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'submitted').length
+      const pendingDept = db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review').length
+      const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === query.clubId && a.status === 'in_progress').length
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: 128, trend: 'up', trendValue: 12 },
-            { label: '本月新增', value: 8, trend: 'up', trendValue: 3 },
-            { label: '活跃招新', value: 1, trend: 'flat', trendValue: 0 },
-            { label: '待处理申请', value: 12, trend: 'down', trendValue: 5 },
+            { label: '总成员数', value: active.length, trend: 'flat', trendValue: 0 },
+            { label: '本月新增', value: members.filter((m) => new Date(m.joinedAt).getMonth() === thisMonth).length, trend: 'flat', trendValue: 0 },
+            { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
+            { label: '待处理申请', value: pendingApps + pendingDept, trend: 'flat', trendValue: 0 },
           ],
-          departmentDistribution: [
-            { name: '技术部', count: 45 },
-            { name: '运营部', count: 32 },
-            { name: '设计部', count: 28 },
-            { name: '人事部', count: 23 },
-          ],
+          departmentDistribution: [...deptCounts.entries()].map(([name, count]) => ({ name, count })),
         },
       }
     },
@@ -1402,7 +1769,7 @@ const platformHandlers: MockMethod[] = [
       setTimeout(() => {
         task.status = 'completed'
         task.completedAt = new Date().toISOString()
-        task.expiredAt = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString()
+        task.expiredAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
         task.downloadUrl = `#exp-${task.id}`
         task.fileSize = 1024 * (16 + Math.floor(Math.random() * 48))
       }, 3000)
@@ -1443,6 +1810,14 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
+  // 保存权限模板草稿
+  {
+    url: '/api/admin/config/permission-templates/:templateId/save',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { name?: string; permissions?: string[] } }) => {
+      return { code: 0, data: { id: query.templateId, name: body?.name || '未命名模板', permissions: body?.permissions || [], status: 'draft', savedAt: new Date().toISOString() } }
+    },
+  },
   // 发布权限模板
   {
     url: '/api/admin/config/permission-templates/:templateId/publish',
@@ -1451,12 +1826,88 @@ const platformHandlers: MockMethod[] = [
       return { code: 0, data: { id: query.templateId, status: 'published', publishedAt: new Date().toISOString() } }
     },
   },
+  // Casdoor Group 目录（接入向导：分层搜索 / 层级候选）
+  {
+    url: '/api/admin/casdoor/groups',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const under = query.under
+      if (under) {
+        const parent = casdoorGroups.find((g) => g.path === under)
+        if (!parent) return businessError('Group 不存在')
+        let kids = casdoorGroups.filter((g) => g.parentPath === parent.path)
+        if (query.kind) kids = kids.filter((g) => g.kind === query.kind)
+        return {
+          code: 0,
+          data: {
+            items: kids.map((g) => ({
+              id: g.id, path: g.path, name: g.name, parentPath: g.parentPath, kind: g.kind,
+              memberCount: g.memberCount, boundClubId: g.boundClubId,
+            })),
+          },
+        }
+      }
+      const items = query.keyword ? searchCasdoorGroups(query.keyword) : casdoorGroups.filter((g) => g.kind === 'club')
+      return {
+        code: 0,
+        data: {
+          items: items.map((g) => ({
+            id: g.id, path: g.path, name: g.name, parentPath: g.parentPath, kind: g.kind,
+            memberCount: g.memberCount, boundClubId: g.boundClubId,
+          })),
+        },
+      }
+    },
+  },
+  // 提交新社团接入向导（校验通过后进入待审核）
+  {
+    url: '/api/admin/clubs/wizard',
+    method: 'post',
+    response: ({ body }: { body: { input: { groupPath?: string; name?: string; description?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
+      const input = body.input ?? {}
+      const group = casdoorGroups.find((g) => g.path === input.groupPath)
+      if (!group) return businessError('所选 Group 不存在')
+      if (group.kind !== 'club') return businessError('仅社团级 Group 可接入，请选择社团类 Group')
+      if (group.boundClubId) return businessError('该 Group 已绑定其他社团（重复绑定）')
+      const name = (input.name ?? '').trim()
+      if (!name) return businessError('请填写社团名称')
+      if (mockClubs.some((c) => c.name === name)) return businessError('社团名称已存在，请检查用途唯一性')
+      if (!input.leaderRoleGroup) return businessError('启用前必须指定负责人职位 Group')
+      const leader = casdoorGroups.find((g) => g.path === input.leaderRoleGroup)
+      if (!leader || !leader.path.startsWith(group.path + '/')) return businessError('负责人职位 Group 不在所选社团层级下')
+      if (leader.kind !== 'role') return businessError('负责人职位必须是角色级 Group')
+      if (leader.memberCount < 1) return businessError('负责人职位 Group 中无有效负责人')
+      for (const p of input.deptGroups ?? []) {
+        const d = casdoorGroups.find((g) => g.path === p)
+        if (!d || !d.path.startsWith(group.path + '/') || d.kind !== 'dept') return businessError(`部门 Group「${p}」层级或类型不正确`)
+      }
+      for (const p of input.roleGroups ?? []) {
+        const r = casdoorGroups.find((g) => g.path === p)
+        if (!r || !r.path.startsWith(group.path + '/') || r.kind !== 'role') return businessError(`职位 Group「${p}」层级或类型不正确`)
+      }
+      const id = `club-${String(nextClubSeq++).padStart(3, '0')}`
+      mockClubs.push({
+        id,
+        name,
+        description: (input.description ?? '').trim(),
+        status: 'pending_review',
+        createdAt: new Date().toISOString().slice(0, 10),
+        groupMapped: true,
+      })
+      group.boundClubId = id
+      return { code: 0, data: { id, status: 'pending_review', pendingAt: new Date().toISOString() } }
+    },
+  },
   // 批准社团接入
   {
     url: '/api/admin/clubs/:clubId/approve',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
-      return { code: 0, data: { id: query.clubId, status: 'approved', approvedAt: new Date().toISOString() } }
+      const club = mockClubs.find((c) => c.id === query.clubId)
+      if (!club) return businessError('社团不存在')
+      if (club.status !== 'pending_review') return businessError(`当前状态「${club.status}」不允许批准`)
+      club.status = 'approved'
+      return { code: 0, data: { id: club.id, status: club.status, approvedAt: new Date().toISOString() } }
     },
   },
   // 拒绝社团接入
@@ -1464,7 +1915,63 @@ const platformHandlers: MockMethod[] = [
     url: '/api/admin/clubs/:clubId/reject',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
-      return { code: 0, data: { id: query.clubId, status: 'rejected', rejectedAt: new Date().toISOString() } }
+      const club = mockClubs.find((c) => c.id === query.clubId)
+      if (!club) return businessError('社团不存在')
+      if (club.status !== 'pending_review') return businessError(`当前状态「${club.status}」不允许拒绝`)
+      club.status = 'rejected'
+      return { code: 0, data: { id: club.id, status: club.status, rejectedAt: new Date().toISOString() } }
+    },
+  },
+  // 停用社团（approved -> suspended）
+  {
+    url: '/api/admin/clubs/:clubId/suspend',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const club = mockClubs.find((c) => c.id === query.clubId)
+      if (!club) return businessError('社团不存在')
+      if (club.status !== 'approved') return businessError(`当前状态「${club.status}」不允许停用，仅已批准社团可停用`)
+      club.status = 'suspended'
+      return { code: 0, data: { id: club.id, status: club.status, suspendedAt: new Date().toISOString() } }
+    },
+  },
+  // 紧急停用社团（approved -> emergency_suspended）
+  {
+    url: '/api/admin/clubs/:clubId/emergency-suspend',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const club = mockClubs.find((c) => c.id === query.clubId)
+      if (!club) return businessError('社团不存在')
+      if (club.status !== 'approved') return businessError(`当前状态「${club.status}」不允许紧急停用，仅已批准社团可紧急停用`)
+      club.status = 'emergency_suspended'
+      return { code: 0, data: { id: club.id, status: club.status, suspendedAt: new Date().toISOString() } }
+    },
+  },
+  // 恢复社团（suspended | emergency_suspended -> approved）
+  {
+    url: '/api/admin/clubs/:clubId/re-enable',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const club = mockClubs.find((c) => c.id === query.clubId)
+      if (!club) return businessError('社团不存在')
+      if (club.status !== 'suspended' && club.status !== 'emergency_suspended') {
+        return businessError(`当前状态「${club.status}」不允许恢复，仅停用或紧急停用中的社团可恢复`)
+      }
+      club.status = 'approved'
+      return { code: 0, data: { id: club.id, status: club.status, reEnabledAt: new Date().toISOString() } }
+    },
+  },
+  // 解除接入（approved | suspended | emergency_suspended -> removed）
+  {
+    url: '/api/admin/clubs/:clubId/revoke',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const club = mockClubs.find((c) => c.id === query.clubId)
+      if (!club) return businessError('社团不存在')
+      if (!['approved', 'suspended', 'emergency_suspended'].includes(club.status)) {
+        return businessError(`当前状态「${club.status}」不允许解除接入`)
+      }
+      club.status = 'removed'
+      return { code: 0, data: { id: club.id, status: club.status, revokedAt: new Date().toISOString() } }
     },
   },
   // 运维状态
@@ -1489,6 +1996,332 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
+// 管理员路由：配置
+  {
+    url: '/api/admin/config',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          clubName: 'RanaMinder 平台', clubDescription: '社团招新管理平台',
+          requireEmailVerification: true, requireProfileComplete: true,
+          maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/config',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, version: 2, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 管理员路由：统计
+  {
+    url: '/api/admin/stats',
+    method: 'get',
+    response: () => {
+      const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会', 'club-004': '摄影协会' }
+      const clubIds = Object.keys(clubNames)
+      const distribution = clubIds
+        .map((id) => ({ name: clubNames[id], count: db.listMembers(id).filter((m) => m.status === 'active').length }))
+        .filter((d) => d.count > 0)
+      const totalMembers = distribution.reduce((s, d) => s + d.count, 0)
+      const activeRec = rdb.recruitmentActivities.filter((a) => a.status === 'in_progress').length
+      return {
+        code: 0,
+        data: {
+          summary: [
+            { label: '总社团数', value: clubIds.length, trend: 'flat', trendValue: 0 },
+            { label: '总成员数', value: totalMembers, trend: 'flat', trendValue: 0 },
+            { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
+            { label: '待处理申请', value: rdb.recruitmentApplications.filter((a) => a.status === 'submitted').length, trend: 'flat', trendValue: 0 },
+          ],
+          departmentDistribution: distribution,
+        },
+      }
+    },
+  },
+  // 管理员路由：导出
+  {
+    url: '/api/admin/exports',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          items: [
+            { id: 'exp-003', clubId: 'club-001', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', expiredAt: '2025-08-02T10:00:00+08:00', downloadUrl: '#', fileSize: 32768 },
+          ],
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/exports',
+    method: 'post',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:export:execute')) return forbidden()
+      return {
+        code: 0,
+        data: {
+          id: 'exp-' + Date.now(), clubId: '', type: '全平台导出',
+          status: 'generating', createdAt: new Date().toISOString(),
+          completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/exports/:id/download',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return {
+        code: 0,
+        data: {
+          fileId: query.id, status: 'downloaded',
+          downloadUrl: '/mock-files/' + query.id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+      }
+    },
+  },
+  // 管理员：导出任务状态查询（用于轮询）
+  {
+    url: '/api/admin/exports/:id/status',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const task = exportTasks.find((t) => t.id === query.id)
+      if (!task) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '导出任务不存在', supportId: 'MOCK' } }
+      }
+      return {
+        code: 0,
+        data: {
+          id: task.id,
+          status: task.status,
+          downloadUrl: task.downloadUrl,
+          fileSize: task.fileSize,
+          completedAt: task.completedAt,
+          expiredAt: task.expiredAt,
+        },
+      }
+    },
+  },
+  // 管理员路由：审计日志
+  {
+    url: '/api/admin/audit/logs',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
+      const allLogs = [
+        { id: 'log-101', actorName: '超级管理员', action: '强制关闭联合活动', targetType: '联合活动', targetId: 'jnt-001', detail: '计算机+电子联合招新', createdAt: '2025-08-01T09:00:00+08:00' },
+        { id: 'log-102', actorName: '超级管理员', action: '批准社团接入', targetType: '社团', targetId: 'club-001', detail: '计算机协会', createdAt: '2025-07-01T10:00:00+08:00' },
+      ]
+      const search = query.search
+      const items = search ? allLogs.filter((l) => l.actorName.includes(search) || l.action.includes(search) || l.detail.includes(search)) : allLogs
+      return { code: 0, data: { items, nextCursor: null } }
+    },
+  },
+  // 管理员路由：事实纠错
+  {
+    url: '/api/admin/audit/corrections',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          items: [
+            { id: 'cor-003', targetType: '社团信息', targetId: 'club-002', reason: '社团名称有误', evidence: '审批文件', status: 'submitted', submittedAt: '2025-07-28T10:00:00+08:00', submitterName: '超级管理员' },
+          ],
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/audit/corrections',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: 'cor-' + Date.now(), status: 'submitted', submittedAt: new Date().toISOString(), ...body.input } }
+    },
+  },
+  {
+    url: '/api/admin/audit/corrections/:correctionId/decide',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
+      return {
+        code: 0,
+        data: { id: query.correctionId, status: body.input?.decision === 'approve' ? 'approved' : 'rejected', decidedAt: new Date().toISOString() },
+      }
+    },
+  },
+  {
+    url: '/api/admin/audit/corrections/:correctionId/withdraw',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return { code: 0, data: { id: query.correctionId, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+    },
+  },
+  // 管理员路由：邮件配置
+  {
+    url: '/api/admin/notifications/email-config',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          smtpHost: 'smtp.platform.edu.cn', smtpPort: 465, smtpUser: 'admin@platform.edu.cn',
+          fromName: 'RanaMinder 平台', encryption: 'ssl', verified: true,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/notifications/email-config',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, verified: true, savedAt: new Date().toISOString() } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/email-config/test',
+    method: 'post',
+    response: () => {
+      return { code: 0, data: { status: 'sent', sentAt: new Date().toISOString(), to: 'admin@platform.edu.cn' } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/email-config/rotate-key',
+    method: 'post',
+    response: () => {
+      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/preferences',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 管理员路由：表单
+  {
+    url: '/api/admin/forms/designer/:formId',
+    method: 'get',
+    response: () => {
+      return {
+        code: 0,
+        data: {
+          id: 'pform-001', title: '平台通用报名表', status: 'published',
+          fields: [
+            { id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null },
+            { id: 'f2', type: 'text', label: '学号', required: true, readonly: false, permission: 'read_write', options: null, description: null },
+            { id: 'f3', type: 'select', label: '意向社团', required: true, readonly: false, permission: 'read_write', options: ['计算机协会', '电子设计协会', '数学建模协会'], description: null },
+          ],
+          version: 3,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/forms/designer/:formId/save',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
+    },
+  },
+  {
+    url: '/api/admin/forms/:formId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return {
+        code: 0,
+        data: {
+          id: query.formId, title: '平台通用表单', status: 'published',
+          versions: [{
+            version: 1, status: 'published', publishedAt: '2025-07-01T10:00:00+08:00',
+            fields: [
+              { id: 'f1', type: 'text', label: '字段1', description: null, required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            ],
+          }],
+        },
+      }
+    },
+  },
+  {
+    url: '/api/admin/forms/versions/:formId/submit',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：导出下载
+  {
+    url: '/api/org/:clubId/exports/:id/download',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return {
+        code: 0,
+        data: {
+          fileId: query.id, status: 'downloaded',
+          downloadUrl: '/mock-files/' + query.id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        },
+      }
+    },
+  },
+  // 工作空间：导出任务状态查询（用于轮询）
+  {
+    url: '/api/org/:clubId/exports/:id/status',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const task = exportTasks.find((t) => t.id === query.id)
+      if (!task) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '导出任务不存在', supportId: 'MOCK' } }
+      }
+      return {
+        code: 0,
+        data: {
+          id: task.id,
+          status: task.status,
+          downloadUrl: task.downloadUrl,
+          fileSize: task.fileSize,
+          completedAt: task.completedAt,
+          expiredAt: task.expiredAt,
+        },
+      }
+    },
+  },
+  // 工作空间：邮件密钥轮换
+  {
+    url: '/api/org/:clubId/notifications/email-config/rotate-key',
+    method: 'post',
+    response: () => {
+      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：通知偏好
+  {
+    url: '/api/org/:clubId/notifications/preferences',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：表单版本提交
+  {
+    url: '/api/org/:clubId/forms/versions/:formId/submit',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
+    },
+  },
 ]
 
 /** 列表页补充 handlers */
@@ -1497,35 +2330,36 @@ const listHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/recruitment/list',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          items: [
-            { id: 'act-001', title: '2025 秋季招新', status: 'published', channelStatus: 'open', deadline: '2025-09-15T23:59:00+08:00', applicantCount: 45, createdAt: '2025-08-01T10:00:00+08:00' },
-            { id: 'act-003', title: '2025 春季补录', status: 'draft', channelStatus: 'closed', deadline: '2025-03-01T23:59:00+08:00', applicantCount: 0, createdAt: '2025-01-15T10:00:00+08:00' },
-            { id: 'act-004', title: '2024 秋季招新', status: 'closed', channelStatus: 'closed_final', deadline: '2024-09-15T23:59:00+08:00', applicantCount: 62, createdAt: '2024-08-20T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
-      }
+    response: ({ query }: { query: Record<string, string> }) => {
+      const items = rdb.listActivities(query.clubId).map((a) => ({
+        id: a.id,
+        title: a.title,
+        status: a.status === 'in_progress' ? 'published' : a.status,
+        channelStatus: a.channelStatus === 'not_open' ? 'closed' : a.channelStatus,
+        deadline: a.deadline,
+        applicantCount: a.applicantIds.length,
+        createdAt: a.createdAt,
+      }))
+      return { code: 0, data: { items, nextCursor: null } }
     },
   },
   // 联合活动列表
   {
     url: '/api/org/:clubId/joint/list',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          items: [
-            { id: 'jnt-001', title: '计算机+电子联合招新', status: 'published', channelStatus: 'open', participants: ['计算机协会', '电子设计协会'], applicantCount: 28, createdAt: '2025-08-01T10:00:00+08:00' },
-            { id: 'jnt-002', title: '设计+摄影联合招新', status: 'closed', channelStatus: 'closed_final', participants: ['设计协会', '摄影协会'], applicantCount: 15, createdAt: '2024-09-01T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
-      }
+    response: ({ query }: { query: Record<string, string> }) => {
+      const items = rdb.jointActivities
+        .filter((j) => j.clubs.some((c) => c.clubId === query.clubId))
+        .map((j) => ({
+          id: j.id,
+          title: j.title,
+          status: j.status,
+          channelStatus: j.channelStatus === 'not_open' ? 'closed' : j.channelStatus,
+          participants: j.clubs.map((c) => c.clubName),
+          applicantCount: j.applicantIds.length,
+          createdAt: j.createdAt,
+        }))
+      return { code: 0, data: { items, nextCursor: null } }
     },
   },
   // 表单列表
@@ -1571,22 +2405,15 @@ const listHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
-          items: [
-            {
-              id: 'jnt-001', title: '计算机+电子联合招新', status: 'published', participants: ['计算机协会', '电子设计协会'], applicantCount: 28, canForceClose: true,
-              clubs: [
-                { clubId: 'club-001', clubName: '计算机协会', suspended: false },
-                { clubId: 'club-002', clubName: '电子设计协会', suspended: false },
-              ],
-            },
-            {
-              id: 'jnt-002', title: '设计+摄影联合招新', status: 'closed', participants: ['设计协会', '摄影协会'], applicantCount: 15, canForceClose: false,
-              clubs: [
-                { clubId: 'club-004', clubName: '设计协会', suspended: true },
-                { clubId: 'club-005', clubName: '摄影协会', suspended: false },
-              ],
-            },
-          ],
+          items: rdb.jointActivities.map((j) => ({
+            id: j.id,
+            title: j.title,
+            status: j.status,
+            participants: j.clubs.map((c) => c.clubName),
+            applicantCount: j.applicantIds.length,
+            canForceClose: j.status === 'published',
+            clubs: j.clubs.map((c) => ({ clubId: c.clubId, clubName: c.clubName, suspended: c.status === 'force_suspended' })),
+          })),
           nextCursor: null,
         },
       }
@@ -1599,11 +2426,14 @@ const listHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'act-001', title: '2025 秋季招新', clubName: '计算机协会', status: 'published', applicantCount: 28, canForceComplete: true },
-            { id: 'act-002', title: '2025 设计部春招', clubName: '设计协会', status: 'closed', applicantCount: 12, canForceComplete: false },
-            { id: 'act-003', title: '2025 新媒体招新', clubName: '新媒体协会', status: 'draft', applicantCount: 0, canForceComplete: false },
-          ],
+          items: rdb.recruitmentActivities.map((a) => ({
+            id: a.id,
+            title: a.title,
+            clubName: a.clubName,
+            status: a.status === 'in_progress' ? 'published' : a.status,
+            applicantCount: a.applicantIds.length,
+            canForceComplete: a.status === 'in_progress',
+          })),
           nextCursor: null,
         },
       }

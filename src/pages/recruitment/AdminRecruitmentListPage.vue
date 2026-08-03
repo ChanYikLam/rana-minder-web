@@ -94,6 +94,7 @@ onMounted(loadData)
         :targets="target ? [{ id: target.id, label: target.title, detail: `${target.clubName} · ${target.applicantCount} 报名` }] : []"
         impact-summary="强制结束后活动进入平台强制结束状态，社团不可再恢复。"
         confirm-label="确认强制结束"
+        reauth-required
         :executing="busy"
         @confirm="handleForceComplete"
       >
