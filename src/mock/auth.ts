@@ -392,6 +392,13 @@ export const USER_MEMBER_MAP: Record<string, string> = {
   'user-deptleader-001': 'mem-006',
 }
 
+/** mock 用户 id → 候选人 id 映射（申请人视角操作者；通知/业务侧经此反查接收用户） */
+export const USER_APPLICANT_MAP: Record<string, string> = {
+  'user-applicant-001': 'u-001',
+  'user-applicant-002': 'u-002',
+  'user-applicant-003': 'u-006',
+}
+
 /** 获取当前用户的默认工作空间（有社团归属时返回） */
 export function getWorkspace(user: MockUser): { clubId: string; clubName: string; role: MockRole['role']; permissions: string[]; memberId?: string } | null {
   if (!user.currentClubId) return null

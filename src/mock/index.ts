@@ -2,6 +2,7 @@ import type { MockMethod } from './types'
 import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, mockUsers, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
+import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
@@ -555,7 +556,7 @@ const organizationHandlers: MockMethod[] = [
   },
 ]
 
-/** 通知处理器 */
+/** 通知处理器（动态内存库：业务操作实时 push，已读/未读真实落状态） */
 const notificationHandlers: MockMethod[] = [
   {
     url: '/api/notifications',
@@ -565,34 +566,35 @@ const notificationHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      const allItems = [
-        { id: 'ntf-001', type: 'application', title: '报名申请已提交', body: '您的报名申请已提交，请等待审核。', read: false, createdAt: '2025-08-01T10:00:00+08:00', link: '/me/todo' },
-        { id: 'ntf-002', type: 'interview', title: '面试已排期', body: '您的面试已安排，请查看日程。', read: false, createdAt: '2025-08-01T09:00:00+08:00', link: '/me/schedule' },
-        { id: 'ntf-003', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/rinv-001' },
-        { id: 'ntf-004', type: 'system', title: '系统维护通知', body: '系统将于本周六凌晨进行维护。', read: true, createdAt: '2025-07-30T18:00:00+08:00', link: null },
-      ]
-      const items = query.unreadOnly === 'true' ? allItems.filter((n) => !n.read) : allItems
+      const user = resolveMockUser(url)
+      const items = listNotifications(user.id, query.unreadOnly === 'true')
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
   {
     url: '/api/notifications/unread-count',
     method: 'get',
-    response: () => {
-      return { code: 0, data: { count: 3 } }
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      return { code: 0, data: { count: unreadCountOf(user.id) } }
     },
   },
   {
     url: '/api/notifications/:id/read',
     method: 'post',
-    response: () => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const id = decodeURIComponent(query.id ?? '')
+      markNotificationRead(user.id, id)
       return { code: 0, data: null }
     },
   },
   {
     url: '/api/notifications/read-all',
     method: 'post',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      markAllNotificationsRead(user.id)
       return { code: 0, data: null }
     },
   },
