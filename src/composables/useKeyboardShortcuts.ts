@@ -1,4 +1,4 @@
-﻿import { onMounted, onUnmounted, type Ref } from 'vue'
+import { onMounted, onUnmounted, type Ref } from 'vue'
 
 export interface KeyboardShortcut {
   key: string

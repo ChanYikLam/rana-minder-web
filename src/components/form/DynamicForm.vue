@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
 import { ref } from 'vue'
 import FieldPermission from './FieldPermission.vue'

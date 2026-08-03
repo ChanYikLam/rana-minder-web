@@ -37,10 +37,7 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "vue-demi"
-    ],
-    "overrides": {
-      "esbuild": ">=0.28.1"
-    }
+    ]
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -52,6 +49,7 @@
     "eslint": "^10.8.0",
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.8.0",
+    "happy-dom": "^20.11.1",
     "tailwindcss": "4.3.3",
     "typescript": "5.8.3",
     "typescript-eslint": "^8.65.0",
