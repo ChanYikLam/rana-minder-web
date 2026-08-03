@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import FieldPermission from './FieldPermission.vue'
 import AttachmentUpload from './AttachmentUpload.vue'
 import DateTimePicker from './DateTimePicker.vue'
@@ -16,6 +16,8 @@ const props = defineProps<{
   fieldErrors?: Record<string, string[]>
   versionPending?: boolean
   versionConflict?: boolean
+  resolvingConflict?: boolean
+  migratingVersion?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +28,9 @@ const emit = defineEmits<{
 
 const resolving = ref(false)
 const migrating = ref(false)
+
+const isResolving = computed(() => props.resolvingConflict ?? resolving.value)
+const isMigrating = computed(() => props.migratingVersion ?? migrating.value)
 
 function fieldValue(field: FormField): unknown {
   return props.modelValue[field.id]
@@ -118,13 +123,13 @@ function arrayItemValue(field: FormField, index: number, childId: string): strin
 }
 
 function handleResolveConflict() {
-  if (resolving.value) return
+  if (isResolving.value) return
   resolving.value = true
   emit('resolveConflict')
 }
 
 function handleMigrateVersion() {
-  if (migrating.value) return
+  if (isMigrating.value) return
   migrating.value = true
   emit('migrateVersion')
 }
@@ -143,11 +148,11 @@ const inputErrorClass = 'border-danger'
       </div>
       <button
         type="button"
-        :disabled="migrating"
+        :disabled="isMigrating"
         class="rounded-md bg-warning px-3 py-1.5 text-xs font-medium text-white hover:bg-warning/90 disabled:opacity-60"
         @click="handleMigrateVersion"
       >
-        {{ migrating ? '迁移中...' : '迁移到新版本' }}
+        {{ isMigrating ? '迁移中...' : '迁移到新版本' }}
       </button>
     </div>
 
@@ -159,11 +164,11 @@ const inputErrorClass = 'border-danger'
       </div>
       <button
         type="button"
-        :disabled="resolving"
+        :disabled="isResolving"
         class="rounded-md bg-danger px-3 py-1.5 text-xs font-medium text-white hover:bg-danger/90 disabled:opacity-60"
         @click="handleResolveConflict"
       >
-        {{ resolving ? '刷新中...' : '刷新数据' }}
+        {{ isResolving ? '刷新中...' : '刷新数据' }}
       </button>
     </div>
 

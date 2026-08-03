@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 .pnpm-store
+
+# Lock files (project uses pnpm)
+package-lock.json
+yarn.lock
