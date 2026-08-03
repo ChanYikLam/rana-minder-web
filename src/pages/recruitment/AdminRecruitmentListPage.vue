@@ -96,7 +96,7 @@ onMounted(loadData)
         confirm-label="确认强制结束"
         reauth-required
         :executing="busy"
-        :error="reasonError || null"
+        :error-message="reasonError || undefined"
         @confirm="handleForceComplete"
       >
         <template #extra>
@@ -105,7 +105,6 @@ onMounted(loadData)
             class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             placeholder="强制结束原因（必填）"
           />
-          <p v-if="reasonError" class="mt-2 text-xs text-destructive">{{ reasonError }}</p>
         </template>
       </HighRiskConfirm>
     </div>

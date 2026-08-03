@@ -5,6 +5,25 @@
 import { assertTransition } from './state-machines/transitions'
 import { mockUsers } from './auth'
 
+/** 申请人档案（applicantId → 姓名/学号）：申请人 id 为 u-xxx 域内编号，
+ * 与 auth.mockUsers 的 user-applicant-xxx 键不同，按申请人域自维护 */
+const APPLICANT_PROFILES: Record<string, { name: string; studentId: string }> = {
+  'u-001': { name: '刘子豪', studentId: '20240001' },
+  'u-002': { name: '陈雨桐', studentId: '20240002' },
+  'u-003': { name: '王梓涵', studentId: '20240003' },
+  'u-004': { name: '张博文', studentId: '20240004' },
+  'u-005': { name: '李欣怡', studentId: '20240005' },
+  'u-006': { name: '林婉婷', studentId: '20240006' },
+}
+
+export function applicantNameOf(applicantId: string): string {
+  return APPLICANT_PROFILES[applicantId]?.name || ''
+}
+
+export function applicantStudentIdOf(applicantId: string): string {
+  return APPLICANT_PROFILES[applicantId]?.studentId || ''
+}
+
 const now = () => new Date().toISOString()
 export function daysFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
@@ -563,7 +582,7 @@ export function interviewerTimeConflict(interviewerId: string, startAt: string, 
     if (!it.interviewerIds.includes(interviewerId)) continue
     if (['cancelled', 'invalidated'].includes(it.status)) continue
     if (it.startAt && it.endAt && overlaps(startAt, endAt, it.startAt, it.endAt)) {
-      return { conflict: true, detail: `面试官 ${mockUsers[interviewerId]?.name || interviewerId} 在该时段已有面试任务` }
+      return { conflict: true, detail: `面试官 ${mockUsers[interviewerId]?.name || applicantNameOf(interviewerId) || interviewerId} 在该时段已有面试任务` }
     }
   }
   return { conflict: false }
@@ -945,7 +964,7 @@ export function bookInterview(activityId: string, applicantId: string, roundId: 
     existing.version += 1
   } else {
     existing = {
-      id: 'int-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: mockUsers[applicantId]?.name || '',
+      id: 'int-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId),
       roundId, status: 'scheduled', slotId, startAt: slot.startAt, endAt: slot.endAt,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
       interviewerIds: interviewerIds || [],
@@ -1022,7 +1041,7 @@ export function skipRoundInterview(activityId: string, applicantId: string, roun
     if (slot) slot.taken = Math.max(0, slot.taken - 1)
   } else {
     recruitmentInterviews.push({
-      id: 'int-' + Date.now(), activityId, clubId: findAnyActivity(activityId)?.clubId || '', applicantId, applicantName: mockUsers[applicantId]?.name || '',
+      id: 'int-' + Date.now(), activityId, clubId: findAnyActivity(activityId)?.clubId || '', applicantId, applicantName: applicantNameOf(applicantId),
       roundId, status: 'cancelled', slotId: null, startAt: null, endAt: null,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null,
       skipReason: reason, cancelReason: null, interviewerIds: [], version: 1,
@@ -1041,7 +1060,7 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
   let app = findApplication(activityId, applicantId)
   if (!app) {
     app = {
-      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: mockUsers[applicantId]?.name || '', studentId: mockUsers[applicantId]?.studentId || '',
+      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
       status: 'draft', preferences: [], allowAdjustment: a.allowAdjustmentDefault, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
       recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
@@ -1078,7 +1097,7 @@ export function submitApplication(activityId: string, applicantId: string, input
   }
   if (!app) {
     app = {
-      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: mockUsers[applicantId]?.name || '', studentId: mockUsers[applicantId]?.studentId || '',
+      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
       status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
       recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,

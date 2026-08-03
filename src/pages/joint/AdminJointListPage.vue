@@ -130,7 +130,7 @@ onMounted(loadData)
         confirm-label="确认强制关闭"
         reauth-required
         :executing="busy"
-        :error="closeError || null"
+        :error-message="closeError || undefined"
         @confirm="handleForceClose"
       >
         <template #extra>
@@ -139,7 +139,6 @@ onMounted(loadData)
             class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             placeholder="强制关闭原因（必填）"
           />
-          <p v-if="closeError" class="mt-2 text-xs text-destructive">{{ closeError }}</p>
         </template>
       </HighRiskConfirm>
     </div>

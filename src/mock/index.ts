@@ -367,7 +367,7 @@ const mockClubs: { id: string; name: string; description: string; status: string
   { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'approved', createdAt: '2022-09-01', groupMapped: true },
   { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', status: 'approved', createdAt: '2022-09-01', groupMapped: true },
   { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'approved', createdAt: '2023-03-15', groupMapped: true },
-  { id: 'club-004', name: '摄影协会', description: '摄影艺术与后期制作', status: 'pending_review', createdAt: '2025-07-28', groupMapped: false },
+  { id: 'club-004', name: '摄影协会', description: '摄影艺术与后期制作', status: 'approved', createdAt: '2025-07-28', groupMapped: true },
 ]
 
 const clubMemberCount = (id: string) => db.getMemberStats(id).total
@@ -2138,10 +2138,9 @@ const platformHandlers: MockMethod[] = [
     url: '/api/admin/stats',
     method: 'get',
     response: () => {
-      const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会', 'club-004': '摄影协会' }
-      const clubIds = Object.keys(clubNames)
-      const distribution = clubIds
-        .map((id) => ({ name: clubNames[id], count: db.listMembers(id).filter((m) => m.status === 'active').length }))
+      const clubs = mockClubs.filter((c) => c.status === 'approved')
+      const distribution = clubs
+        .map((c) => ({ name: c.name, count: db.listMembers(c.id).filter((m) => m.status === 'active').length }))
         .filter((d) => d.count > 0)
       const totalMembers = distribution.reduce((s, d) => s + d.count, 0)
       const activeRec = rdb.recruitmentActivities.filter((a) => a.status === 'in_progress').length
@@ -2149,7 +2148,7 @@ const platformHandlers: MockMethod[] = [
         code: 0,
         data: {
           summary: [
-            { label: '总社团数', value: clubIds.length, trend: 'flat', trendValue: 0 },
+            { label: '总社团数', value: clubs.length, trend: 'flat', trendValue: 0 },
             { label: '总成员数', value: totalMembers, trend: 'flat', trendValue: 0 },
             { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
             { label: '待处理申请', value: rdb.recruitmentApplications.filter((a) => a.status === 'submitted').length, trend: 'flat', trendValue: 0 },

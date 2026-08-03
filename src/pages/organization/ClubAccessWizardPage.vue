@@ -142,15 +142,13 @@ async function getGroupByPath(path: string): Promise<CasdoorGroupRow | null> {
 async function submit() {
   importing.value = true
   const result = await post<{ id: string; status: string }>('/admin/clubs/wizard', {
-    input: {
-      groupPath: selectedGroup.value?.path,
-      name: form.value.name,
-      description: form.value.description,
-      email: form.value.email,
-      deptGroups: form.value.deptGroups,
-      roleGroups: form.value.roleGroups,
-      leaderRoleGroup: form.value.leaderRoleGroup,
-    },
+    groupPath: selectedGroup.value?.path,
+    name: form.value.name,
+    description: form.value.description,
+    email: form.value.email,
+    deptGroups: form.value.deptGroups,
+    roleGroups: form.value.roleGroups,
+    leaderRoleGroup: form.value.leaderRoleGroup,
   })
   importing.value = false
   if (result.kind === 'completed') {

@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf } from './db-recruitment'
+/** 申请人档案（u-xxx 域内编号 → 姓名/学号），用于新申请/新面试自动填充 */
+describe('申请人档案填充', () => {
+  it('按 u-xxx 申请人编号解析姓名与学号', () => {
+    expect(applicantNameOf('u-001')).toBe('刘子豪')
+    expect(applicantStudentIdOf('u-003')).toBe('20240003')
+    expect(applicantNameOf('u-999')).toBe('')
+  })
+
+  it('submitApplication 新申请自动填充姓名与学号', () => {
+    const result = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(result.ok, result.error || '').toBe(true)
+    const app = recruitmentApplications.find((a) => a.applicantId === 'u-006')
+    expect(app?.applicantName).toBe('林婉婷')
+    expect(app?.studentId).toBe('20240006')
+    const idx = recruitmentApplications.findIndex((a) => a.applicantId === 'u-006')
+    if (idx >= 0) recruitmentApplications.splice(idx, 1)
+  })
+})
 /** PRD-OPT-013：明确面试官任务硬冲突检测 */
 describe('面试官任务冲突检测', () => {
   const act = 'act-001'
