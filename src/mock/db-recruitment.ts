@@ -6,7 +6,7 @@ import { assertTransition } from './state-machines/transitions'
 import { mockUsers } from './auth'
 
 const now = () => new Date().toISOString()
-function daysFromNow(days: number): string {
+export function daysFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 /** 面试时段：以起点加 1 小时为终点，保证区间检测（overlaps）有效 */
@@ -100,6 +100,7 @@ export interface RecInterview {
   invalidReason: string | null
   skipReason: string | null
   cancelReason: string | null
+  interviewerIds: string[]
   version: number
 }
 
@@ -426,6 +427,7 @@ export const recruitmentInterviews: RecInterview[] = [
     applicantId: 'u-001', applicantName: '刘子豪', roundId: 'rd-001',
     status: 'scheduled', slotId: 'slot-001', startAt: daysFromNow(35), endAt: plusHours(daysFromNow(35), 1),
     actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+    interviewerIds: ['user-interviewer-001'],
     version: 1,
   },
   {
@@ -434,6 +436,7 @@ export const recruitmentInterviews: RecInterview[] = [
     status: 'completed', slotId: 'slot-001', startAt: daysFromNow(35), endAt: plusHours(daysFromNow(35), 1),
     actualStartAt: daysFromNow(35), actualEndAt: daysFromNow(35), attendance: 'present',
     invalidReason: null, skipReason: null, cancelReason: null,
+    interviewerIds: ['user-interviewer-001'],
     version: 2,
   },
 ]
@@ -908,7 +911,7 @@ export function cancelRound(activityId: string, roundId: string, reason: string)
 }
 
 /** 预约/改期面试：申请人本人或管理员；原子释放旧时段+占用新时段；全局冲突校验 */
-export function bookInterview(activityId: string, applicantId: string, roundId: string, slotId: string, actorId: string, actorIsAdmin: boolean): { ok: boolean; error?: string; data?: RecInterview } {
+export function bookInterview(activityId: string, applicantId: string, roundId: string, slotId: string, actorId: string, actorIsAdmin: boolean, interviewerIds?: string[]): { ok: boolean; error?: string; data?: RecInterview } {
   void actorId
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
@@ -944,6 +947,7 @@ export function bookInterview(activityId: string, applicantId: string, roundId: 
       id: 'int-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: mockUsers[applicantId]?.name || '',
       roundId, status: 'scheduled', slotId, startAt: slot.startAt, endAt: slot.endAt,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+      interviewerIds: interviewerIds || [],
       version: 1,
     }
     recruitmentInterviews.push(existing)
@@ -1020,7 +1024,7 @@ export function skipRoundInterview(activityId: string, applicantId: string, roun
       id: 'int-' + Date.now(), activityId, clubId: findAnyActivity(activityId)?.clubId || '', applicantId, applicantName: mockUsers[applicantId]?.name || '',
       roundId, status: 'cancelled', slotId: null, startAt: null, endAt: null,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null,
-      skipReason: reason, cancelReason: null, version: 1,
+      skipReason: reason, cancelReason: null, interviewerIds: [], version: 1,
     })
   }
   return ok()

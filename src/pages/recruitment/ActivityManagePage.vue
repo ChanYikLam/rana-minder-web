@@ -436,6 +436,7 @@ onMounted(loadDetail)
         impact-summary="操作后活动状态不可自行恢复；取消仅限未发出邀请的活动。"
         confirm-label="确认执行"
         :executing="actionLoading"
+        :error="actionError || null"
         @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
       />
     </div>

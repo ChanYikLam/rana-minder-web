@@ -96,6 +96,7 @@ onMounted(loadData)
         confirm-label="确认强制结束"
         reauth-required
         :executing="busy"
+        :error="reasonError || null"
         @confirm="handleForceComplete"
       >
         <template #extra>

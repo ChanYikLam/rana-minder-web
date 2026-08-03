@@ -130,6 +130,7 @@ onMounted(loadData)
         confirm-label="确认强制关闭"
         reauth-required
         :executing="busy"
+        :error="closeError || null"
         @confirm="handleForceClose"
       >
         <template #extra>
