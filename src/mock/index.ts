@@ -167,6 +167,7 @@ const identityHandlers: MockMethod[] = [
     url: '/api/auth/logout',
     method: 'delete',
     response: () => {
+      clearMockSession()
       return { code: 0, data: null }
     },
   },
@@ -1555,7 +1556,7 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
-  // 统计数据（部门负责人按本部门范围过滤）
+  // 统计数据（部门负责人按本部门范围过滤，summary 同步按部门口径）
   {
     url: '/api/org/:clubId/stats',
     method: 'get',
@@ -1568,14 +1569,21 @@ const platformHandlers: MockMethod[] = [
         { name: '设计部', count: 28 },
         { name: '人事部', count: 23 },
       ]
+      const deptSummary: Record<string, { monthlyNew: number; pending: number }> = {
+        技术部: { monthlyNew: 3, pending: 4 },
+        运营部: { monthlyNew: 2, pending: 3 },
+        设计部: { monthlyNew: 2, pending: 2 },
+        人事部: { monthlyNew: 1, pending: 3 },
+      }
+      const dept = scope ? deptSummary[scope] : undefined
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: 128, trend: 'up', trendValue: 12 },
-            { label: '本月新增', value: 8, trend: 'up', trendValue: 3 },
+            { label: '总成员数', value: dept ? (distribution.find((d) => d.name === scope)?.count ?? 0) : 128, trend: 'up', trendValue: dept ? 2 : 12 },
+            { label: '本月新增', value: dept?.monthlyNew ?? 8, trend: 'up', trendValue: dept ? 1 : 3 },
             { label: '活跃招新', value: 1, trend: 'flat', trendValue: 0 },
-            { label: '待处理申请', value: 12, trend: 'down', trendValue: 5 },
+            { label: '待处理申请', value: dept?.pending ?? 12, trend: 'down', trendValue: dept ? 1 : 5 },
           ],
           departmentDistribution: scope ? distribution.filter((d) => d.name === scope) : distribution,
         },

@@ -20,7 +20,7 @@ export interface SideNavGroup {
 }
 
 /** 构建某社团的 L3 模块导航（按权限过滤） */
-export function buildClubGroups(clubId: string, canAccess: (p?: string) => boolean): SideNavGroup[] {
+export function buildClubGroups(clubId: string, canAccess: (p?: string, permissionAny?: string[]) => boolean): SideNavGroup[] {
   const base = `/org/${clubId}`
   const groups: SideNavGroup[] = [
     {

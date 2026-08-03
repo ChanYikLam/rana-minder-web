@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && vue-tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
     "@lucide/vue": "1.28.0",
