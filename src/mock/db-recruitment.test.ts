@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
+import { mockUsers, USER_APPLICANT_MAP } from './auth'
 import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, recruitmentActivities, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
+/** 身份域（auth.mockUsers）与业务域（db-recruitment APPLICANT_PROFILES）同实体姓名/学号必须一致 */
+describe('申请人档案跨域一致性', () => {
+  it('USER_APPLICANT_MAP 每个映射的姓名与学号与业务域档案一致', () => {
+    for (const [userId, applicantId] of Object.entries(USER_APPLICANT_MAP)) {
+      const user = Object.values(mockUsers).find((u) => u.id === userId)
+      expect(user, `mockUsers 缺少 ${userId}`).toBeTruthy()
+      expect(applicantNameOf(applicantId), `${userId} → ${applicantId} 姓名不一致`).toBe(user!.name)
+      expect(applicantStudentIdOf(applicantId), `${userId} → ${applicantId} 学号不一致`).toBe(user!.studentId)
+    }
+  })
+})
 /** 申请人档案（u-xxx 域内编号 → 姓名/学号），用于新申请/新面试自动填充 */
 describe('申请人档案填充', () => {
   it('按 u-xxx 申请人编号解析姓名与学号', () => {

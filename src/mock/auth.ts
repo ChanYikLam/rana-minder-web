@@ -289,7 +289,7 @@ export const mockUsers: Record<string, MockUser> = {
   applicant3: {
     id: 'user-applicant-003',
     studentId: '20240006',
-    name: '孙一凡',
+    name: '林婉婷',
     email: 'applicant3@example.edu.cn',
     phone: '13800000003',
     avatar: null,
