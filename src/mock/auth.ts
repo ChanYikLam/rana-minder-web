@@ -347,15 +347,6 @@ export const DEMO_ROLES: DemoRoleInfo[] = Object.entries(mockUsers).map(([key, u
   }
 })
 
-export function resolveMockSessionUser(url: string): MockUser | null {
-  const u = new URL(url, 'http://localhost')
-  const requestedKey = u.searchParams.get('_mock_user')
-  if (requestedKey && mockUsers[requestedKey]) {
-    activeMockUserKey = requestedKey
-  }
-  return activeMockUserKey ? mockUsers[activeMockUserKey] : null
-}
-
 export function clearMockSession(): void {
   activeMockUserKey = null
 }
@@ -364,11 +355,17 @@ export function getActiveMockUser(): MockUser | null {
   return activeMockUserKey ? mockUsers[activeMockUserKey] : null
 }
 
-/** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换） */
+/** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换）
+ * 带参请求（如登录后的 session 拉取）会锚定 activeMockUserKey，
+ * 使后续不带参数的请求解析到同一登录角色，直到退出登录。 */
 export function resolveMockUser(url: string): MockUser {
   try {
     const u = new URL(url, 'http://localhost')
-    const key = u.searchParams.get('_mock_user') || activeMockUserKey || 'leader'
+    const requested = u.searchParams.get('_mock_user')
+    if (requested && mockUsers[requested]) {
+      activeMockUserKey = requested
+    }
+    const key = requested || activeMockUserKey || 'leader'
     return mockUsers[key] || mockUsers.leader
   } catch {
     return mockUsers.leader
