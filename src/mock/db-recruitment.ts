@@ -1058,8 +1058,6 @@ export function skipRoundInterview(activityId: string, applicantId: string, roun
 export function saveApplicationDraft(activityId: string, applicantId: string, input: { answers?: Record<string, unknown> }): { ok: boolean; error?: string; data?: RecApplication } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
-  const t = assertTransition('SM-REC-003', 'draft', 'draft', 'submit')
-  void t
   let app = findApplication(activityId, applicantId)
   if (!app) {
     app = {
@@ -1070,6 +1068,10 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     }
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
+  } else if (app.status === 'submitted') {
+    const t = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
+    if (!t.ok) return err(t.reason || '已提交申请当前不可编辑')
+    app.status = 'draft'
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
   app.version += 1
@@ -1108,13 +1110,22 @@ export function submitApplication(activityId: string, applicantId: string, input
     recruitmentApplications.push(app)
     a.applicantIds.push(app.id)
   }
-  const fromStatus = app.status === 'exited' ? 'exited' : app.status
-  const event = app.status === 'exited' ? 'recovery_resubmit'
-    : app.status === 'revision_requested' ? 'submit_in_window'
-    : inAdjustment && app.status === 'submitted' ? 'rule_tightening'
-    : 'submit'
-  const t = assertTransition('SM-REC-003', fromStatus, 'submitted', event)
-  if (!t.ok) return err(t.reason || '当前申请状态不可提交')
+  let okResult: { ok: boolean; reason?: string }
+  if (app.status === 'exited') {
+    okResult = assertTransition('SM-REC-003', 'exited', 'submitted', 'recovery_resubmit')
+  } else if (app.status === 'revision_requested') {
+    okResult = assertTransition('SM-REC-003', 'revision_requested', 'submitted', 'submit_in_window')
+  } else if (inAdjustment && app.status === 'submitted') {
+    okResult = assertTransition('SM-REC-003', 'submitted', 'submitted', 'rule_tightening')
+  } else if (app.status === 'submitted') {
+    okResult = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
+    if (okResult.ok) {
+      okResult = assertTransition('SM-REC-003', 'draft', 'submitted', 'submit')
+    }
+  } else {
+    okResult = assertTransition('SM-REC-003', app.status, 'submitted', 'submit')
+  }
+  if (!okResult.ok) return err(okResult.reason || '当前申请状态不可提交')
   app.status = 'submitted'
   app.preferences = input.preferences.map((p, i) => {
     const d = a.departments.find((x) => x.id === p.departmentId)!
