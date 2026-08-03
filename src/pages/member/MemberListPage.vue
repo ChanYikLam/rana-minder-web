@@ -197,12 +197,14 @@ const deptSeries = computed<ChartSeries[]>(() =>
           <p class="text-sm text-text-secondary mt-1">当前关系来自 Casdoor Group；本系统记录任期、异动与审批历史。</p>
         </div>
         <div v-if="canManage" class="flex flex-wrap gap-2">
-          <button
-            class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover"
-            @click="router.push(`/org/${route.params.clubId}/members/appointments`)"
-          >
-            <UserPlus :size="15" /> 任命调岗
-          </button>
+          <PermissionGuard permission="club:appointment:manage" scope="workspace">
+            <button
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover"
+              @click="router.push(`/org/${route.params.clubId}/members/appointments`)"
+            >
+              <UserPlus :size="15" /> 任命调岗
+            </button>
+          </PermissionGuard>
           <PermissionGuard permission="club:invite:manage" scope="workspace">
             <button
               class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
@@ -294,7 +296,7 @@ const deptSeries = computed<ChartSeries[]>(() =>
           </div>
           <button class="mt-3 w-full h-8 rounded-md border border-border text-xs text-primary hover:bg-primary-subtle" @click.stop="router.push(`/org/${route.params.clubId}/members/department-apply`)">去审批</button>
         </Card>
-        <Card v-if="workspace.hasPermission('club:member:manage')" class="!p-4 cursor-pointer transition-colors hover:border-primary" @click="router.push(`/org/${route.params.clubId}/members/appointments`)">
+        <Card v-if="workspace.hasPermission('club:appointment:manage')" class="!p-4 cursor-pointer transition-colors hover:border-primary" @click="router.push(`/org/${route.params.clubId}/members/appointments`)">
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-text-primary">预约管理命令</p>

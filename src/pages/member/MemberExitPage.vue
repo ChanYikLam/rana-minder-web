@@ -190,8 +190,8 @@ onMounted(loadData)
         </div>
       </Card>
 
-      <!-- 辞职审批 -->
-      <PermissionGuard permission="club:member:manage" scope="workspace">
+      <!-- 辞职审批（仅社团负责人/人事可见） -->
+      <PermissionGuard permission="club:resignation:approve" scope="workspace">
         <div v-if="resignations.length > 0" class="mb-6">
           <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
             <FileText :size="18" /> 辞职申请审批

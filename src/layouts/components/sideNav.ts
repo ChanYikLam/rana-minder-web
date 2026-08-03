@@ -53,7 +53,7 @@ export function buildClubGroups(clubId: string, canAccess: (p?: string) => boole
         { label: '成员列表', path: `${base}/members`, permission: 'club:member:manage' },
         { label: '部门关系申请', path: `${base}/members/department-apply`, permission: 'club:member:manage' },
         { label: '常规入社邀请', path: `${base}/members/invite`, permission: 'club:invite:manage' },
-        { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:member:manage' },
+        { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:appointment:manage' },
         { label: '成员退出与移除', path: `${base}/members/exit`, permission: 'club:member:manage' },
         { label: '换届管理', path: `${base}/members/transition`, permission: 'club:transition:manage' },
       ],

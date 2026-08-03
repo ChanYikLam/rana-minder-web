@@ -73,6 +73,16 @@ function canManageMembersFull(user: MockUser, clubId: string): boolean {
   return user.roles.find((r) => r.clubId === clubId)?.role !== 'department_leader'
 }
 
+/** 任命/调岗/免职（P-MEM-04，仅社团负责人/人事可发起与执行） */
+function canAppointments(user: MockUser, clubId: string): boolean {
+  return getPermissions(user, clubId).includes('club:appointment:manage')
+}
+
+/** 辞职申请审批（MEM-005，仅社团负责人/人事可查看与审批） */
+function canApproveResignation(user: MockUser, clubId: string): boolean {
+  return getPermissions(user, clubId).includes('club:resignation:approve')
+}
+
 /** 导出任务（内存态；POST 创建后模拟异步完成） */
 interface ExportTask { id: string; clubId: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number; scope: string; includeContact: boolean; includeFiles: boolean }
 const exportTasks: ExportTask[] = [
@@ -936,6 +946,7 @@ const memberHandlers: MockMethod[] = [
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const clubRole = user.roles.find((r) => r.clubId === query.clubId)?.role
       // 任命层级（03-社团组织与权限）：人事不可任命负责人级职位，部门负责人仅本部门普通职位
@@ -973,7 +984,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
-      if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      if (!member || !canAppointments(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const clubRole = user.roles.find((r) => r.clubId === query.clubId)?.role
       const target = db.findMember(query.clubId, body.input?.memberId)
@@ -1006,7 +1017,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const r = db.cancelAppointmentCommand(query.commandId)
       if (!r.ok) return businessError(r.error || '取消失败')
       return { code: 0, data: { id: query.commandId, status: 'cancelled' } }
@@ -1018,7 +1029,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { scheduledAt?: string } } }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const r = db.reconfirmAppointmentCommand(query.commandId, body.input?.scheduledAt || new Date().toISOString())
       if (!r.ok) return businessError(r.error || '重新确认失败')
       return { code: 0, data: { id: query.commandId, status: 'reconfirmed' } }
@@ -1030,7 +1041,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const r = db.executeAppointmentCommand(query.commandId)
       if (!r.ok) {
         if (r.command) return { code: 0, data: { id: r.command.id, status: r.command.status, failed: true, message: r.error } }
@@ -1045,7 +1056,7 @@ const memberHandlers: MockMethod[] = [
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canApproveResignation(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       return {
         code: 0,
@@ -1089,7 +1100,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
-      if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      if (!member || !canApproveResignation(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const req = db.resignationRequests.find((r) => r.id === query.requestId)
       if (scope && req && req.departmentName !== scope) return forbidden()
@@ -1122,7 +1133,9 @@ const memberHandlers: MockMethod[] = [
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
             }
           }),
-          resignations: db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope)),
+          resignations: canApproveResignation(user, query.clubId)
+            ? db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope))
+            : [],
           nextCursor: null,
         },
       }
