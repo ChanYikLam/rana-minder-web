@@ -1,5 +1,6 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
+import { ref } from 'vue'
 import FieldPermission from './FieldPermission.vue'
 import AttachmentUpload from './AttachmentUpload.vue'
 import DateTimePicker from './DateTimePicker.vue'
@@ -22,6 +23,9 @@ const emit = defineEmits<{
   'resolveConflict': []
   'migrateVersion': []
 }>()
+
+const resolving = ref(false)
+const migrating = ref(false)
 
 function fieldValue(field: FormField): unknown {
   return props.modelValue[field.id]
@@ -56,17 +60,20 @@ function toggleCheckbox(field: FormField, opt: string, checked: boolean) {
 function arrayItems(field: FormField): Array<{ id: string; index: number }> {
   const val = fieldValue(field)
   if (Array.isArray(val)) {
-    return val.map((_item: unknown, index: number) => ({
-      id: `${field.id}-${index}`,
-      index,
-    }))
+    return val.map((item: unknown, index: number) => {
+      const row = item as Record<string, unknown> | null
+      return {
+        id: (row?._uid as string) || `${field.id}-${index}`,
+        index,
+      }
+    })
   }
   return []
 }
 
 function addArrayItem(field: FormField) {
   const current = Array.isArray(fieldValue(field)) ? [...(fieldValue(field) as unknown[])] : []
-  current.push({})
+  current.push({ _uid: crypto.randomUUID() })
   updateField(field, current)
 }
 
@@ -86,10 +93,6 @@ function arrayChildFields(field: FormField): FormField[] {
   if (!field.arrayFieldTemplateId) return []
   return props.fields
     .filter((f) => f.arrayFieldTemplateId === field.id)
-    .map((f) => ({
-      ...f,
-      id: f.id.split('.').slice(1).join('.'),
-    }))
 }
 
 function getFieldErrors(fieldId: string): string[] {
@@ -114,6 +117,18 @@ function arrayItemValue(field: FormField, index: number, childId: string): strin
   return ''
 }
 
+function handleResolveConflict() {
+  if (resolving.value) return
+  resolving.value = true
+  emit('resolveConflict')
+}
+
+function handleMigrateVersion() {
+  if (migrating.value) return
+  migrating.value = true
+  emit('migrateVersion')
+}
+
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60'
 const inputErrorClass = 'border-danger'
 </script>
@@ -128,10 +143,11 @@ const inputErrorClass = 'border-danger'
       </div>
       <button
         type="button"
-        class="rounded-md bg-warning px-3 py-1.5 text-xs font-medium text-white hover:bg-warning/90"
-        @click="$emit('migrateVersion')"
+        :disabled="migrating"
+        class="rounded-md bg-warning px-3 py-1.5 text-xs font-medium text-white hover:bg-warning/90 disabled:opacity-60"
+        @click="handleMigrateVersion"
       >
-        迁移到新版本
+        {{ migrating ? '迁移中...' : '迁移到新版本' }}
       </button>
     </div>
 
@@ -143,10 +159,11 @@ const inputErrorClass = 'border-danger'
       </div>
       <button
         type="button"
-        class="rounded-md bg-danger px-3 py-1.5 text-xs font-medium text-white hover:bg-danger/90"
-        @click="$emit('resolveConflict')"
+        :disabled="resolving"
+        class="rounded-md bg-danger px-3 py-1.5 text-xs font-medium text-white hover:bg-danger/90 disabled:opacity-60"
+        @click="handleResolveConflict"
       >
-        刷新数据
+        {{ resolving ? '刷新中...' : '刷新数据' }}
       </button>
     </div>
 
@@ -287,6 +304,16 @@ const inputErrorClass = 'border-danger'
 
         <p v-if="field.description" class="text-xs text-text-secondary">{{ field.description }}</p>
 
+        <p
+          v-for="(msg, ei) in getFieldErrors(field.id)"
+          :id="`dyn-err-${field.id}-${ei}`"
+          :key="ei"
+          class="text-xs text-danger"
+          role="alert"
+        >
+          {{ msg }}
+        </p>
+
         <div v-if="arrayItems(field).length === 0" class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-text-secondary">
           暂无内容，点击「添加」新增一条记录
         </div>
@@ -310,18 +337,25 @@ const inputErrorClass = 'border-danger'
 
           <div class="space-y-3">
             <div v-for="child in arrayChildFields(field)" :key="child.id" class="space-y-1">
-              <label class="text-xs font-medium text-text-secondary">
+              <label
+                class="text-xs font-medium text-text-secondary"
+                :for="`dyn-${field.id}-${item.id}-${child.id}`"
+              >
                 {{ child.label }}
                 <span v-if="child.required" class="text-danger">*</span>
               </label>
 
               <textarea
                 v-if="child.type === 'textarea'"
+                :id="`dyn-${field.id}-${item.id}-${child.id}`"
+                :class="[getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 ? inputErrorClass : '']"
                 class="w-full rounded-md border border-border bg-elevated px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 rows="2"
                 :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
+                :aria-invalid="getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 || undefined"
+                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.index}.${child.id}`)"
                 @input="(e: Event) => {
                   const row = { ...((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>) }
                   row[child.id] = (e.target as HTMLTextAreaElement).value
@@ -331,11 +365,15 @@ const inputErrorClass = 'border-danger'
 
               <input
                 v-else-if="child.type === 'number'"
+                :id="`dyn-${field.id}-${item.id}-${child.id}`"
                 type="number"
+                :class="[getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 ? inputErrorClass : '']"
                 class="w-full h-10 rounded-md border border-border bg-elevated px-3 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
+                :aria-invalid="getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 || undefined"
+                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.index}.${child.id}`)"
                 @input="(e: Event) => {
                   const row = { ...((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>) }
                   row[child.id] = Number((e.target as HTMLInputElement).value)
@@ -345,17 +383,31 @@ const inputErrorClass = 'border-danger'
 
               <input
                 v-else
+                :id="`dyn-${field.id}-${item.id}-${child.id}`"
                 type="text"
+                :class="[getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 ? inputErrorClass : '']"
                 class="w-full h-10 rounded-md border border-border bg-elevated px-3 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
+                :aria-invalid="getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 || undefined"
+                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.index}.${child.id}`)"
                 @input="(e: Event) => {
                   const row = { ...((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>) }
                   row[child.id] = (e.target as HTMLInputElement).value
                   updateArrayItem(field, item.index, row)
                 }"
               />
+
+              <p
+                v-for="(msg, ei) in getFieldErrors(`${field.id}.${item.index}.${child.id}`)"
+                :id="`dyn-err-${field.id}.${item.index}.${child.id}-${ei}`"
+                :key="ei"
+                class="text-xs text-danger"
+                role="alert"
+              >
+                {{ msg }}
+              </p>
             </div>
           </div>
         </div>

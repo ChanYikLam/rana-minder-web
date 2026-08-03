@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, type Ref } from 'vue'
+﻿import { onMounted, onUnmounted, type Ref } from 'vue'
 
 export interface KeyboardShortcut {
   key: string
@@ -7,7 +7,6 @@ export interface KeyboardShortcut {
   alt?: boolean
   description: string
   handler: () => void
-  scope?: 'global' | 'modal' | 'page'
 }
 
 export interface UseKeyboardShortcutsOptions {
@@ -38,6 +37,7 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
   }
 
   function onKeydown(event: KeyboardEvent) {
+    if (event.repeat) return
     if (enabled && !enabled.value) return
     if (shouldIgnore(event)) return
 

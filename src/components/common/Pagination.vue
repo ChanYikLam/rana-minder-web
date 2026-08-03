@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 
@@ -19,7 +19,7 @@ const emit = defineEmits<{
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
 
 const pages = computed(() => {
-  const result: Array<number | 'ellipsis'> = []
+  const result: Array<number | 'left-ellipsis' | 'right-ellipsis'> = []
   const tp = totalPages.value
   const cur = props.current
   const mv = props.maxVisible
@@ -39,7 +39,7 @@ const pages = computed(() => {
 
   if (start > 1) {
     result.push(1)
-    if (start > 2) result.push('ellipsis')
+    if (start > 2) result.push('left-ellipsis')
   }
 
   for (let i = start; i <= end; i++) {
@@ -47,7 +47,7 @@ const pages = computed(() => {
   }
 
   if (end < tp) {
-    if (end < tp - 1) result.push('ellipsis')
+    if (end < tp - 1) result.push('right-ellipsis')
     result.push(tp)
   }
 
@@ -72,8 +72,8 @@ function goTo(page: number) {
       <span aria-hidden="true">&laquo;</span>
     </Button>
 
-    <template v-for="page in pages" :key="page">
-      <span v-if="page === 'ellipsis'" class="px-2 text-text-secondary">&hellip;</span>
+    <template v-for="(page, i) in pages" :key="i">
+      <span v-if="typeof page === 'string'" class="px-2 text-text-secondary">&hellip;</span>
       <Button
         v-else
         :variant="page === current ? 'default' : 'ghost'"

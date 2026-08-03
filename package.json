@@ -37,13 +37,17 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "vue-demi"
-    ]
+    ],
+    "overrides": {
+      "esbuild": ">=0.28.1"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "^26.1.2",
     "@vitejs/plugin-vue": "6.0.8",
+    "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "0.7.0",
     "eslint": "^10.8.0",
     "eslint-plugin-vue": "^10.10.0",
