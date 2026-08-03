@@ -1559,6 +1559,30 @@ const platformHandlers: MockMethod[] = [
       return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
     },
   },
+  // 文件详情（FORM/REC：FilePreviewPage 打开前先取元数据）
+  {
+    url: '/api/files/:fileId',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const fileId = query.fileId
+      if (!fileId.startsWith('file-')) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+      }
+      return {
+        code: 0,
+        data: {
+          id: fileId,
+          name: '报名附件.pdf',
+          size: 1024 * (8 + Math.floor(Math.random() * 32)),
+          mimeType: 'application/octet-stream',
+          status: 'clean',
+          uploadedAt: new Date().toISOString(),
+          checkedAt: new Date().toISOString(),
+          downloadUrl: null,
+        },
+      }
+    },
+  },
   // 文件下载
   {
     url: '/api/files/:fileId/download',
@@ -1633,6 +1657,52 @@ const platformHandlers: MockMethod[] = [
   // 撤回事实纠错
   {
     url: '/api/org/:clubId/audit/corrections/:correctionId/withdraw',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      return { code: 0, data: { id: query.correctionId, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+    },
+  },
+  // 个人中心：我的纠错列表（本人提交的纠错，数据与社团版共用）
+  {
+    url: '/api/me/corrections',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      const submitterName = user.name
+      return {
+        code: 0,
+        data: {
+          items: [
+            { id: 'cor-001', targetType: '申请记录', targetId: 'app-003', reason: '评分有误，应为 5 分', evidence: '截图', status: 'submitted', submittedAt: '2025-07-30T10:00:00+08:00', submitterName },
+            { id: 'cor-002', targetType: '成员信息', targetId: 'mem-002', reason: '部门信息未更新', evidence: '审批截图', status: 'approved', submittedAt: '2025-07-25T10:00:00+08:00', submitterName },
+          ],
+          nextCursor: null,
+        },
+      }
+    },
+  },
+  // 个人中心：发起事实纠错
+  {
+    url: '/api/me/corrections',
+    method: 'post',
+    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+      return { code: 0, data: { id: 'cor-' + Date.now(), status: 'submitted', submittedAt: new Date().toISOString(), ...body.input } }
+    },
+  },
+  // 个人中心：处理事实纠错（批准/拒绝）
+  {
+    url: '/api/me/corrections/:correctionId/decide',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
+      return {
+        code: 0,
+        data: { id: query.correctionId, status: body.input?.decision === 'approve' ? 'approved' : 'rejected', decidedAt: new Date().toISOString() },
+      }
+    },
+  },
+  // 个人中心：撤回事实纠错
+  {
+    url: '/api/me/corrections/:correctionId/withdraw',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
       return { code: 0, data: { id: query.correctionId, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
