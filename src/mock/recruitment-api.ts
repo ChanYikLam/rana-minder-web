@@ -234,12 +234,12 @@ const recHandlers: MockMethod[] = [
       })
     },
   },
-  // 活动列表（管理视角）
+  // 活动列表（管理视角；面试职能角色可读，创建/编辑仍限负责人与人事）
   {
     url: '/api/org/:clubId/recruitment',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const items = rdb.listActivities(query.clubId).map((a) => ({
         id: a.id, clubId: a.clubId, title: a.title, status: a.status, channelStatus: a.channelStatus,
         deadline: a.deadline, applicantCount: a.applicantIds.length, createdAt: a.createdAt,
@@ -260,12 +260,12 @@ const recHandlers: MockMethod[] = [
       return result(r)
     },
   },
-  // 活动详情（管理视角）
+  // 活动详情（管理视角；面试职能角色可读，更新仍限负责人与人事）
   {
     url: '/api/org/:clubId/recruitment/:activityId',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const a = rdb.findActivity(query.clubId, query.activityId)
       if (!a) return notFound('活动不存在')
       return ok({
@@ -761,6 +761,8 @@ const recHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const me = actorInfo(url)
+      const isManager = canManageRec(url, query.clubId)
       const items = rdb.recruitmentApplications
         .filter((a) => a.activityId === query.activityId && a.status !== 'draft')
         .map((app) => {
@@ -773,11 +775,15 @@ const recHandlers: MockMethod[] = [
           if (anyPublished) status = 'published'
           else if (review || rating) status = 'concluded'
           else if (anyEvaluating) status = 'evaluating'
+          // REC-015: 面试官首次提交本人评语前，不得看到同轮他人评分/评语
+          const visible = isManager || (review ? review.authorId === me.memberId : false)
           return {
             id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
             departmentName: app.preferences[0]?.departmentName || '', status,
-            rating: rating || null, comment: review?.comment || '',
-            concludedAt: review?.updatedAt || null, concludedBy: review?.authorName || null,
+            rating: visible ? rating : null,
+            comment: visible ? (review?.comment || '') : '',
+            concludedAt: visible ? (review?.updatedAt || null) : null,
+            concludedBy: visible ? (review?.authorName || null) : null,
           }
         })
       return ok({ items, nextCursor: null })

@@ -5,7 +5,8 @@ import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useWriteGuard } from '@/composables/useWriteGuard'
 
 interface Props {
-  permission: string
+  /** 单个权限串或权限串数组（任一命中即可） */
+  permission: string | string[]
   scope?: 'session' | 'workspace'
   fallback?: 'hide' | 'disable'
   disableReason?: string
@@ -25,10 +26,16 @@ const workspaceStore = useWorkspaceContextStore()
 const { canWrite, writeDisabledReason } = useWriteGuard()
 
 const hasPermission = computed(() => {
-  if (props.scope === 'workspace') {
-    return workspaceStore.hasPermission(props.permission)
+  const check = (permission: string) => {
+    if (props.scope === 'workspace') {
+      return workspaceStore.hasPermission(permission)
+    }
+    return sessionStore.hasPermission(permission)
   }
-  return sessionStore.hasPermission(props.permission)
+  if (Array.isArray(props.permission)) {
+    return props.permission.some(check)
+  }
+  return check(props.permission)
 })
 
 /** 写操作门禁：资料门未通过时也禁用 */

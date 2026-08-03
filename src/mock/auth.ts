@@ -83,6 +83,7 @@ export const mockUsers: Record<string, MockUser> = {
           'club:audit:view',
           'club:config:manage',
           'club:batch:execute',
+          'club:email:config',
         ],
       },
       {
@@ -129,6 +130,7 @@ export const mockUsers: Record<string, MockUser> = {
           'club:member:manage',
           'club:invite:manage',
           'club:transition:manage',
+          'club:form:design',
           'club:stats:view',
           'club:export:execute',
           'club:audit:view',
@@ -182,6 +184,10 @@ export const mockUsers: Record<string, MockUser> = {
         permissions: [
           'club:dashboard:view',
           'club:member:manage',
+          'club:interview:view',
+          'club:interview:evaluate',
+          'club:stats:view',
+          'club:export:execute',
         ],
       },
     ],

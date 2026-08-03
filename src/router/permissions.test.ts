@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { workspacePermissionForRoute, ADMIN_PERMISSIONS } from './permissions'
+import { workspacePermissionForRoute, ADMIN_PERMISSIONS, INTERVIEW_ACCESS_PERMISSIONS } from './permissions'
 
 describe('ADMIN_PERMISSIONS', () => {
   it('maps all admin route names to a permission', () => {
@@ -33,6 +33,23 @@ describe('workspacePermissionForRoute', () => {
     expect(workspacePermissionForRoute('P-FORM-list')).toBe('club:form:design')
     expect(workspacePermissionForRoute('P-STAT-01')).toBe('club:stats:view')
     expect(workspacePermissionForRoute('P-AUD-02')).toBe('club:audit:view')
+  })
+
+  it('maps recruitment list/detail/review to interview access union (SRS 7.4 / ORG-037)', () => {
+    expect(workspacePermissionForRoute('P-REC-list')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
+    expect(workspacePermissionForRoute('P-REC-02')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
+    expect(workspacePermissionForRoute('P-REC-05')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
+  })
+
+  it('keeps recruitment manage-only routes gated by club:recruitment:manage', () => {
+    expect(workspacePermissionForRoute('P-REC-01')).toBe('club:recruitment:manage')
+    expect(workspacePermissionForRoute('P-REC-02-applications')).toBe('club:recruitment:manage')
+    expect(workspacePermissionForRoute('P-REC-04-manage')).toBe('club:recruitment:manage')
+    expect(workspacePermissionForRoute('P-REC-06-manage')).toBe('club:recruitment:manage')
+  })
+
+  it('maps club email config to club:email:config (leader only, SRS 7.3)', () => {
+    expect(workspacePermissionForRoute('P-NTF-02-club')).toBe('club:email:config')
   })
 
   it('returns null for unknown route names', () => {

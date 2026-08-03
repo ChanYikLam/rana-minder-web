@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
@@ -115,9 +116,11 @@ onMounted(loadData)
             <p class="text-xs text-text-secondary mt-0.5">发现于 {{ formatDate(an.createdAt) }}</p>
           </div>
         </div>
-        <button class="mt-3 px-3 h-8 rounded-md border border-warning text-warning text-xs hover:bg-warning-subtle" @click="router.push(`/org/${route.params.clubId}/audit/corrections`)">
-          去处理
-        </button>
+        <PermissionGuard permission="club:audit:view" scope="workspace">
+          <button class="mt-3 px-3 h-8 rounded-md border border-warning text-warning text-xs hover:bg-warning-subtle" @click="router.push(`/org/${route.params.clubId}/audit/corrections`)">
+            去处理
+          </button>
+        </PermissionGuard>
       </Card>
 
       <!-- 部门经历 -->

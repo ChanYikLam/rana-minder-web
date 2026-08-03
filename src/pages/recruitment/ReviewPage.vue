@@ -199,7 +199,12 @@ onMounted(loadReviews)
                 placeholder="填写评价内容..."
               />
             </div>
-            <PermissionGuard permission="club:interview:evaluate" fallback="disable" disable-reason="无面试评价权限">
+            <PermissionGuard
+              :permission="['club:interview:evaluate', 'club:recruitment:manage']"
+              scope="workspace"
+              fallback="disable"
+              disable-reason="无面试评价权限"
+            >
               <button
                 class="w-full h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
                 :disabled="submitting || rating === 0"

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import SyncIndicator from '@/components/common/SyncIndicator.vue'
 import { FilterPanel, type FilterField, type FilterOption } from '@/components/display'
 import { StatChart, type ChartSeries } from '@/components/display'
@@ -202,12 +203,14 @@ const deptSeries = computed<ChartSeries[]>(() =>
           >
             <UserPlus :size="15" /> 任命调岗
           </button>
-          <button
-            class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
-            @click="router.push(`/org/${route.params.clubId}/members/invite`)"
-          >
-            <Mail :size="15" /> 入社邀请
-          </button>
+          <PermissionGuard permission="club:invite:manage" scope="workspace">
+            <button
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+              @click="router.push(`/org/${route.params.clubId}/members/invite`)"
+            >
+              <Mail :size="15" /> 入社邀请
+            </button>
+          </PermissionGuard>
           <button
             class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
             @click="router.push(`/org/${route.params.clubId}/members/department-apply`)"
@@ -220,12 +223,14 @@ const deptSeries = computed<ChartSeries[]>(() =>
           >
             <LogOut :size="15" /> 退出移除
           </button>
-          <button
-            class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
-            @click="router.push(`/org/${route.params.clubId}/members/transition`)"
-          >
-            <RefreshCw :size="15" /> 换届管理
-          </button>
+          <PermissionGuard permission="club:transition:manage" scope="workspace">
+            <button
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+              @click="router.push(`/org/${route.params.clubId}/members/transition`)"
+            >
+              <RefreshCw :size="15" /> 换届管理
+            </button>
+          </PermissionGuard>
         </div>
       </div>
 
