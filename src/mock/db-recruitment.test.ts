@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, recruitmentActivities, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
 /** 申请人档案（u-xxx 域内编号 → 姓名/学号），用于新申请/新面试自动填充 */
 describe('申请人档案填充', () => {
   it('按 u-xxx 申请人编号解析姓名与学号', () => {
@@ -157,6 +157,31 @@ describe('评价提交链路（REC-014/015）', () => {
     expect(locked.error).toContain('关闭')
     const okOpen = submitReview('act-001', 'u-004', { comment: '未关闭轮次评价', rating: 4, authorId: 'mem-c', authorName: '作者丙', authorRole: 'club_leader', roundId: 'rd-001' })
     expect(okOpen.ok).toBe(true)
+  })
+})
+
+describe('状态机事件名对齐（SM-REC-003/SM-REC-005）', () => {
+  it('请假/迟到/缺席后重排走 rearrange 事件（而非 reschedule）', () => {
+    const first = bookInterview('act-001', 'u-008', 'rd-001', 'slot-001', '', true, [])
+    expect(first.ok).toBe(true)
+    const marked = markAttendance(first.data!.id, 'leave', true)
+    expect(marked.ok).toBe(true)
+    const rearranged = bookInterview('act-001', 'u-008', 'rd-001', 'slot-002', '', true, [])
+    expect(rearranged.ok, rearranged.error || '').toBe(true)
+    expect(rearranged.data?.status).toBe('scheduled')
+  })
+
+  it('补充材料请求后重提走 submit_in_window 事件（而非 submit）', () => {
+    const act = recruitmentActivities.find((a) => a.id === 'act-001')!
+    act.channelStatus = 'open'
+    act.status = 'in_progress'
+    const req = requestSupplement('act-001', 'u-001', '请补充获奖证明', new Date(Date.now() + 3600_000).toISOString())
+    expect(req.ok).toBe(true)
+    const app = recruitmentApplications.find((x) => x.id === 'app-001')!
+    expect(app.status).toBe('revision_requested')
+    const resubmit = submitApplication('act-001', 'u-001', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: true })
+    expect(resubmit.ok, resubmit.error || '').toBe(true)
+    expect(resubmit.data?.status).toBe('submitted')
   })
 })
 

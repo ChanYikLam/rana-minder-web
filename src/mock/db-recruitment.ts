@@ -943,7 +943,10 @@ export function bookInterview(activityId: string, applicantId: string, roundId: 
   if (slot.taken >= slot.capacity) return err('该时段已满员')
   let existing = recruitmentInterviews.find((i) => i.activityId === activityId && i.applicantId === applicantId && i.roundId === roundId && i.status !== 'cancelled' && i.status !== 'invalidated')
   if (existing) {
-    const t = assertTransition('SM-REC-005', existing.status, 'scheduled', 'reschedule')
+    const event = existing.status === 'scheduled' ? 'reschedule'
+      : ['leave', 'late', 'absent', 'invalidated'].includes(existing.status) ? 'rearrange'
+      : 'select'
+    const t = assertTransition('SM-REC-005', existing.status, 'scheduled', event)
     if (!t.ok) return err(t.reason || '当前面试记录不可改期')
   }
   const conflict = applicantTimeConflict(applicantId, slot.startAt, slot.endAt, existing?.id)
@@ -1106,7 +1109,10 @@ export function submitApplication(activityId: string, applicantId: string, input
     a.applicantIds.push(app.id)
   }
   const fromStatus = app.status === 'exited' ? 'exited' : app.status
-  const event = app.status === 'exited' ? 'recovery_resubmit' : inAdjustment && app.status === 'submitted' ? 'rule_tightening' : 'submit'
+  const event = app.status === 'exited' ? 'recovery_resubmit'
+    : app.status === 'revision_requested' ? 'submit_in_window'
+    : inAdjustment && app.status === 'submitted' ? 'rule_tightening'
+    : 'submit'
   const t = assertTransition('SM-REC-003', fromStatus, 'submitted', event)
   if (!t.ok) return err(t.reason || '当前申请状态不可提交')
   app.status = 'submitted'
