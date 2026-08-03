@@ -234,12 +234,12 @@ const recHandlers: MockMethod[] = [
       })
     },
   },
-  // 活动列表（管理视角）
+  // 活动列表（管理视角；面试职能角色可读，创建/编辑仍限负责人与人事）
   {
     url: '/api/org/:clubId/recruitment',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const items = rdb.listActivities(query.clubId).map((a) => ({
         id: a.id, clubId: a.clubId, title: a.title, status: a.status, channelStatus: a.channelStatus,
         deadline: a.deadline, applicantCount: a.applicantIds.length, createdAt: a.createdAt,
@@ -260,12 +260,12 @@ const recHandlers: MockMethod[] = [
       return result(r)
     },
   },
-  // 活动详情（管理视角）
+  // 活动详情（管理视角；面试职能角色可读，更新仍限负责人与人事）
   {
     url: '/api/org/:clubId/recruitment/:activityId',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const a = rdb.findActivity(query.clubId, query.activityId)
       if (!a) return notFound('活动不存在')
       return ok({
@@ -761,23 +761,39 @@ const recHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const me = actorInfo(url)
+      const isManager = canManageRec(url, query.clubId)
       const items = rdb.recruitmentApplications
         .filter((a) => a.activityId === query.activityId && a.status !== 'draft')
         .map((app) => {
-          const review = rdb.recruitmentReviews.find((r) => r.activityId === query.activityId && r.applicantId === app.applicantId)
+          // REC-015: 隔离基于"本人是否已提交评语"；评分/评语均取自本人那条 review
+          const myReview = rdb.recruitmentReviews.find(
+            (r) => r.activityId === query.activityId && r.applicantId === app.applicantId && r.authorId === me.memberId,
+          )
+          // 负责人/人事：展示最近一条已提交评价
+          const latestReview = isManager
+            ? [...rdb.recruitmentReviews.filter((r) => r.activityId === query.activityId && r.applicantId === app.applicantId)]
+                .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+            : undefined
+          const shown = isManager ? latestReview : myReview
           const paths = Object.values(app.paths || {})
           const anyPublished = paths.some((p) => p.publishedAt)
           const anyEvaluating = paths.some((p) => p.status === 'evaluating')
-          const rating = reviewRating(query.activityId, app.applicantId)
           let status = 'pending'
           if (anyPublished) status = 'published'
-          else if (review || rating) status = 'concluded'
+          else if (shown) status = 'concluded'
           else if (anyEvaluating) status = 'evaluating'
+          // REC-015: 面试官首次提交本人评语前，不得看到同轮他人评分/评语/结论状态
+          const visible = isManager || !!myReview
           return {
             id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
-            departmentName: app.preferences[0]?.departmentName || '', status,
-            rating: rating || null, comment: review?.comment || '',
-            concludedAt: review?.updatedAt || null, concludedBy: review?.authorName || null,
+            departmentName: app.preferences[0]?.departmentName || '', status: visible ? status : 'pending',
+            rating: visible ? (shown?.rating || 0) : null,
+            comment: visible ? (shown?.comment || '') : '',
+            concludedAt: visible ? (shown?.updatedAt || null) : null,
+            concludedBy: visible ? (shown?.authorName || null) : null,
+            myRating: myReview?.rating ?? null,
+            myComment: myReview?.comment ?? null,
           }
         })
       return ok({ items, nextCursor: null })
@@ -800,10 +816,10 @@ const recHandlers: MockMethod[] = [
       const me = actorInfo(url)
       const r = rdb.submitReview(query.activityId, app.applicantId, {
         comment: input.comment || '',
+        rating: Number(input.rating) || 0,
         authorId: me.memberId || '', authorName: me.name, authorRole: me.role,
       })
       if (!r.ok) return businessError(r.error || '提交失败')
-      setReviewRating(query.activityId, app.applicantId, Number(input.rating) || 0)
       return ok({ id: query.reviewId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
     },
   },
@@ -815,7 +831,10 @@ const recHandlers: MockMethod[] = [
       if (!canManageRec(url, query.clubId)) return forbidden()
       const me = actorInfo(url)
       const apps = rdb.recruitmentApplications.filter(
-        (a) => a.activityId === query.activityId && a.status !== 'draft' && reviewRating(query.activityId, a.applicantId)
+        (a) =>
+          a.activityId === query.activityId &&
+          a.status !== 'draft' &&
+          rdb.recruitmentReviews.some((r) => r.activityId === query.activityId && r.applicantId === a.applicantId && r.rating > 0),
       )
       if (!apps.length) return businessError('没有可发布的结论')
       const published: string[] = []
@@ -989,21 +1008,6 @@ const recHandlers: MockMethod[] = [
     },
   },
 ]
-
-// 评价评分辅助存储（页面级展示，不进入状态机）
-const reviewRatings = new Map<string, number>()
-
-function reviewKey(activityId: string, applicantId: string): string {
-  return activityId + ':' + applicantId
-}
-
-function reviewRating(activityId: string, applicantId: string): number | undefined {
-  return reviewRatings.get(reviewKey(activityId, applicantId))
-}
-
-function setReviewRating(activityId: string, applicantId: string, rating: number): void {
-  if (rating > 0) reviewRatings.set(reviewKey(activityId, applicantId), rating)
-}
 
 // ================= 联合活动 =================
 

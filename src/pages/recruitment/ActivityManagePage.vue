@@ -302,12 +302,32 @@ onMounted(loadDetail)
       <Card class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-3">管理操作</h2>
         <div class="space-y-1">
+          <PermissionGuard permission="club:recruitment:manage">
+            <div class="space-y-1">
+              <button
+                v-for="item in [
+                  { label: '报名申请管理', desc: '查看和处理所有报名申请', icon: ClipboardList, path: 'applications' },
+                  { label: '面试排期管理', desc: '安排面试时段和面试官', icon: Users, path: 'interview' },
+                  { label: '邀请管理', desc: '发送和管理录取邀请', icon: Mail, path: 'invitations' },
+                ]"
+                :key="item.path"
+                class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle transition-colors text-left"
+                @click="router.push(`/org/${route.params.clubId}/recruitment/${detail.id}/${item.path}`)"
+              >
+                <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-subtle text-primary shrink-0">
+                  <component :is="item.icon" :size="18" />
+                </div>
+                <div class="flex-1">
+                  <p class="text-sm font-medium text-text-primary">{{ item.label }}</p>
+                  <p class="text-xs text-text-secondary">{{ item.desc }}</p>
+                </div>
+                <ChevronRight :size="18" class="text-text-secondary" />
+              </button>
+            </div>
+          </PermissionGuard>
           <button
             v-for="item in [
-              { label: '报名申请管理', desc: '查看和处理所有报名申请', icon: ClipboardList, path: 'applications' },
-              { label: '面试排期管理', desc: '安排面试时段和面试官', icon: Users, path: 'interview' },
               { label: '评价与结论', desc: '评价申请人并发布结论', icon: FileText, path: 'review' },
-              { label: '邀请管理', desc: '发送和管理录取邀请', icon: Mail, path: 'invitations' },
             ]"
             :key="item.path"
             class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle transition-colors text-left"

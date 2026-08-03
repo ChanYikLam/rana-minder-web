@@ -1,10 +1,7 @@
-import { computed, isRef } from 'vue'
 import {
-  Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Megaphone, Flag, Search, User, Settings,
+  Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Megaphone, Flag, Settings,
 } from '@lucide/vue'
 import type { LucideIcon } from '@lucide/vue'
-import { useSessionViewStore } from '@/state/sessionViewStore'
-import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 
 export interface SideNavItem {
   label: string
@@ -18,17 +15,12 @@ export interface SideNavGroup {
   prefix: string
   items: SideNavItem[]
   permission?: string
-}
-
-export interface PersonalLink {
-  label: string
-  path: string
-  icon: LucideIcon
-  requireClub?: boolean
+  /** 任一命中即可（与 permission 二选一；item 未显式声明权限时继承） */
+  permissionAny?: string[]
 }
 
 /** 构建某社团的 L3 模块导航（按权限过滤） */
-function buildClubGroups(clubId: string, canAccess: (p?: string) => boolean): SideNavGroup[] {
+export function buildClubGroups(clubId: string, canAccess: (p?: string, permissionAny?: string[]) => boolean): SideNavGroup[] {
   const base = `/org/${clubId}`
   const groups: SideNavGroup[] = [
     {
@@ -39,10 +31,13 @@ function buildClubGroups(clubId: string, canAccess: (p?: string) => boolean): Si
       ],
     },
     {
-      label: '普通招新', icon: Megaphone, prefix: `${base}/recruitment`, permission: 'club:recruitment:manage',
+      label: '普通招新', icon: Megaphone, prefix: `${base}/recruitment`,
+      // 招新管理（负责人/人事）与默认/临时面试职能（部门负责人/面试官）均可进入活动列表与评审
+      permission: 'club:recruitment:manage',
+      permissionAny: ['club:recruitment:manage', 'club:interview:view', 'club:interview:evaluate'],
       items: [
         { label: '活动列表', path: `${base}/recruitment` },
-        { label: '创建活动', path: `${base}/recruitment/create` },
+        { label: '创建活动', path: `${base}/recruitment/create`, permission: 'club:recruitment:manage' },
       ],
     },
     {
@@ -58,7 +53,7 @@ function buildClubGroups(clubId: string, canAccess: (p?: string) => boolean): Si
         { label: '成员列表', path: `${base}/members`, permission: 'club:member:manage' },
         { label: '部门关系申请', path: `${base}/members/department-apply`, permission: 'club:member:manage' },
         { label: '常规入社邀请', path: `${base}/members/invite`, permission: 'club:invite:manage' },
-        { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:member:manage' },
+        { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:appointment:manage' },
         { label: '成员退出与移除', path: `${base}/members/exit`, permission: 'club:member:manage' },
         { label: '换届管理', path: `${base}/members/transition`, permission: 'club:transition:manage' },
       ],
@@ -75,7 +70,7 @@ function buildClubGroups(clubId: string, canAccess: (p?: string) => boolean): Si
       ],
     },
     {
-      label: '通知配置', icon: Mail, prefix: `${base}/notifications`, permission: 'club:config:manage',
+      label: '通知配置', icon: Mail, prefix: `${base}/notifications`, permission: 'club:email:config',
       items: [{ label: '发信配置', path: `${base}/notifications/email-config` }],
     },
     {
@@ -91,7 +86,10 @@ function buildClubGroups(clubId: string, canAccess: (p?: string) => boolean): Si
     },
   ]
   return groups
-    .map((g) => ({ ...g, items: g.items.filter((i) => canAccess(i.permission ?? g.permission)) }))
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((i) => (i.permission ? canAccess(i.permission) : canAccess(g.permission, g.permissionAny))),
+    }))
     .filter((g) => g.items.length > 0)
 }
 
@@ -127,25 +125,3 @@ export const ADMIN_NAV: SideNavGroup[] = [
   },
   { label: '运维状态', icon: ClipboardList, prefix: '/admin/ops', items: [{ label: '运维监控', path: '/admin/ops-status' }] },
 ]
-
-export function useSideNav(clubRef: string | import('vue').Ref<string | null>) {
-  const session = useSessionViewStore()
-  const workspace = useWorkspaceContextStore()
-  const isAdmin = computed(() => session.hasPermission('platform:club:manage'))
-  const canAccess = (permission?: string) => !permission || workspace.hasPermission(permission)
-
-  const clubId = computed(() => {
-    const v = isRef(clubRef) ? clubRef.value : clubRef
-    return v || ''
-  })
-
-  const clubNav = computed(() => (clubId.value ? buildClubGroups(clubId.value, canAccess) : []))
-
-  const personalLinks = computed<PersonalLink[]>(() => [
-    { label: '公开发现', path: '/explore', icon: Search },
-    { label: '我的工作台', path: clubId.value ? `/org/${clubId.value}/dashboard` : '', icon: Building2, requireClub: true },
-    { label: '个人空间', path: '/me', icon: User },
-  ])
-
-  return { isAdmin, clubNav, personalLinks, canAccess }
-}

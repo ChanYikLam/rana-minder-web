@@ -1,5 +1,5 @@
 import type { MockMethod } from './types'
-import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, type MockUser } from './auth'
+import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUsers, USER_MEMBER_MAP, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
@@ -73,12 +73,27 @@ function canManageMembersFull(user: MockUser, clubId: string): boolean {
   return user.roles.find((r) => r.clubId === clubId)?.role !== 'department_leader'
 }
 
+/** 任命/调岗/免职（P-MEM-04，仅社团负责人/人事可发起与执行） */
+function canAppointments(user: MockUser, clubId: string): boolean {
+  return getPermissions(user, clubId).includes('club:appointment:manage')
+}
+
+/** 辞职申请审批（MEM-005，仅社团负责人/人事可查看与审批） */
+function canApproveResignation(user: MockUser, clubId: string): boolean {
+  return getPermissions(user, clubId).includes('club:resignation:approve')
+}
+
 /** 导出任务（内存态；POST 创建后模拟异步完成） */
-interface ExportTask { id: string; clubId: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number }
+interface ExportTask { id: string; clubId: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number; scope: string; includeContact: boolean; includeFiles: boolean }
 const exportTasks: ExportTask[] = [
-  { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576 },
-  { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 },
+  { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576, scope: '全社团', includeContact: true, includeFiles: false },
+  { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0, scope: '全社团', includeContact: false, includeFiles: false },
 ]
+
+/** 当前用户可导出数据作用域：部门负责人仅本部门，其余全社团（EXP-001） */
+function exportScopeFor(user: MockUser, clubId: string): string {
+  return departmentScopeFor(user, clubId) || '全社团'
+}
 
 /**
  * vite-plugin-mock 的 query 传递缺陷：
@@ -152,6 +167,7 @@ const identityHandlers: MockMethod[] = [
     url: '/api/auth/logout',
     method: 'delete',
     response: () => {
+      clearMockSession()
       return { code: 0, data: null }
     },
   },
@@ -931,7 +947,11 @@ const memberHandlers: MockMethod[] = [
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
+      const clubRole = user.roles.find((r) => r.clubId === query.clubId)?.role
+      // 任命层级（03-社团组织与权限）：人事不可任命负责人级职位，部门负责人仅本部门普通职位
+      const titles = scope ? ['干事'] : clubRole === 'hr' ? ['干事', '副部长', '部长'] : ['干事', '副部长', '部长', '副负责人']
       const all = db.listMembers(query.clubId)
       const candidates = scope
         ? all.filter((m) => m.positions.some((p) => p.status === 'active' && p.departmentName === scope))
@@ -946,7 +966,7 @@ const memberHandlers: MockMethod[] = [
               return { id: m.id, name: m.name, studentId: m.studentId, department: active?.departmentName || '-', title: active?.title || '成员', status: m.status }
             }),
           departments: scope ? db.departments.filter((d) => d.name === scope) : db.departments,
-          titles: scope ? ['干事'] : ['干事', '副部长', '部长', '副负责人'],
+          titles,
           commands: db.appointmentCommands.filter((c) => c.clubId === query.clubId && (!scope || c.departmentName === scope)).map((c) => ({
             id: c.id, action: c.action, memberId: c.memberId, memberName: c.memberName,
             departmentId: c.departmentId, departmentName: c.departmentName, title: c.title,
@@ -965,14 +985,19 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
-      if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      if (!member || !canAppointments(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
+      const clubRole = user.roles.find((r) => r.clubId === query.clubId)?.role
       const target = db.findMember(query.clubId, body.input?.memberId)
       if (!target) return businessError('目标成员不存在')
       if (scope) {
         const inScope = target.positions.some((p) => p.status === 'active' && p.departmentName === scope)
         if (!inScope) return forbidden()
         if (body.input?.title && body.input.title !== '干事') return businessError('部门负责人仅可任命普通职位')
+      }
+      // 人事管理员只能在正式换届流程中确认负责人变更，不得通过任命命令产生负责人级职位
+      if (clubRole === 'hr' && body.input?.title && ['负责人', '副负责人'].includes(body.input.title)) {
+        return businessError('人事管理员不能任命负责人级职位')
       }
       const r = db.createAppointmentCommand(query.clubId, {
         action: body.input?.action as 'appoint' | 'transfer' | 'dismiss',
@@ -993,7 +1018,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const r = db.cancelAppointmentCommand(query.commandId)
       if (!r.ok) return businessError(r.error || '取消失败')
       return { code: 0, data: { id: query.commandId, status: 'cancelled' } }
@@ -1005,7 +1030,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { scheduledAt?: string } } }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const r = db.reconfirmAppointmentCommand(query.commandId, body.input?.scheduledAt || new Date().toISOString())
       if (!r.ok) return businessError(r.error || '重新确认失败')
       return { code: 0, data: { id: query.commandId, status: 'reconfirmed' } }
@@ -1017,7 +1042,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      if (!canAppointments(user, query.clubId)) return forbidden()
       const r = db.executeAppointmentCommand(query.commandId)
       if (!r.ok) {
         if (r.command) return { code: 0, data: { id: r.command.id, status: r.command.status, failed: true, message: r.error } }
@@ -1030,11 +1055,14 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/resignation',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!canApproveResignation(user, query.clubId)) return forbidden()
+      const scope = departmentScopeFor(user, query.clubId)
       return {
         code: 0,
         data: {
-          items: db.resignationRequests.filter((r) => r.clubId === query.clubId),
+          items: db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope)),
           nextCursor: null,
         },
       }
@@ -1073,7 +1101,7 @@ const memberHandlers: MockMethod[] = [
       const user = resolveMockUser(url)
       const actor = actorMemberId(user)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
-      if (!member || !canManageMembers(user, query.clubId)) return forbidden()
+      if (!member || !canApproveResignation(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const req = db.resignationRequests.find((r) => r.id === query.requestId)
       if (scope && req && req.departmentName !== scope) return forbidden()
@@ -1089,6 +1117,7 @@ const memberHandlers: MockMethod[] = [
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      if (!canManageMembers(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const list = db.listMembers(query.clubId).filter((m) =>
         !scope || m.positions.some((p) => p.departmentName === scope),
@@ -1105,7 +1134,9 @@ const memberHandlers: MockMethod[] = [
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
             }
           }),
-          resignations: db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope)),
+          resignations: canApproveResignation(user, query.clubId)
+            ? db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope))
+            : [],
           nextCursor: null,
         },
       }
@@ -1525,58 +1556,75 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
-  // 统计数据
+  // 统计数据（部门负责人按本部门范围过滤，summary 同步按部门口径）
   {
     url: '/api/org/:clubId/stats',
     method: 'get',
-    response: () => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const scope = departmentScopeFor(user, query.clubId)
+      const distribution = [
+        { name: '技术部', count: 45 },
+        { name: '运营部', count: 32 },
+        { name: '设计部', count: 28 },
+        { name: '人事部', count: 23 },
+      ]
+      const deptSummary: Record<string, { monthlyNew: number; pending: number }> = {
+        技术部: { monthlyNew: 3, pending: 4 },
+        运营部: { monthlyNew: 2, pending: 3 },
+        设计部: { monthlyNew: 2, pending: 2 },
+        人事部: { monthlyNew: 1, pending: 3 },
+      }
+      const dept = scope ? deptSummary[scope] : undefined
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: 128, trend: 'up', trendValue: 12 },
-            { label: '本月新增', value: 8, trend: 'up', trendValue: 3 },
+            { label: '总成员数', value: dept ? (distribution.find((d) => d.name === scope)?.count ?? 0) : 128, trend: 'up', trendValue: dept ? 2 : 12 },
+            { label: '本月新增', value: dept?.monthlyNew ?? 8, trend: 'up', trendValue: dept ? 1 : 3 },
             { label: '活跃招新', value: 1, trend: 'flat', trendValue: 0 },
-            { label: '待处理申请', value: 12, trend: 'down', trendValue: 5 },
+            { label: '待处理申请', value: dept?.pending ?? 12, trend: 'down', trendValue: dept ? 1 : 5 },
           ],
-          departmentDistribution: [
-            { name: '技术部', count: 45 },
-            { name: '运营部', count: 32 },
-            { name: '设计部', count: 28 },
-            { name: '人事部', count: 23 },
-          ],
+          departmentDistribution: scope ? distribution.filter((d) => d.name === scope) : distribution,
         },
       }
     },
   },
-  // 导出任务列表
+  // 导出任务列表（EXP-001：部门负责人仅见本部门作用域）
   {
     url: '/api/org/:clubId/exports',
     method: 'get',
-    response: ({ url }: { url: string }) => {
-      const clubId = new URL(url, 'http://localhost').pathname.split('/')[3]
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const clubId = query.clubId
+      if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
+      const scope = exportScopeFor(user, clubId)
       return {
         code: 0,
         data: {
-          items: exportTasks.filter((t) => t.clubId === clubId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+          items: exportTasks
+            .filter((t) => t.clubId === clubId && (scope === '全社团' || t.scope === scope))
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
           nextCursor: null,
         },
       }
     },
   },
-  // 创建导出任务（EXP：导出是高危操作，需权限）
+  // 创建导出任务（EXP：导出是高危操作，需权限；部门负责人仅本部门）
   {
     url: '/api/org/:clubId/exports',
     method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { type?: string; includeContact?: boolean; includeFiles?: boolean } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { type?: string; includeContact?: boolean; includeFiles?: boolean } } }) => {
       const user = resolveMockUser(url)
       const clubId = query.clubId
-      if (!canManageMembers(user, clubId)) return forbidden()
+      if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
       const type = body.input?.type || '成员名单'
+      const scope = exportScopeFor(user, clubId)
       const task: ExportTask = {
         id: 'exp-' + Date.now(), clubId, type,
         status: 'generating', createdAt: new Date().toISOString(),
         completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
+        scope, includeContact: !!body.input?.includeContact, includeFiles: !!body.input?.includeFiles,
       }
       exportTasks.push(task)
       setTimeout(() => {
@@ -1604,19 +1652,21 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
-  // 权限模板
+  // 权限模板（与 mockUsers 内置权限集同源，避免漂移）
   {
     url: '/api/admin/config/permission-templates',
     method: 'get',
     response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden()
+      const leaderPerms = mockUsers.leader.roles.find((r) => r.role === 'club_leader')?.permissions ?? []
+      const hrPerms = mockUsers.hr.roles[0]?.permissions ?? []
       return {
         code: 0,
         data: {
           items: [
-            { id: 'tpl-001', name: '社团负责人模板', permissions: ['club:dashboard:view', 'club:recruitment:manage', 'club:member:manage', 'club:config:manage'], version: 2, status: 'published' },
-            { id: 'tpl-002', name: '人事模板', permissions: ['club:dashboard:view', 'club:recruitment:manage', 'club:member:manage', 'club:batch:execute'], version: 1, status: 'published' },
+            { id: 'tpl-001', name: '社团负责人模板', permissions: leaderPerms, version: 2, status: 'published' },
+            { id: 'tpl-002', name: '人事模板', permissions: hrPerms, version: 1, status: 'published' },
             { id: 'tpl-003', name: '面试官模板', permissions: ['club:interview:view', 'club:interview:evaluate'], version: 1, status: 'draft' },
           ],
         },
@@ -1931,11 +1981,18 @@ const platformHandlers: MockMethod[] = [
       return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
     },
   },
-  // 工作空间：导出下载
+  // 工作空间：导出下载（EXP-003：每次下载实时校验当前权限与作用域）
   {
     url: '/api/org/:clubId/exports/:id/download',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:export:execute')) return forbidden()
+      const task = exportTasks.find((t) => t.id === query.id && t.clubId === query.clubId)
+      if (!task) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '导出任务不存在', supportId: 'MOCK' } }
+      }
+      if (task.scope !== '全社团' && exportScopeFor(user, query.clubId) !== task.scope) return forbidden()
       return {
         code: 0,
         data: {
@@ -1950,11 +2007,14 @@ const platformHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/exports/:id/status',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
-      const task = exportTasks.find((t) => t.id === query.id)
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:export:execute')) return forbidden()
+      const task = exportTasks.find((t) => t.id === query.id && t.clubId === query.clubId)
       if (!task) {
         return { statusCode: 404, body: { code: 'IFC-ERR-004', message: '导出任务不存在', supportId: 'MOCK' } }
       }
+      if (task.scope !== '全社团' && exportScopeFor(user, query.clubId) !== task.scope) return forbidden()
       return {
         code: 0,
         data: {

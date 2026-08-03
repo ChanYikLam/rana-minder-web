@@ -190,36 +190,36 @@ onMounted(loadData)
         </div>
       </Card>
 
-      <!-- 辞职审批 -->
-      <div v-if="resignations.length > 0" class="mb-6">
-        <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
-          <FileText :size="18" /> 辞职申请审批
-        </h2>
-        <div class="space-y-3">
-          <Card v-for="res in resignations" :key="res.id">
-            <div class="flex items-start justify-between mb-2">
-              <div>
-                <p class="text-sm font-medium text-text-primary">{{ res.memberName }} <span class="text-xs text-text-secondary ml-1">{{ res.departmentName }} · {{ res.title }}</span></p>
-                <p class="text-xs text-text-secondary mt-1">原因：{{ res.reason }}</p>
-                <p class="text-xs text-text-secondary mt-0.5">提交于 {{ formatDate(res.submittedAt) }}</p>
+      <!-- 辞职审批（仅社团负责人/人事可见） -->
+      <PermissionGuard permission="club:resignation:approve" scope="workspace">
+        <div v-if="resignations.length > 0" class="mb-6">
+          <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
+            <FileText :size="18" /> 辞职申请审批
+          </h2>
+          <div class="space-y-3">
+            <Card v-for="res in resignations" :key="res.id">
+              <div class="flex items-start justify-between mb-2">
+                <div>
+                  <p class="text-sm font-medium text-text-primary">{{ res.memberName }} <span class="text-xs text-text-secondary ml-1">{{ res.departmentName }} · {{ res.title }}</span></p>
+                  <p class="text-xs text-text-secondary mt-1">原因：{{ res.reason }}</p>
+                  <p class="text-xs text-text-secondary mt-0.5">提交于 {{ formatDate(res.submittedAt) }}</p>
+                </div>
+                <StateTag :status="res.status" />
               </div>
-              <StateTag :status="res.status" />
-            </div>
-            <div v-if="res.status === 'under_review'" class="mt-3 flex gap-2">
-              <PermissionGuard permission="club:member:manage" scope="workspace">
+              <div v-if="res.status === 'under_review'" class="mt-3 flex gap-2">
                 <button class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90" :disabled="actingId === res.id" @click="handleResignDecide(res, 'approve')">
                   <CheckCircle2 :size="14" /> 批准
                 </button>
                 <button class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === res.id" @click="handleResignDecide(res, 'reject')">
                   <XCircle :size="14" /> 驳回
                 </button>
-              </PermissionGuard>
-            </div>
-            <p v-else-if="res.status === 'rejected' && res.decidedBy" class="text-xs text-text-secondary mt-2">由 {{ res.decidedBy }} 驳回</p>
-            <p v-else-if="res.status === 'approved' && res.decidedBy" class="text-xs text-success mt-2">由 {{ res.decidedBy }} 批准</p>
-          </Card>
+              </div>
+              <p v-else-if="res.status === 'rejected' && res.decidedBy" class="text-xs text-text-secondary mt-2">由 {{ res.decidedBy }} 驳回</p>
+              <p v-else-if="res.status === 'approved' && res.decidedBy" class="text-xs text-success mt-2">由 {{ res.decidedBy }} 批准</p>
+            </Card>
+          </div>
         </div>
-      </div>
+      </PermissionGuard>
 
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无成员记录" />
 
