@@ -46,8 +46,6 @@ function startCreate() {
   editing.value = true
 }
 
-const saving = ref(false)
-
 function startEdit() {
   if (!selected.value) return
   draft.value = {
