@@ -18,13 +18,6 @@ export interface UseKeyboardShortcutsOptions {
 export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
   const { shortcuts, enabled } = options
 
-  const grouped = new Map<string, KeyboardShortcut[]>()
-  for (const s of shortcuts) {
-    const group = s.scope || 'global'
-    if (!grouped.has(group)) grouped.set(group, [])
-    grouped.get(group)!.push(s)
-  }
-
   function matches(event: KeyboardEvent, shortcut: KeyboardShortcut): boolean {
     if (event.key.toLowerCase() !== shortcut.key.toLowerCase()) return false
     if (shortcut.ctrl && !event.ctrlKey && !event.metaKey) return false

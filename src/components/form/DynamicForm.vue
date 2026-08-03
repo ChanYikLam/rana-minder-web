@@ -85,10 +85,7 @@ function updateArrayItem(field: FormField, index: number, itemValue: unknown) {
 function arrayChildFields(field: FormField): FormField[] {
   if (!field.arrayFieldTemplateId) return []
   return props.fields
-    .filter((f) => {
-      const parts = f.id.split('.')
-      return parts.length >= 2 && parts[0] === field.id
-    })
+    .filter((f) => f.arrayFieldTemplateId === field.id)
     .map((f) => ({
       ...f,
       id: f.id.split('.').slice(1).join('.'),
@@ -97,6 +94,13 @@ function arrayChildFields(field: FormField): FormField[] {
 
 function getFieldErrors(fieldId: string): string[] {
   return props.fieldErrors?.[fieldId] ?? []
+}
+
+function fieldErrorDescribedBy(fieldId: string): string | undefined {
+  const errors = getFieldErrors(fieldId)
+  return errors.length > 0
+    ? errors.map((_, ei) => `dyn-err-${fieldId}-${ei}`).join(' ')
+    : undefined
 }
 
 function arrayItemValue(field: FormField, index: number, childId: string): string {
@@ -162,7 +166,7 @@ const inputErrorClass = 'border-danger'
           v-if="field.type === 'textarea'"
           :id="`dyn-${field.id}`"
           :class="[inputClass, getFieldErrors(field.id).length > 0 ? inputErrorClass : '']"
-          :aria-describedby="getFieldErrors(field.id).length > 0 ? `dyn-err-${field.id}` : undefined"
+          :aria-describedby="fieldErrorDescribedBy(field.id)"
           :aria-invalid="getFieldErrors(field.id).length > 0 || undefined"
           rows="3"
           :value="(fieldValue(field) as string) || ''"
@@ -175,7 +179,7 @@ const inputErrorClass = 'border-danger'
           v-else-if="field.type === 'select' || field.type === 'multi_select'"
           :id="`dyn-${field.id}`"
           :class="[inputClass, getFieldErrors(field.id).length > 0 ? inputErrorClass : '']"
-          :aria-describedby="getFieldErrors(field.id).length > 0 ? `dyn-err-${field.id}` : undefined"
+          :aria-describedby="fieldErrorDescribedBy(field.id)"
           :aria-invalid="getFieldErrors(field.id).length > 0 || undefined"
           :multiple="field.type === 'multi_select'"
           :disabled="isReadOnly(field)"
@@ -218,7 +222,7 @@ const inputErrorClass = 'border-danger'
           :id="`dyn-${field.id}`"
           type="number"
           :class="[inputClass, getFieldErrors(field.id).length > 0 ? inputErrorClass : '']"
-          :aria-describedby="getFieldErrors(field.id).length > 0 ? `dyn-err-${field.id}` : undefined"
+          :aria-describedby="fieldErrorDescribedBy(field.id)"
           :aria-invalid="getFieldErrors(field.id).length > 0 || undefined"
           :value="(fieldValue(field) as number | undefined) ?? ''"
           :disabled="isReadOnly(field)"
@@ -243,7 +247,7 @@ const inputErrorClass = 'border-danger'
           :id="`dyn-${field.id}`"
           type="text"
           :class="[inputClass, getFieldErrors(field.id).length > 0 ? inputErrorClass : '']"
-          :aria-describedby="getFieldErrors(field.id).length > 0 ? `dyn-err-${field.id}` : undefined"
+          :aria-describedby="fieldErrorDescribedBy(field.id)"
           :aria-invalid="getFieldErrors(field.id).length > 0 || undefined"
           :value="(fieldValue(field) as string) || ''"
           :disabled="isReadOnly(field)"
@@ -253,7 +257,7 @@ const inputErrorClass = 'border-danger'
 
         <p
           v-for="(msg, ei) in getFieldErrors(field.id)"
-          :id="`dyn-err-${field.id}`"
+          :id="`dyn-err-${field.id}-${ei}`"
           :key="ei"
           class="text-xs text-danger"
           role="alert"
