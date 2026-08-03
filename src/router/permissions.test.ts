@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { workspacePermissionForRoute, ADMIN_PERMISSIONS } from './permissions'
+import { workspacePermissionForRoute, ADMIN_PERMISSIONS, INTERVIEW_ACCESS_PERMISSIONS } from './permissions'
+import { mockUsers, getPermissions } from '@/mock/auth'
 
 describe('ADMIN_PERMISSIONS', () => {
   it('maps all admin route names to a permission', () => {
@@ -13,9 +14,12 @@ describe('workspacePermissionForRoute', () => {
   it('maps member routes to club:member:manage', () => {
     expect(workspacePermissionForRoute('P-MEM-list')).toBe('club:member:manage')
     expect(workspacePermissionForRoute('P-MEM-02')).toBe('club:member:manage')
-    expect(workspacePermissionForRoute('P-MEM-04')).toBe('club:member:manage')
     expect(workspacePermissionForRoute('P-MEM-05')).toBe('club:member:manage')
     expect(workspacePermissionForRoute('P-MEM-01')).toBe('club:member:manage')
+  })
+
+  it('maps appointment route to club:appointment:manage (leader/hr only)', () => {
+    expect(workspacePermissionForRoute('P-MEM-04')).toBe('club:appointment:manage')
   })
 
   it('maps invite route to club:invite:manage (exact override over prefix)', () => {
@@ -35,8 +39,44 @@ describe('workspacePermissionForRoute', () => {
     expect(workspacePermissionForRoute('P-AUD-02')).toBe('club:audit:view')
   })
 
+  it('maps recruitment list/detail/review to interview access union (SRS 7.4 / ORG-037)', () => {
+    expect(workspacePermissionForRoute('P-REC-list')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
+    expect(workspacePermissionForRoute('P-REC-02')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
+    expect(workspacePermissionForRoute('P-REC-05')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
+  })
+
+  it('keeps recruitment manage-only routes gated by club:recruitment:manage', () => {
+    expect(workspacePermissionForRoute('P-REC-01')).toBe('club:recruitment:manage')
+    expect(workspacePermissionForRoute('P-REC-02-applications')).toBe('club:recruitment:manage')
+    expect(workspacePermissionForRoute('P-REC-04-manage')).toBe('club:recruitment:manage')
+    expect(workspacePermissionForRoute('P-REC-06-manage')).toBe('club:recruitment:manage')
+  })
+
+  it('maps club email config to club:email:config (leader only, SRS 7.3)', () => {
+    expect(workspacePermissionForRoute('P-NTF-02-club')).toBe('club:email:config')
+  })
+
   it('returns null for unknown route names', () => {
     expect(workspacePermissionForRoute('P-GEN-01')).toBeNull()
     expect(workspacePermissionForRoute('')).toBeNull()
+  })
+})
+
+describe('appointment/resignation permission roles', () => {
+  it('grants club:appointment:manage and club:resignation:approve to leader and hr only', () => {
+    for (const userKey of ['leader', 'hr']) {
+      const perms = getPermissions(mockUsers[userKey], 'club-001')
+      expect(perms).toContain('club:appointment:manage')
+      expect(perms).toContain('club:resignation:approve')
+    }
+    const deptleaderPerms = getPermissions(mockUsers.deptleader, 'club-001')
+    expect(deptleaderPerms).not.toContain('club:appointment:manage')
+    expect(deptleaderPerms).not.toContain('club:resignation:approve')
+  })
+
+  it('grants both permissions to hr role in the second club (leader@club-002)', () => {
+    const perms = mockUsers.leader.roles.find((r) => r.clubId === 'club-002')!.permissions
+    expect(perms).toContain('club:appointment:manage')
+    expect(perms).toContain('club:resignation:approve')
   })
 })

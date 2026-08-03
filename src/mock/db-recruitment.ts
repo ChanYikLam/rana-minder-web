@@ -112,6 +112,7 @@ export interface RecReview {
   authorName: string
   authorRole: string
   comment: string
+  rating: number
   roundId?: string | null
   history?: { comment: string; version: number; updatedAt: string }[]
   version: number
@@ -445,7 +446,7 @@ export const recruitmentReviews: RecReview[] = [
   {
     id: 'rev-001', activityId: 'act-001', applicantId: 'u-002',
     authorId: 'mem-004', authorName: '张明远', authorRole: 'club_leader',
-    comment: '基础扎实，表达清晰', version: 1,
+    comment: '基础扎实，表达清晰', rating: 4, version: 1,
     createdAt: daysFromNow(-26), updatedAt: daysFromNow(-26),
   },
 ]
@@ -1267,7 +1268,7 @@ export function setWaitlist(activityId: string, applicantId: string, departmentI
   return ok()
 }
 
-export function submitReview(activityId: string, applicantId: string, input: { comment: string; authorId: string; authorName: string; authorRole: string; roundId?: string | null }): { ok: boolean; error?: string; data?: RecReview } {
+export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string; roundId?: string | null }): { ok: boolean; error?: string; data?: RecReview } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   if (a.status === 'completed' || a.status === 'cancelled' || a.status === 'force_completed') return err('活动已结束，普通评价编辑已锁定')
@@ -1282,11 +1283,12 @@ export function submitReview(activityId: string, applicantId: string, input: { c
       { comment: rev.comment, version: rev.version, updatedAt: rev.updatedAt },
     ]
     rev.comment = input.comment
+    rev.rating = input.rating
     if (input.roundId) rev.roundId = input.roundId
     rev.version += 1
     rev.updatedAt = now()
   } else {
-    rev = { id: 'rev-' + Date.now(), activityId, applicantId, authorId: input.authorId, authorName: input.authorName, authorRole: input.authorRole, comment: input.comment, roundId: input.roundId, version: 1, createdAt: now(), updatedAt: now() }
+    rev = { id: 'rev-' + Date.now(), activityId, applicantId, authorId: input.authorId, authorName: input.authorName, authorRole: input.authorRole, comment: input.comment, rating: input.rating, roundId: input.roundId, version: 1, createdAt: now(), updatedAt: now() }
     recruitmentReviews.push(rev)
     a.reviewIds.push(rev.id)
   }

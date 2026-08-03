@@ -11,7 +11,7 @@ describe('面试官任务冲突检测', () => {
     const first = bookInterview(act, 'u-008', round, slot, '', true, ['u-002'])
     expect(first.ok).toBe(true)
     const t = first.data!
-    const direct = interviewerTimeConflict('u-002', t.startAt, t.endAt)
+    const direct = interviewerTimeConflict('u-002', t.startAt || '', t.endAt || '')
     expect(direct.conflict).toBe(true)
     expect(direct.detail).toContain('面试官')
   })
@@ -119,12 +119,12 @@ describe('规则收紧补救窗口（REC-007/REC-044）', () => {
 
 describe('评价提交链路（REC-014/015）', () => {
   it('多作者各自独立评价，同一作者修改保留历史', () => {
-    const r1 = submitReview('act-001', 'u-004', { comment: '第一作者评语', authorId: 'mem-a', authorName: '作者甲', authorRole: 'club_leader' })
+    const r1 = submitReview('act-001', 'u-004', { comment: '第一作者评语', rating: 4, authorId: 'mem-a', authorName: '作者甲', authorRole: 'club_leader' })
     expect(r1.ok).toBe(true)
-    const r2 = submitReview('act-001', 'u-004', { comment: '第二作者评语', authorId: 'mem-b', authorName: '作者乙', authorRole: 'temp_interviewer' })
+    const r2 = submitReview('act-001', 'u-004', { comment: '第二作者评语', rating: 3, authorId: 'mem-b', authorName: '作者乙', authorRole: 'temp_interviewer' })
     expect(r2.ok).toBe(true)
     expect(recruitmentReviews.filter((x) => x.applicantId === 'u-004').length).toBe(2)
-    const upd = submitReview('act-001', 'u-004', { comment: '作者甲修改', authorId: 'mem-a', authorName: '作者甲', authorRole: 'club_leader' })
+    const upd = submitReview('act-001', 'u-004', { comment: '作者甲修改', rating: 5, authorId: 'mem-a', authorName: '作者甲', authorRole: 'club_leader' })
     expect(upd.ok).toBe(true)
     expect(upd.data?.history?.length).toBe(1)
     expect(upd.data?.history?.[0].comment).toBe('第一作者评语')
@@ -134,10 +134,10 @@ describe('评价提交链路（REC-014/015）', () => {
   it('轮次关闭后评价被锁定，未关闭轮次可提交', () => {
     const closed = cancelRound('act-001', 'rd-002', '测试关闭轮次')
     expect(closed.ok).toBe(true)
-    const locked = submitReview('act-001', 'u-004', { comment: '关闭后评价', authorId: 'mem-c', authorName: '作者丙', authorRole: 'club_leader', roundId: 'rd-002' })
+    const locked = submitReview('act-001', 'u-004', { comment: '关闭后评价', rating: 4, authorId: 'mem-c', authorName: '作者丙', authorRole: 'club_leader', roundId: 'rd-002' })
     expect(locked.ok).toBe(false)
     expect(locked.error).toContain('关闭')
-    const okOpen = submitReview('act-001', 'u-004', { comment: '未关闭轮次评价', authorId: 'mem-c', authorName: '作者丙', authorRole: 'club_leader', roundId: 'rd-001' })
+    const okOpen = submitReview('act-001', 'u-004', { comment: '未关闭轮次评价', rating: 4, authorId: 'mem-c', authorName: '作者丙', authorRole: 'club_leader', roundId: 'rd-001' })
     expect(okOpen.ok).toBe(true)
   })
 })

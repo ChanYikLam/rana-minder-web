@@ -263,12 +263,12 @@ const recHandlers: MockMethod[] = [
       })
     },
   },
-  // 活动列表（管理视角）
+  // 活动列表（管理视角；面试职能角色可读，创建/编辑仍限负责人与人事）
   {
     url: '/api/org/:clubId/recruitment',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const items = rdb.listActivities(query.clubId).map((a) => ({
         id: a.id, clubId: a.clubId, title: a.title, status: a.status, channelStatus: a.channelStatus,
         deadline: a.deadline, applicantCount: a.applicantIds.length, createdAt: a.createdAt,
@@ -289,12 +289,12 @@ const recHandlers: MockMethod[] = [
       return result(r)
     },
   },
-  // 活动详情（管理视角）
+  // 活动详情（管理视角；面试职能角色可读，更新仍限负责人与人事）
   {
     url: '/api/org/:clubId/recruitment/:activityId',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const a = rdb.findActivity(query.clubId, query.activityId)
       if (!a) return notFound('活动不存在')
       return ok({
@@ -832,8 +832,9 @@ const recHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const me = actorInfo(url)
+      const isManager = canManageRec(url, query.clubId)
       const act = rdb.findAnyActivity(query.activityId)
-      const myMemberId = actorInfo(url).memberId
       const items = rdb.recruitmentApplications
         .filter((a) => a.activityId === query.activityId && a.status !== 'draft')
         .map((app) => {
@@ -842,26 +843,30 @@ const recHandlers: MockMethod[] = [
             : rdb.recruitmentReviews.filter((r) => r.activityId === query.activityId && r.applicantId === app.applicantId)
           const sorted = [...reviews].sort((x, y) => (y.updatedAt || y.createdAt).localeCompare(x.updatedAt || x.createdAt))
           const latest = sorted[0]
-          const mySubmitted = reviews.some((r) => myMemberId && r.authorId === myMemberId)
-          const peerViewLocked = !mySubmitted
+          // REC-015: 评分/评语按作者取本人那条 review；负责人/人事展示最近一条已提交评价
+          const myReview = reviews.find((r) => me.memberId && r.authorId === me.memberId)
+          const shown = isManager ? latest : myReview
+          const mySubmitted = !!myReview
+          const peerViewLocked = !isManager && !mySubmitted
           const paths = Object.values(app.paths || {})
           const anyPublished = paths.some((p) => p.publishedAt)
           const anyEvaluating = paths.some((p) => p.status === 'evaluating')
-          const rating = reviewRating(query.activityId, app.applicantId)
           let status = 'pending'
           if (anyPublished) status = 'published'
-          else if (latest || rating) status = 'concluded'
+          else if (shown) status = 'concluded'
           else if (anyEvaluating) status = 'evaluating'
           return {
             id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
             departmentName: app.preferences[0]?.departmentName || '', status,
-            rating: rating || null, comment: latest?.comment || '',
-            concludedAt: latest?.updatedAt || null, concludedBy: latest?.authorName || null,
+            rating: shown?.rating ?? null, comment: shown?.comment || '',
+            concludedAt: shown?.updatedAt || null, concludedBy: shown?.authorName || null,
             peerViewLocked,
             reviews: peerViewLocked ? [] : sorted.map((r) => ({
               authorName: r.authorName, authorRole: r.authorRole, comment: r.comment,
               version: r.version, createdAt: r.createdAt, updatedAt: r.updatedAt,
             })),
+            myRating: myReview?.rating ?? null,
+            myComment: myReview?.comment ?? null,
           }
         })
       return ok({ items, nextCursor: null })
@@ -894,10 +899,10 @@ const recHandlers: MockMethod[] = [
       const roundId = interviews[interviews.length - 1]?.roundId || null
       const r = rdb.submitReview(query.activityId, app.applicantId, {
         comment: input.comment || '',
+        rating: Number(input.rating) || 0,
         authorId: me.memberId || '', authorName: me.name, authorRole: me.role, roundId,
       })
       if (!r.ok) return businessError(r.error || '提交失败')
-      setReviewRating(query.activityId, app.applicantId, Number(input.rating) || 0)
       return ok({ id: query.reviewId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
     },
   },
@@ -909,7 +914,10 @@ const recHandlers: MockMethod[] = [
       if (!canManageRec(url, query.clubId)) return forbidden()
       const me = actorInfo(url)
       const apps = rdb.recruitmentApplications.filter(
-        (a) => a.activityId === query.activityId && a.status !== 'draft' && reviewRating(query.activityId, a.applicantId)
+        (a) =>
+          a.activityId === query.activityId &&
+          a.status !== 'draft' &&
+          rdb.recruitmentReviews.some((r) => r.activityId === query.activityId && r.applicantId === a.applicantId && r.rating > 0),
       )
       if (!apps.length) return businessError('没有可发布的结论')
       const published: string[] = []
@@ -1083,21 +1091,6 @@ const recHandlers: MockMethod[] = [
     },
   },
 ]
-
-// 评价评分辅助存储（页面级展示，不进入状态机）
-const reviewRatings = new Map<string, number>()
-
-function reviewKey(activityId: string, applicantId: string): string {
-  return activityId + ':' + applicantId
-}
-
-function reviewRating(activityId: string, applicantId: string): number | undefined {
-  return reviewRatings.get(reviewKey(activityId, applicantId))
-}
-
-function setReviewRating(activityId: string, applicantId: string, rating: number): void {
-  if (rating > 0) reviewRatings.set(reviewKey(activityId, applicantId), rating)
-}
 
 // ================= 联合活动 =================
 

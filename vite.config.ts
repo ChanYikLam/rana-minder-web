@@ -16,4 +16,7 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  build: {
+    target: ['chrome108', 'edge108', 'safari16', 'firefox116'],
+  },
 })

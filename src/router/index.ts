@@ -517,7 +517,10 @@ router.beforeEach(async (to) => {
       return { name: 'P-IDN-01' }
     }
     if (session.workspace?.clubId) {
-      return { path: `/org/${session.workspace.clubId}/dashboard` }
+      if (session.hasPermission('club:dashboard:view')) {
+        return { path: `/org/${session.workspace.clubId}/dashboard` }
+      }
+      return { name: 'P-IDN-03' }
     }
     if (session.hasPermission('platform:club:manage')) {
       return { name: 'P-ORG-01' }
@@ -550,7 +553,13 @@ router.beforeEach(async (to) => {
     if (to.meta.requiresWorkspace === true) {
       const clubId = typeof to.params.clubId === 'string' ? to.params.clubId : null
       const permission = workspacePermissionForRoute(String(to.name))
-      if (!clubId || !permission || !(await workspace.loadWorkspace(clubId)) || !workspace.hasPermission(permission)) {
+      if (!clubId || !permission || !(await workspace.loadWorkspace(clubId))) {
+        return { name: 'P-GEN-02' }
+      }
+      const granted = Array.isArray(permission)
+        ? permission.some((p) => workspace.hasPermission(p))
+        : workspace.hasPermission(permission)
+      if (!granted) {
         return { name: 'P-GEN-02' }
       }
     } else if (!workspace.hasWorkspace && session.workspace) {
