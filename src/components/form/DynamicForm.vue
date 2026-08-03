@@ -99,6 +99,17 @@ function getFieldErrors(fieldId: string): string[] {
   return props.fieldErrors?.[fieldId] ?? []
 }
 
+function arrayItemValue(field: FormField, index: number, childId: string): string {
+  const val = fieldValue(field)
+  if (!Array.isArray(val)) return ''
+  const row = val[index]
+  if (row && typeof row === 'object') {
+    const v = (row as Record<string, unknown>)[childId]
+    return v === undefined || v === null ? '' : String(v)
+  }
+  return ''
+}
+
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60'
 const inputErrorClass = 'border-danger'
 </script>
@@ -304,7 +315,7 @@ const inputErrorClass = 'border-danger'
                 v-if="child.type === 'textarea'"
                 class="w-full rounded-md border border-border bg-elevated px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 rows="2"
-                :value="((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>)?.[child.id] ?? ''"
+                :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
                 @input="(e: Event) => {
@@ -318,7 +329,7 @@ const inputErrorClass = 'border-danger'
                 v-else-if="child.type === 'number'"
                 type="number"
                 class="w-full h-10 rounded-md border border-border bg-elevated px-3 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
-                :value="((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>)?.[child.id] ?? ''"
+                :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
                 @input="(e: Event) => {
@@ -332,7 +343,7 @@ const inputErrorClass = 'border-danger'
                 v-else
                 type="text"
                 class="w-full h-10 rounded-md border border-border bg-elevated px-3 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
-                :value="((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>)?.[child.id] ?? ''"
+                :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
                 @input="(e: Event) => {

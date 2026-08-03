@@ -8,6 +8,16 @@ import {
   ERROR_AUTO_RETRY,
   ERROR_RESUBMIT_ALLOWED,
 } from './error-map'
+import type { ApiResult } from '@/types/contracts'
+
+/** 断言 kind 并将联合类型收窄到对应分支，便于访问 error/currentData 等属性 */
+function expectKind<T extends ApiResult<unknown>['kind']>(
+  result: ApiResult<unknown>,
+  kind: T,
+): Extract<ApiResult<unknown>, { kind: T }> {
+  expect(result.kind).toBe(kind)
+  return result as Extract<ApiResult<unknown>, { kind: T }>
+}
 
 describe('ERROR_CODES completeness', () => {
   it('has exactly 16 error codes', () => {
@@ -89,8 +99,7 @@ describe('errorToPageState', () => {
 
 describe('httpStatusToResult', () => {
   it('maps IFC-ERR-013 to external_uncertain', () => {
-    const result = httpStatusToResult(202, { code: 'IFC-ERR-013', message: '无法确认' })
-    expect(result.kind).toBe('external_uncertain')
+    const result = expectKind(httpStatusToResult(202, { code: 'IFC-ERR-013', message: '无法确认' }), 'external_uncertain')
     expect(result.error?.code).toBe('IFC-ERR-013')
   })
 
@@ -103,20 +112,17 @@ describe('httpStatusToResult', () => {
   })
 
   it('maps IFC-ERR-008 to concurrency_conflict with currentData', () => {
-    const result = httpStatusToResult(409, { code: 'IFC-ERR-008', currentData: { version: 2 } })
-    expect(result.kind).toBe('concurrency_conflict')
+    const result = expectKind(httpStatusToResult(409, { code: 'IFC-ERR-008', currentData: { version: 2 } }), 'concurrency_conflict')
     expect(result.currentData).toEqual({ version: 2 })
   })
 
   it('maps IFC-ERR-010 to concurrency_conflict', () => {
-    const result = httpStatusToResult(409, { code: 'IFC-ERR-010', currentData: { slots: 3 } })
-    expect(result.kind).toBe('concurrency_conflict')
+    const result = expectKind(httpStatusToResult(409, { code: 'IFC-ERR-010', currentData: { slots: 3 } }), 'concurrency_conflict')
     expect(result.currentData).toEqual({ slots: 3 })
   })
 
   it('maps IFC-ERR-012 to dependency_unavailable', () => {
-    const result = httpStatusToResult(503, { code: 'IFC-ERR-012', message: '邮件服务不可用' })
-    expect(result.kind).toBe('dependency_unavailable')
+    const result = expectKind(httpStatusToResult(503, { code: 'IFC-ERR-012', message: '邮件服务不可用' }), 'dependency_unavailable')
     expect(result.error?.code).toBe('IFC-ERR-012')
   })
 
@@ -126,60 +132,54 @@ describe('httpStatusToResult', () => {
   })
 
   it('maps IFC-ERR-001 (unauthenticated) to rejected', () => {
-    const result = httpStatusToResult(401, { code: 'IFC-ERR-001', message: '未登录' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(401, { code: 'IFC-ERR-001', message: '未登录' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-001')
   })
 
   it('maps IFC-ERR-003 (unauthorized) to rejected', () => {
-    const result = httpStatusToResult(403, { code: 'IFC-ERR-003', message: '无权限' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(403, { code: 'IFC-ERR-003', message: '无权限' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-003')
   })
 
   it('maps IFC-ERR-005 (invalid input) to rejected with fieldErrors', () => {
-    const result = httpStatusToResult(422, {
-      code: 'IFC-ERR-005',
-      message: '校验失败',
-      fieldErrors: { email: ['格式不正确'] },
-    })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(
+      httpStatusToResult(422, {
+        code: 'IFC-ERR-005',
+        message: '校验失败',
+        fieldErrors: { email: ['格式不正确'] },
+      }),
+      'rejected',
+    )
     expect(result.error?.fieldErrors).toEqual({ email: ['格式不正确'] })
   })
 
   it('maps IFC-ERR-006 (precondition failed) to rejected', () => {
-    const result = httpStatusToResult(422, { code: 'IFC-ERR-006', message: '资料未补齐' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(422, { code: 'IFC-ERR-006', message: '资料未补齐' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-006')
   })
 
   it('maps IFC-ERR-007 (state conflict) to rejected', () => {
-    const result = httpStatusToResult(409, { code: 'IFC-ERR-007', message: '活动已结束' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(409, { code: 'IFC-ERR-007', message: '活动已结束' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-007')
   })
 
   it('maps IFC-ERR-009 (idempotency conflict) to rejected', () => {
-    const result = httpStatusToResult(409, { code: 'IFC-ERR-009', message: '请勿重复提交' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(409, { code: 'IFC-ERR-009', message: '请勿重复提交' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-009')
   })
 
   it('maps IFC-ERR-011 (security limit) to rejected', () => {
-    const result = httpStatusToResult(429, { code: 'IFC-ERR-011', message: '请求频率过高' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(429, { code: 'IFC-ERR-011', message: '请求频率过高' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-011')
   })
 
   it('maps IFC-ERR-015 (not visible) to rejected', () => {
-    const result = httpStatusToResult(404, { code: 'IFC-ERR-015', message: '不存在或不可见' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(404, { code: 'IFC-ERR-015', message: '不存在或不可见' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-015')
   })
 
   it('maps IFC-ERR-016 (internal failure) to rejected', () => {
-    const result = httpStatusToResult(500, { code: 'IFC-ERR-016', message: '内部错误' })
-    expect(result.kind).toBe('rejected')
+    const result = expectKind(httpStatusToResult(500, { code: 'IFC-ERR-016', message: '内部错误' }), 'rejected')
     expect(result.error?.code).toBe('IFC-ERR-016')
   })
 

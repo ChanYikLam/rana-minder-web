@@ -76,7 +76,7 @@ function goTo(page: number) {
       <span v-if="page === 'ellipsis'" class="px-2 text-text-secondary">&hellip;</span>
       <Button
         v-else
-        :variant="page === current ? 'primary' : 'ghost'"
+        :variant="page === current ? 'default' : 'ghost'"
         size="icon-sm"
         :aria-label="`第 ${page} 页`"
         :aria-current="page === current ? 'page' : undefined"
