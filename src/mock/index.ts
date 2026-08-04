@@ -780,7 +780,7 @@ const personalHandlers: MockMethod[] = [
       // 录取邀请（普通招新）：仅展示发给当前用户的待处理邀请
       if (applicantId) {
         for (const inv of rdb.recruitmentInvitations) {
-          if (inv.applicantId !== applicantId || (inv.status !== 'pending_acceptance' && inv.status !== 'sent')) continue
+          if (inv.applicantId !== applicantId || inv.status !== 'pending_acceptance') continue
           const act = rdb.findAnyActivity(inv.activityId)
           items.push({
             id: 'todo-inv-' + inv.id,
@@ -792,7 +792,7 @@ const personalHandlers: MockMethod[] = [
           })
         }
         for (const inv of rdb.jointInvitations) {
-          if (inv.applicantId !== applicantId || (inv.status !== 'pending_acceptance' && inv.status !== 'sent')) continue
+          if (inv.applicantId !== applicantId || inv.status !== 'pending_acceptance') continue
           const ja = rdb.findJoint(inv.jointId)
           items.push({
             id: 'todo-jinv-' + inv.id,
