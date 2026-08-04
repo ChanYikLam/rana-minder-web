@@ -4,19 +4,35 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { HighRiskConfirm } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { NameSearch, type SearchResult } from '@/components/form'
+import ConfirmScope from '@/components/operation/ConfirmScope.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { useRouter } from 'vue-router'
 import type { PageState } from '@/types/machine'
 import type { ClubAccessItem, GroupSearchResult } from '@/types/domain/organization'
-import { Building2, CheckCircle2, RefreshCw, ShieldCheck, Users, Link2, Unplug, Info } from '@lucide/vue'
+import { Building2, CheckCircle2, RefreshCw, ShieldCheck, Users, Link2, Unplug, Info, Plus } from '@lucide/vue'
 
 type ClubItem = ClubAccessItem & { hasActiveBusiness: boolean }
+
+type ClubAction = 'approve' | 'reject' | 'suspend' | 'emergency-suspend' | 're-enable' | 'revoke'
+
+const ACTION_LABELS: Record<ClubAction, string> = {
+  approve: '批准接入',
+  reject: '拒绝',
+  suspend: '停用',
+  'emergency-suspend': '紧急停用',
+  're-enable': '恢复',
+  revoke: '解除接入',
+}
 
 const state = ref<PageState>('loading')
 const items = ref<ClubItem[]>([])
 const activeTab = ref<'wizard' | 'manage'>('wizard')
 const actingId = ref<string | null>(null)
+const confirmState = ref<{ club: ClubItem; action: ClubAction } | null>(null)
+const confirming = ref(false)
+const router = useRouter()
 
 async function loadData() {
   state.value = 'loading'
@@ -62,6 +78,16 @@ async function searchGroup() {
   } else {
     rawResults.value = []
     groupResults.value = []
+  }
+}
+
+async function runAction(club: ClubItem, action: ClubAction) {
+  actingId.value = club.id
+  const result = await post<{ status: string }>(`/admin/clubs/${club.id}/${action}`)
+  actingId.value = null
+  if (result.kind === 'completed') {
+    club.status = (result as { kind: 'completed'; data: { status: string } }).data.status
+    toast.success(`${club.name}：${ACTION_LABELS[action]}成功`)
   }
 }
 
@@ -248,13 +274,30 @@ async function handleRebind(club: ClubItem) {
   }
 }
 
+async function onConfirmScope() {
+  const current = confirmState.value
+  if (!current) return
+  confirming.value = true
+  await runAction(current.club, current.action)
+  confirming.value = false
+  confirmState.value = null
+}
+
 onMounted(loadData)
 </script>
 
 <template>
   <PageStateBoundary :state="state" title="社团接入管理" @retry="loadData">
     <div class="max-w-4xl mx-auto">
-      <h1 class="text-2xl font-bold text-text-primary mb-4">社团接入管理</h1>
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-text-primary">社团接入管理</h1>
+        <button
+          class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:opacity-90"
+          @click="router.push('/admin/clubs/wizard')"
+        >
+          <Plus :size="14" /> 新社团接入
+        </button>
+      </div>
 
       <div class="flex gap-1 mb-6 rounded-md bg-subtle p-1 w-fit">
         <button
@@ -416,5 +459,17 @@ onMounted(loadData)
         @update:open="(v) => { if (!v) risk = null }"
       />
     </div>
+
+    <ConfirmScope
+      v-if="confirmState"
+      :open="true"
+      :club-name="confirmState.club.name"
+      :irreversible="confirmState.action === 'revoke'"
+      :confirming="confirming"
+      :targets="[{ id: confirmState.club.id, label: confirmState.club.name, detail: `${confirmState.club.memberCount} 名成员` }]"
+      @update:open="(v: boolean) => { if (!v) confirmState = null }"
+      @cancel="confirmState = null"
+      @confirm="onConfirmScope"
+    />
   </PageStateBoundary>
 </template>

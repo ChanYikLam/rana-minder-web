@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { CheckCircle2, XCircle, Clock, Mail, ArrowLeft } from '@lucide/vue'
 
@@ -27,9 +28,7 @@ async function loadDetail() {
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function handleRespond(action: 'accept' | 'reject') {

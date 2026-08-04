@@ -196,6 +196,8 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       edit_before_deadline: 'draft',
       request_supplement: 'revision_requested',
       rule_tightening: 'submitted',
+      extend_window: 'submitted',
+      timeout: 'adjustment_overdue',
       withdraw: 'exited',
       identity_disabled: 'identity_anomaly',
     },

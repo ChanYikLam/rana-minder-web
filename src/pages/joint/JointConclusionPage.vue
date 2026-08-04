@@ -5,15 +5,17 @@ import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Star, Send, CheckCircle2, ThumbsUp, ThumbsDown, RefreshCw, XCircle } from '@lucide/vue'
+import { Star, Send, CheckCircle2, ThumbsUp, ThumbsDown, RefreshCw, XCircle, Building2 } from '@lucide/vue'
 
 interface Conclusion {
   id: string; applicantId?: string; applicantName: string; clubId: string; clubName: string; status: string
   conclusion: 'admit' | 'not_admit' | null; reviewFlag: boolean
   rating: number | null; comment: string; concludedAt: string | null
   authorName?: string | null; versions?: { conclusion: 'admit' | 'not_admit'; changedBy: string; changedByRole: string; reason: string | null; at: string }[]
+  myClub: boolean
 }
 interface JointInvitation {
   id: string; applicantId: string; applicantName: string; clubId: string
@@ -31,8 +33,8 @@ const evaluating = ref(false)
 const invitingName = ref<string | null>(null)
 const actionError = ref('')
 
-const clubId = computed(() => (route.params.clubId as string) || 'club-001')
-const jointId = computed(() => (route.params.jointId as string) || 'jnt-001')
+const clubId = computed(() => (route.params.clubId as string) || '')
+const jointId = computed(() => (route.params.jointId as string) || '')
 
 async function loadData() {
   state.value = 'loading'
@@ -40,9 +42,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     conclusions.value = result.data.items
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function loadInvitations() {
@@ -169,12 +169,20 @@ onMounted(async () => {
               <div
                 v-for="c in conclusions.filter((c) => c.applicantName === name)"
                 :key="c.id"
-                class="rounded-lg border border-border p-3"
+                class="flex items-center justify-between rounded-lg border border-border p-3"
+                :class="c.myClub ? 'border-border' : 'border-border bg-subtle/50'"
               >
                 <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
+                  <Building2 :size="16" class="text-text-secondary" />
                   <span :class="c.clubId === clubId ? 'text-text-primary' : 'text-text-secondary'" class="text-sm">
                     {{ c.clubName }}<span v-if="c.clubId !== clubId" class="ml-1 text-xs">（他社）</span>
+                  </span>
+                  <span
+                    v-if="!c.myClub"
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-info-subtle text-info"
+                  >
+                    跨社互见
                   </span>
                 </div>
                 <div class="flex items-center gap-2">
@@ -192,27 +200,29 @@ onMounted(async () => {
                     </span>
                     <StateTag status="concluded" />
                     <!-- 复核仅对补面完成后标记了 reviewFlag 的结论开放，且仅本社团可操作 -->
-                    <button v-if="c.reviewFlag && c.clubId === clubId" class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
-                    <div v-if="c.reviewFlag && c.clubId === clubId && reviewingId === c.id" class="flex items-center gap-1.5">
-                      <button
-                        class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
-                        @click="handleReview(c, 'keep')"
-                      >
-                        保持结论
-                      </button>
-                      <button
-                        class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
-                        @click="handleReview(c, 'modify', 'admit')"
-                      >
-                        改为录用
-                      </button>
-                      <button
-                        class="px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted"
-                        @click="handleReview(c, 'modify', 'not_admit')"
-                      >
-                        改为不录用
-                      </button>
-                    </div>
+                    <template v-if="c.myClub">
+                      <button v-if="c.reviewFlag && c.clubId === clubId" class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
+                      <div v-if="c.reviewFlag && c.clubId === clubId && reviewingId === c.id" class="flex items-center gap-1.5">
+                        <button
+                          class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
+                          @click="handleReview(c, 'keep')"
+                        >
+                          保持结论
+                        </button>
+                        <button
+                          class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
+                          @click="handleReview(c, 'modify', 'admit')"
+                        >
+                          改为录用
+                        </button>
+                        <button
+                          class="px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted"
+                          @click="handleReview(c, 'modify', 'not_admit')"
+                        >
+                          改为不录用
+                        </button>
+                      </div>
+                    </template>
                   </template>
                   <!-- JNT-014: 过期与拒绝是不同状态，不得混用 -->
                   <template v-else-if="c.status === 'expired'">
@@ -222,26 +232,30 @@ onMounted(async () => {
                   <template v-else-if="c.status === 'rejected'">
                     <StateTag status="rejected" />
                   </template>
+                  <!-- JNT-014: 过期与拒绝是不同状态，不得混用（mock 不产生此二态，状态机 SM-JNT-005 亦无） -->
                   <template v-else-if="c.status === 'pending'">
-                    <div v-if="c.clubId === clubId" class="flex items-center gap-1.5">
-                      <button
-                        class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
-                        @click="handleSetConclusion(c, 'admit')"
-                      >
-                        <ThumbsUp :size="12" /> 录用
-                      </button>
-                      <button
-                        class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
-                        @click="handleSetConclusion(c, 'not_admit')"
-                      >
-                        <ThumbsDown :size="12" /> 不录用
-                      </button>
-                      <button class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
-                    </div>
+                    <template v-if="c.myClub">
+                      <div v-if="c.clubId === clubId" class="flex items-center gap-1.5">
+                        <button
+                          class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          @click="handleSetConclusion(c, 'admit')"
+                        >
+                          <ThumbsUp :size="12" /> 录用
+                        </button>
+                        <button
+                          class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          @click="handleSetConclusion(c, 'not_admit')"
+                        >
+                          <ThumbsDown :size="12" /> 不录用
+                        </button>
+                        <button class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
+                      </div>
+                    </template>
+                    <StateTag v-else :status="c.status" />
                   </template>
                   <template v-else>
                     <StateTag :status="c.status" />
-                    <button v-if="c.clubId === clubId" class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
+                    <button v-if="c.myClub && c.clubId === clubId" class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
                   </template>
                 </div>
                 </div>
@@ -307,6 +321,7 @@ onMounted(async () => {
               class="mt-3 pt-3 border-t border-border"
             >
               <button
+                v-if="conclusions.some((c) => c.applicantName === name && c.myClub)"
                 class="flex items-center gap-1.5 text-sm text-primary hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
                 :disabled="invitingName !== null"
                 @click="handleInvite(conclusions.find((c) => c.applicantName === name)!)"

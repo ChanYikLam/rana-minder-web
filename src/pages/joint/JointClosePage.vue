@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { ShieldAlert, CheckCircle2, Users, Mail, ArrowLeft, XCircle } from '@lucide/vue'
@@ -26,9 +27,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 const allConfirmed = computed(() => {

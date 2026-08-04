@@ -4,6 +4,7 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { HighRiskConfirm } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { identityApi } from '@/services/modules'
@@ -31,6 +32,11 @@ const state = ref<PageState>('loading')
 const items = ref<Template[]>([])
 const selected = ref<Template | null>(null)
 const mode = ref<'edit' | 'create' | null>(null)
+const editing = ref(false)
+const publishing = ref(false)
+const publishOpen = ref(false)
+const publishSucceeded = ref(false)
+const publishError = ref('')
 const draft = ref({ name: '', permissions: '' })
 const saving = ref(false)
 const creating = ref(false)
@@ -41,7 +47,6 @@ const publishReason = ref('')
 const reauthProof = ref('')
 const reauthenticating = ref(false)
 const reauthConfirmOpen = ref(false)
-const publishing = ref(false)
 
 async function loadData() {
   state.value = 'loading'
@@ -53,7 +58,7 @@ async function loadData() {
     publishReason.value = ''
     reauthProof.value = ''
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function startCreate() {
@@ -64,6 +69,15 @@ function startCreate() {
 function startEdit() {
   if (!selected.value) return
   mode.value = 'edit'
+  draft.value = {
+    name: selected.value.name,
+    permissions: selected.value.permissions.join('\n'),
+  }
+}
+
+function startEditInline() {
+  if (!selected.value) return
+  editing.value = true
   draft.value = {
     name: selected.value.name,
     permissions: selected.value.permissions.join('\n'),
@@ -162,6 +176,24 @@ async function handlePublish() {
   }
 }
 
+async function handlePublishSimple() {
+  if (!selected.value || publishing.value) return
+  publishing.value = true
+  publishSucceeded.value = false
+  publishError.value = ''
+  const result = await post(`/admin/config/permission-templates/${selected.value.id}/publish`)
+  publishing.value = false
+  if (result.kind === 'completed') {
+    publishSucceeded.value = true
+    selected.value.status = 'published'
+    const idx = items.value.findIndex((t) => t.id === selected.value!.id)
+    if (idx >= 0) items.value[idx] = { ...selected.value }
+    toast.success('模板已发布')
+  } else {
+    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
+  }
+}
+
 onMounted(loadData)
 </script>
 
@@ -198,7 +230,7 @@ onMounted(loadData)
           </Card>
         </div>
 
-        <!-- 详情 / 编辑器 / 发布 -->
+        <!-- 详情 / 编辑器 / 发布（HEAD 分支：mode 驱动） -->
         <div v-if="selected || mode === 'create'" class="space-y-4">
           <Card class="h-fit">
             <!-- 新建模板 -->
@@ -259,6 +291,38 @@ onMounted(loadData)
                 </button>
               </div>
             </template>
+          </Card>
+
+          <!-- 权限详情（dev 分支：editing 驱动） -->
+          <Card v-if="selected && mode !== 'create'" class="h-fit">
+            <p class="text-sm font-medium text-text-primary mb-3">{{ selected.name }}</p>
+            <div v-if="!editing" class="space-y-1.5 max-h-80 overflow-y-auto">
+              <div v-for="perm in selected.permissions" :key="perm" class="flex items-center gap-2 text-sm">
+                <Check :size="14" class="text-success shrink-0" />
+                <span class="text-text-primary font-mono text-xs">{{ perm }}</span>
+              </div>
+            </div>
+            <div v-else class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-text-primary mb-1">模板名称</label>
+                <input v-model="draft.name" type="text" class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-text-primary mb-1">权限（每行一条）</label>
+                <textarea v-model="draft.permissions" rows="8" class="w-full px-3 py-2 rounded-md border border-border bg-elevated font-mono text-xs text-text-primary focus:outline-2 focus:outline-primary" />
+              </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-border flex gap-2">
+              <template v-if="!editing">
+                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="startEditInline">编辑</button>
+                <button
+                  class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+                  @click="publishOpen = true"
+                >
+                  发布
+                </button>
+              </template>
+            </div>
           </Card>
 
           <!-- 发布流程（仅草稿） -->
@@ -332,5 +396,19 @@ onMounted(loadData)
         @update:open="(v) => { if (!v) reauthConfirmOpen = false }"
       />
     </div>
+
+    <HighRiskConfirm
+      v-model:open="publishOpen"
+      title="发布权限模板"
+      description="发布后立即作用于全部关联成员并原子切换权限，此操作不可撤销。"
+      :targets="selected ? [{ id: selected.id, label: selected.name, detail: `${selected.permissions.length} 项权限 · v${selected.version}` }] : []"
+      impact-summary="发布失败时全部成员继续使用旧版本；权限缓存将按新版本刷新。"
+      confirm-label="确认发布"
+      reauth-required
+      :executing="publishing"
+      :succeeded="publishSucceeded"
+      :error-message="publishError"
+      @confirm="handlePublishSimple"
+    />
   </PageStateBoundary>
 </template>
