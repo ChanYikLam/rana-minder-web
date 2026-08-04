@@ -29,7 +29,7 @@ describe('StateLabel 覆盖 transitions 全词表', () => {
     expect(resolveStatusLabel('pending_acceptance')).toMatchObject({ label: '待接受', variant: 'warning' })
   })
 
-  it('未知状态回退原文（不崩溃）', () => {
+  it('未知状态返回 undefined（由调用方回退原文显示，不崩溃）', () => {
     expect(resolveStatusLabel('__unknown__')).toBeUndefined()
   })
 })

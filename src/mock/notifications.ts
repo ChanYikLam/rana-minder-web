@@ -21,7 +21,9 @@ export interface NotificationPayload {
   clubName?: string | null
 }
 
-let notificationSeq = 1000
+export const notificationSeqBase = 1000
+
+let notificationSeq = notificationSeqBase
 
 function nextNotificationId(): string {
   notificationSeq += 1
@@ -99,4 +101,9 @@ export function markAllNotificationsRead(userId: string): void {
   for (const n of sysNotifications) {
     if (n.userId === userId) n.read = true
   }
+}
+
+/** 仅供测试重置自增序号（reset.ts 调用） */
+export function setNotificationSeq(seq: number): void {
+  notificationSeq = seq
 }
