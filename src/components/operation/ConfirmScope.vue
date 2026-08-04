@@ -45,7 +45,7 @@ useFocusDialog(dialogRef, open, close)
 
 <template>
   <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div class="absolute inset-0 bg-black/40" aria-hidden="true" @click="close" />
+    <div class="absolute inset-0 bg-black/40" aria-hidden="true" />
     <div
       ref="dialogRef"
       role="dialog"

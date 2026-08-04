@@ -4,6 +4,7 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Users, ShieldAlert, ShieldOff, RotateCcw } from '@lucide/vue'
 
@@ -30,7 +31,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: JointItem[] } }).data.items
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function handleForceClose() {
@@ -127,8 +128,9 @@ onMounted(loadData)
         :targets="closeTarget ? [{ id: closeTarget.id, label: closeTarget.title, detail: '强制关闭前请填写原因' }] : []"
         impact-summary="强制关闭后活动进入平台强制结束状态，不经过社团确认。"
         confirm-label="确认强制关闭"
+        reauth-required
         :executing="busy"
-        :error="closeError || null"
+        :error-message="closeError || undefined"
         @confirm="handleForceClose"
       >
         <template #extra>
@@ -137,7 +139,6 @@ onMounted(loadData)
             class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             placeholder="强制关闭原因（必填）"
           />
-          <p v-if="closeError" class="mt-2 text-xs text-destructive">{{ closeError }}</p>
         </template>
       </HighRiskConfirm>
     </div>

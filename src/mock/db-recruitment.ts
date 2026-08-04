@@ -3,10 +3,34 @@
  * 状态流转经 state-machines/transitions.ts 校验；业务前置条件在此层守卫
  */
 import { assertTransition } from './state-machines/transitions'
+import { mockUsers } from './auth'
+
+/** 申请人档案（applicantId → 姓名/学号）：申请人 id 为 u-xxx 域内编号，
+ * 与 auth.mockUsers 的 user-applicant-xxx 键不同，按申请人域自维护 */
+const APPLICANT_PROFILES: Record<string, { name: string; studentId: string }> = {
+  'u-001': { name: '刘子豪', studentId: '20240001' },
+  'u-002': { name: '陈雨桐', studentId: '20240002' },
+  'u-003': { name: '王梓涵', studentId: '20240003' },
+  'u-004': { name: '张博文', studentId: '20240004' },
+  'u-005': { name: '李欣怡', studentId: '20240005' },
+  'u-006': { name: '林婉婷', studentId: '20240006' },
+}
+
+export function applicantNameOf(applicantId: string): string {
+  return APPLICANT_PROFILES[applicantId]?.name || ''
+}
+
+export function applicantStudentIdOf(applicantId: string): string {
+  return APPLICANT_PROFILES[applicantId]?.studentId || ''
+}
 
 const now = () => new Date().toISOString()
 export function daysFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+}
+/** 面试时段：以起点加 1 小时为终点，保证区间检测（overlaps）有效 */
+export function plusHours(iso: string, hours: number): string {
+  return new Date(new Date(iso).getTime() + hours * 60 * 60 * 1000).toISOString()
 }
 
 function err(message: string): { ok: false; error: string } {
@@ -53,6 +77,9 @@ export interface RecApplication {
   submittedAt: string | null
   withdrawnAt: string | null
   recoveryWindowDeadline: string | null
+  adjustmentDeadline: string | null
+  adjustmentReason: string | null
+  notQualifiedReason: string | null
   identityAnomalyAt: string | null
   version: number
 }
@@ -105,6 +132,8 @@ export interface RecReview {
   authorRole: string
   comment: string
   rating: number
+  roundId?: string | null
+  history?: { comment: string; version: number; updatedAt: string }[]
   version: number
   createdAt: string
   updatedAt: string
@@ -219,6 +248,8 @@ export interface JointApplication {
   consentAt: string | null
   agreementVersion: number | null
   allowJointAdjustment: boolean
+  volunteerClubIds: string[]
+  agreementClubSnapshot: string[]
   answers: Record<string, unknown>
   formVersion: number
   submittedAt: string | null
@@ -305,15 +336,15 @@ export const recruitmentActivities: RecActivity[] = [
         id: 'rd-001', name: '第一轮', status: 'open', mode: 'dept_separate',
         selectDeadline: daysFromNow(40),
         slots: [
-          { id: 'slot-001', roundId: 'rd-001', startAt: daysFromNow(35), endAt: daysFromNow(35), capacity: 30, taken: 12 },
-          { id: 'slot-002', roundId: 'rd-001', startAt: daysFromNow(36), endAt: daysFromNow(36), capacity: 30, taken: 8 },
+          { id: 'slot-001', roundId: 'rd-001', startAt: daysFromNow(35), endAt: plusHours(daysFromNow(35), 1), capacity: 30, taken: 12 },
+          { id: 'slot-002', roundId: 'rd-001', startAt: daysFromNow(36), endAt: plusHours(daysFromNow(36), 1), capacity: 30, taken: 8 },
         ],
       },
       {
         id: 'rd-002', name: '第二轮', status: 'open', mode: 'dept_separate',
         selectDeadline: daysFromNow(48),
         slots: [
-          { id: 'slot-003', roundId: 'rd-002', startAt: daysFromNow(42), endAt: daysFromNow(42), capacity: 20, taken: 0 },
+          { id: 'slot-003', roundId: 'rd-002', startAt: daysFromNow(42), endAt: plusHours(daysFromNow(42), 1), capacity: 20, taken: 0 },
         ],
       },
     ],
@@ -357,7 +388,7 @@ export const recruitmentApplications: RecApplication[] = [
       'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
       'dept-003': { departmentId: 'dept-003', departmentName: '设计部', order: 2, source: 'volunteer', status: 'pending', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
     },
-    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
     version: 1,
   },
   {
@@ -369,7 +400,7 @@ export const recruitmentApplications: RecApplication[] = [
     paths: {
       'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
     },
-    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
     version: 1,
   },
   {
@@ -381,7 +412,7 @@ export const recruitmentApplications: RecApplication[] = [
     paths: {
       'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'waitlist', decided: null, labelSetBy: '李思颖', waitlist: true, holdDeadline: null, publishedAt: null, version: 2 },
     },
-    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
     version: 1,
   },
   {
@@ -393,7 +424,7 @@ export const recruitmentApplications: RecApplication[] = [
     paths: {
       'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'published', decided: 'not_admit', labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: daysFromNow(-28), version: 2 },
     },
-    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
     version: 1,
   },
   {
@@ -405,7 +436,7 @@ export const recruitmentApplications: RecApplication[] = [
     paths: {
       'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
     },
-    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
     version: 1,
   },
 ]
@@ -414,7 +445,7 @@ export const recruitmentInterviews: RecInterview[] = [
   {
     id: 'int-001', activityId: 'act-001', clubId: 'club-001',
     applicantId: 'u-001', applicantName: '刘子豪', roundId: 'rd-001',
-    status: 'scheduled', slotId: 'slot-001', startAt: daysFromNow(35), endAt: daysFromNow(35),
+    status: 'scheduled', slotId: 'slot-001', startAt: daysFromNow(35), endAt: plusHours(daysFromNow(35), 1),
     actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
     interviewerIds: ['user-interviewer-001'],
     version: 1,
@@ -422,7 +453,7 @@ export const recruitmentInterviews: RecInterview[] = [
   {
     id: 'int-002', activityId: 'act-001', clubId: 'club-001',
     applicantId: 'u-002', applicantName: '陈雨桐', roundId: 'rd-001',
-    status: 'completed', slotId: 'slot-001', startAt: daysFromNow(35), endAt: daysFromNow(35),
+    status: 'completed', slotId: 'slot-001', startAt: daysFromNow(35), endAt: plusHours(daysFromNow(35), 1),
     actualStartAt: daysFromNow(35), actualEndAt: daysFromNow(35), attendance: 'present',
     invalidReason: null, skipReason: null, cancelReason: null,
     interviewerIds: ['user-interviewer-001'],
@@ -475,13 +506,15 @@ export const jointApplications: JointApplication[] = [
   {
     id: 'japp-001', jointId: 'jnt-001', applicantId: 'u-006', applicantName: '林婉婷', studentId: '20240006',
     status: 'submitted', consented: true, consentAt: daysFromNow(-25),
-    agreementVersion: 1, allowJointAdjustment: true, answers: {}, formVersion: 1,
+    agreementVersion: 1, allowJointAdjustment: true, volunteerClubIds: ['club-001', 'club-002'], agreementClubSnapshot: ['计算机协会', '电子设计协会'],
+    answers: {}, formVersion: 1,
     submittedAt: daysFromNow(-25), version: 1,
   },
   {
     id: 'japp-002', jointId: 'jnt-001', applicantId: 'u-001', applicantName: '刘子豪', studentId: '20240001',
     status: 'draft', consented: false, consentAt: null,
-    agreementVersion: 1, allowJointAdjustment: false, answers: {}, formVersion: 1,
+    agreementVersion: 1, allowJointAdjustment: false, volunteerClubIds: [], agreementClubSnapshot: [],
+    answers: {}, formVersion: 1,
     submittedAt: null, version: 1,
   },
 ]
@@ -489,7 +522,7 @@ export const jointApplications: JointApplication[] = [
 export const jointInterviews: JointInterview[] = [
   {
     id: 'jint-001', jointId: 'jnt-001', applicantId: 'u-006', applicantName: '林婉婷',
-    status: 'scheduled', slotId: 'jslot-001', startAt: daysFromNow(2), endAt: daysFromNow(2),
+    status: 'scheduled', slotId: 'jslot-001', startAt: daysFromNow(2), endAt: plusHours(daysFromNow(2), 1),
     actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null,
     attempt: 1, version: 1,
   },
@@ -509,8 +542,8 @@ export const jointConclusions: JointConclusion[] = [
 export const jointInvitations: JointInvitation[] = []
 
 export const jointSlots: { id: string; jointId: string; startAt: string; endAt: string; capacity: number; taken: number }[] = [
-  { id: 'jslot-001', jointId: 'jnt-001', startAt: daysFromNow(2), endAt: daysFromNow(2), capacity: 20, taken: 1 },
-  { id: 'jslot-002', jointId: 'jnt-001', startAt: daysFromNow(3), endAt: daysFromNow(3), capacity: 20, taken: 0 },
+  { id: 'jslot-001', jointId: 'jnt-001', startAt: daysFromNow(2), endAt: plusHours(daysFromNow(2), 1), capacity: 20, taken: 1 },
+  { id: 'jslot-002', jointId: 'jnt-001', startAt: daysFromNow(3), endAt: plusHours(daysFromNow(3), 1), capacity: 20, taken: 0 },
 ]
 
 // ================= 工具 =================
@@ -542,20 +575,34 @@ function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string): b
   return new Date(aEnd).getTime() > new Date(bStart).getTime() && new Date(bEnd).getTime() > new Date(aStart).getTime()
 }
 
-/** 申请人全局冲突检测：跨活动跨社团，排除已取消/已作废/已释放安排 */
+/** 面试官维度冲突检测：同一面试官在同一时段的普通招新面试任务重叠即冲突（排除已取消/已作废安排） */
+export function interviewerTimeConflict(interviewerId: string, startAt: string, endAt: string, excludeId?: string): { conflict: boolean; detail?: string } {
+  for (const it of recruitmentInterviews) {
+    if (it.id === excludeId) continue
+    if (!it.interviewerIds.includes(interviewerId)) continue
+    if (['cancelled', 'invalidated'].includes(it.status)) continue
+    if (it.startAt && it.endAt && overlaps(startAt, endAt, it.startAt, it.endAt)) {
+      return { conflict: true, detail: `面试官 ${mockUsers[interviewerId]?.name || applicantNameOf(interviewerId) || interviewerId} 在该时段已有面试任务` }
+    }
+  }
+  return { conflict: false }
+}
+
+/** 申请人全局冲突检测：跨活动跨社团，排除已取消/已作废/已释放安排；只提示冲突区间，不泄漏对端姓名 */
 export function applicantTimeConflict(applicantId: string, startAt: string, endAt: string, excludeId?: string): { conflict: boolean; detail?: string } {
+  const range = (s: string, e: string) => `（${s.slice(5, 16)} ~ ${e.slice(11, 16)}）`
   for (const it of recruitmentInterviews) {
     if (it.applicantId !== applicantId || it.id === excludeId) continue
     if (['cancelled', 'invalidated'].includes(it.status)) continue
     if (it.startAt && it.endAt && overlaps(startAt, endAt, it.startAt, it.endAt)) {
-      return { conflict: true, detail: `与普通招新面试冲突（${it.applicantName}）` }
+      return { conflict: true, detail: `与普通招新面试冲突${range(it.startAt, it.endAt)}` }
     }
   }
   for (const it of jointInterviews) {
     if (it.applicantId !== applicantId || it.id === excludeId) continue
     if (['invalidated', 'cancelled_archived'].includes(it.status)) continue
     if (it.startAt && it.endAt && overlaps(startAt, endAt, it.startAt, it.endAt)) {
-      return { conflict: true, detail: `与联合面试冲突（${it.applicantName}）` }
+      return { conflict: true, detail: `与联合面试冲突${range(it.startAt, it.endAt)}` }
     }
   }
   return { conflict: false }
@@ -567,13 +614,18 @@ export function listActivities(clubId: string): RecActivity[] {
   return recruitmentActivities.filter((a) => a.clubId === clubId)
 }
 
-export function createActivity(clubId: string, clubName: string, input: { title: string; description?: string }): { ok: boolean; error?: string; data?: RecActivity } {
+export function createActivity(
+  clubId: string,
+  clubName: string,
+  input: { title: string; description?: string; deadline?: string; departments?: { id: string; name: string }[]; formId?: string },
+): { ok: boolean; error?: string; data?: RecActivity } {
+  const deadline = input.deadline || daysFromNow(30)
   const a: RecActivity = {
     id: 'act-' + Date.now(), clubId, clubName, title: input.title, description: input.description || '',
     status: 'draft', channelStatus: 'not_open', channelBeforePause: null, pauseStartAt: null,
-    deadline: daysFromNow(30), deadlineVersion: 1, window: { seq: 1, deadline: daysFromNow(30) },
-    formId: 'form-001', formVersion: 1,
-    departments: [{ id: 'dept-001', name: '技术部' }],
+    deadline, deadlineVersion: 1, window: { seq: 1, deadline },
+    formId: input.formId || 'form-001', formVersion: 1,
+    departments: input.departments?.length ? input.departments : [{ id: 'dept-001', name: '技术部' }],
     eligibility: { colleges: [], grades: [] },
     volunteerRules: { min: 1, max: 1 }, allowAdjustmentDefault: true,
     conclusionMode: 'club_unified', rounds: [], applicantIds: [], invitationIds: [], reviewIds: [],
@@ -686,6 +738,76 @@ export function resumeChannel(activityId: string, newDeadline: string): { ok: bo
   a.deadline = newDeadline
   a.version += 1
   return ok()
+}
+
+/** REC-007/044：收紧规则前暂停通道，为已提交申请人开放补救窗口 */
+export function tightenRecruitmentRules(activityId: string, reason: string, deadlineDays: number): { ok: boolean; error?: string; data?: { affected: { applicantId: string; applicantName: string; adjustmentDeadline: string }[] } } {
+  if (!reason.trim()) return err('收紧规则必须填写原因')
+  if (!Number.isInteger(deadlineDays) || deadlineDays < 1 || deadlineDays > 30) return err('补救窗口天数须在 1~30 之间')
+  const a = findAnyActivity(activityId)
+  if (!a) return err('活动不存在')
+  if (a.status !== 'in_progress') return err('活动当前不可操作')
+  const p = assertTransition('SM-REC-002', a.channelStatus, 'paused', 'pause')
+  if (!p.ok) return err(p.reason || '当前通道状态不可暂停')
+  a.channelStatus = 'paused'
+  const deadline = new Date(Date.now() + deadlineDays * 24 * 3600 * 1000).toISOString()
+  const affected: { applicantId: string; applicantName: string; adjustmentDeadline: string }[] = []
+  for (const appId of a.applicantIds) {
+    const app = recruitmentApplications.find((x) => x.id === appId)
+    if (!app || app.status !== 'submitted') continue
+    const t = assertTransition('SM-REC-003', app.status, 'submitted', 'rule_tightening')
+    if (!t.ok) return err(`申请人 ${app.applicantName} 当前状态不可标记补救`)
+    app.adjustmentDeadline = deadline
+    app.adjustmentReason = reason
+    app.version += 1
+    affected.push({ applicantId: app.applicantId, applicantName: app.applicantName, adjustmentDeadline: deadline })
+  }
+  a.version += 1
+  return ok({ affected })
+}
+
+/** REC-044：补救窗口到期惰性推进 submitted → adjustment_overdue，不自动淘汰 */
+export function applyAdjustmentTimeouts(activityId: string): void {
+  const a = findAnyActivity(activityId)
+  if (!a) return
+  const nowMs = Date.now()
+  for (const appId of a.applicantIds) {
+    const app = recruitmentApplications.find((x) => x.id === appId)
+    if (!app || app.status !== 'submitted' || !app.adjustmentDeadline) continue
+    if (new Date(app.adjustmentDeadline).getTime() >= nowMs) continue
+    const t = assertTransition('SM-REC-003', app.status, 'adjustment_overdue', 'timeout')
+    if (!t.ok) continue
+    app.status = 'adjustment_overdue'
+    app.version += 1
+  }
+}
+
+/** REC-044：处理调整逾期——延长窗口（回到 submitted）或资格不符结论（须填原因） */
+export function resolveAdjustment(activityId: string, applicantId: string, action: 'extend' | 'not_qualified', reason: string, newDeadline?: string): { ok: boolean; error?: string; data?: RecApplication } {
+  if (!reason.trim()) return err('必须填写处理原因')
+  const app = findApplication(activityId, applicantId)
+  if (!app) return err('申请不存在')
+  if (app.status !== 'adjustment_overdue' && !app.adjustmentDeadline) return err('该申请当前无补救窗口')
+  if (action === 'extend') {
+    let deadline = newDeadline
+    if (!deadline) deadline = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString()
+    if (new Date(deadline).getTime() <= Date.now()) return err('延长后的截止必须严格晚于当前时刻')
+    const t = assertTransition('SM-REC-003', app.status, 'submitted', 'extend_window')
+    if (!t.ok) return err(t.reason || '当前申请状态不可延长窗口')
+    app.status = 'submitted'
+    app.adjustmentDeadline = deadline
+    app.adjustmentReason = reason
+    app.version += 1
+    return ok(app)
+  }
+  const t = assertTransition('SM-REC-003', app.status, 'not_qualified', 'not_qualified')
+  if (!t.ok) return err(t.reason || '当前申请状态不可作出资格不符结论')
+  app.status = 'not_qualified'
+  app.notQualifiedReason = reason
+  app.adjustmentDeadline = null
+  app.adjustmentReason = null
+  app.version += 1
+  return ok(app)
 }
 
 /** 正常完成：所有路径终态+结果发布+邀请全终态+无未完成成员同步 */
@@ -821,24 +943,31 @@ export function bookInterview(activityId: string, applicantId: string, roundId: 
   if (slot.taken >= slot.capacity) return err('该时段已满员')
   let existing = recruitmentInterviews.find((i) => i.activityId === activityId && i.applicantId === applicantId && i.roundId === roundId && i.status !== 'cancelled' && i.status !== 'invalidated')
   if (existing) {
-    const event = existing.status === 'scheduled' ? 'reschedule' : 'rearrange'
+    const event = existing.status === 'scheduled' ? 'reschedule'
+      : ['leave', 'late', 'absent', 'invalidated'].includes(existing.status) ? 'rearrange'
+      : 'select'
     const t = assertTransition('SM-REC-005', existing.status, 'scheduled', event)
     if (!t.ok) return err(t.reason || '当前面试记录不可改期')
   }
   const conflict = applicantTimeConflict(applicantId, slot.startAt, slot.endAt, existing?.id)
   if (conflict.conflict) return err(conflict.detail || '该时段与既有安排冲突')
+  for (const interviewerId of interviewerIds || []) {
+    const ic = interviewerTimeConflict(interviewerId, slot.startAt, slot.endAt, existing?.id)
+    if (ic.conflict) return err(ic.detail || '面试官在该时段已有任务')
+  }
   if (existing) {
     const oldSlot = round.slots.find((s) => s.id === existing!.slotId)
     if (oldSlot && oldSlot.id !== slotId) oldSlot.taken = Math.max(0, oldSlot.taken - 1)
     existing.slotId = slotId
     existing.startAt = slot.startAt
     existing.endAt = slot.endAt
+    if (interviewerIds) existing.interviewerIds = interviewerIds
     existing.status = 'scheduled'
     existing.attendance = 'none'
     existing.version += 1
   } else {
     existing = {
-      id: 'int-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: '',
+      id: 'int-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId),
       roundId, status: 'scheduled', slotId, startAt: slot.startAt, endAt: slot.endAt,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
       interviewerIds: interviewerIds || [],
@@ -915,7 +1044,7 @@ export function skipRoundInterview(activityId: string, applicantId: string, roun
     if (slot) slot.taken = Math.max(0, slot.taken - 1)
   } else {
     recruitmentInterviews.push({
-      id: 'int-' + Date.now(), activityId, clubId: findAnyActivity(activityId)?.clubId || '', applicantId, applicantName: '',
+      id: 'int-' + Date.now(), activityId, clubId: findAnyActivity(activityId)?.clubId || '', applicantId, applicantName: applicantNameOf(applicantId),
       roundId, status: 'cancelled', slotId: null, startAt: null, endAt: null,
       actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null,
       skipReason: reason, cancelReason: null, interviewerIds: [], version: 1,
@@ -932,10 +1061,10 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
   let app = findApplication(activityId, applicantId)
   if (!app) {
     app = {
-      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: '', studentId: '',
+      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
       status: 'draft', preferences: [], allowAdjustment: a.allowAdjustmentDefault, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
-      recoveryWindowDeadline: null, identityAnomalyAt: null, version: 1,
+      recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
     }
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
@@ -953,8 +1082,11 @@ export function submitApplication(activityId: string, applicantId: string, input
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   if (a.status !== 'in_progress') return err('活动当前不可报名')
-  if (a.channelStatus !== 'open') return err('报名通道当前未开放')
-  if (new Date(a.deadline).getTime() < Date.now()) return err('报名已截止')
+  const existing = findApplication(activityId, applicantId)
+  const inAdjustment = !!existing?.adjustmentDeadline && new Date(existing.adjustmentDeadline).getTime() >= Date.now()
+  if (a.channelStatus !== 'open' && !inAdjustment) return err('报名通道当前未开放')
+  if (a.channelStatus !== 'open' && existing?.status === 'adjustment_overdue') return err('调整逾期，请联系管理员延长窗口或处理')
+  if (a.channelStatus === 'open' && new Date(a.deadline).getTime() < Date.now()) return err('报名已截止')
   const dup = input.preferences.map((p) => p.departmentId)
   if (new Set(dup).size !== dup.length) return err('志愿部门不能重复')
   if (dup.length < a.volunteerRules.min || dup.length > a.volunteerRules.max) return err(`志愿数量须在 ${a.volunteerRules.min}~${a.volunteerRules.max} 之间`)
@@ -970,10 +1102,10 @@ export function submitApplication(activityId: string, applicantId: string, input
   }
   if (!app) {
     app = {
-      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: '', studentId: '',
+      id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
       status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
-      recoveryWindowDeadline: null, identityAnomalyAt: null, version: 1,
+      recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
     }
     recruitmentApplications.push(app)
     a.applicantIds.push(app.id)
@@ -983,6 +1115,8 @@ export function submitApplication(activityId: string, applicantId: string, input
     okResult = assertTransition('SM-REC-003', 'exited', 'submitted', 'recovery_resubmit')
   } else if (app.status === 'revision_requested') {
     okResult = assertTransition('SM-REC-003', 'revision_requested', 'submitted', 'submit_in_window')
+  } else if (inAdjustment && app.status === 'submitted') {
+    okResult = assertTransition('SM-REC-003', 'submitted', 'submitted', 'rule_tightening')
   } else if (app.status === 'submitted') {
     okResult = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
     if (okResult.ok) {
@@ -1003,6 +1137,9 @@ export function submitApplication(activityId: string, applicantId: string, input
   app.submittedAt = now()
   app.withdrawnAt = null
   app.recoveryWindowDeadline = null
+  app.adjustmentDeadline = null
+  app.adjustmentReason = null
+  app.notQualifiedReason = null
   app.version += 1
   for (const p of app.preferences) {
     if (!app.paths[p.departmentId]) {
@@ -1100,8 +1237,9 @@ export function publishNotQualified(activityId: string, applicantId: string, rea
 
 // ================= REC 评价/路径/结论 =================
 
-export function setDeptLabel(activityId: string, applicantId: string, departmentId: string, label: boolean, actorId: string, actorName: string, actorRole: string, isDeptLeader: boolean): { ok: boolean; error?: string } {
+export function setDeptLabel(activityId: string, applicantId: string, departmentId: string, label: boolean, actorId: string, actorName: string, actorRole: string, isDeptLeader: boolean, actorUserId?: string | null): { ok: boolean; error?: string } {
   void actorRole
+  void actorId
   const app = findApplication(activityId, applicantId)
   if (!app) return err('申请不存在')
   const path = app.paths[departmentId]
@@ -1109,7 +1247,7 @@ export function setDeptLabel(activityId: string, applicantId: string, department
   if (isDeptLeader && path.source !== 'volunteer') return err('部门负责人仅能操作正式报名本部门的申请人')
   const vol = app.preferences.find((p) => p.departmentId === departmentId)
   if (isDeptLeader && !vol) return err('部门负责人仅能为正式报名本部门的申请人设置标签')
-  if (isDeptLeader && actorId === app.applicantId) return err('不能设置自己的标签')
+  if (isDeptLeader && actorUserId && actorUserId === app.applicantId) return err('不能设置自己的标签')
   if (label) {
     path.status = 'decided'
     path.decided = 'admit'
@@ -1166,18 +1304,27 @@ export function setWaitlist(activityId: string, applicantId: string, departmentI
   return ok()
 }
 
-export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string }): { ok: boolean; error?: string; data?: RecReview } {
+export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string; roundId?: string | null }): { ok: boolean; error?: string; data?: RecReview } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   if (a.status === 'completed' || a.status === 'cancelled' || a.status === 'force_completed') return err('活动已结束，普通评价编辑已锁定')
+  if (input.roundId) {
+    const round = a.rounds.find((r) => r.id === input.roundId)
+    if (round && (round.status === 'closed' || round.status === 'cancelled')) return err('该轮次已关闭，评价已锁定；如需修改请走事实纠错')
+  }
   let rev = recruitmentReviews.find((r) => r.activityId === activityId && r.applicantId === applicantId && r.authorId === input.authorId)
   if (rev) {
+    rev.history = [
+      ...(rev.history || []),
+      { comment: rev.comment, version: rev.version, updatedAt: rev.updatedAt },
+    ]
     rev.comment = input.comment
     rev.rating = input.rating
+    if (input.roundId) rev.roundId = input.roundId
     rev.version += 1
     rev.updatedAt = now()
   } else {
-    rev = { id: 'rev-' + Date.now(), activityId, applicantId, authorId: input.authorId, authorName: input.authorName, authorRole: input.authorRole, comment: input.comment, rating: input.rating, version: 1, createdAt: now(), updatedAt: now() }
+    rev = { id: 'rev-' + Date.now(), activityId, applicantId, authorId: input.authorId, authorName: input.authorName, authorRole: input.authorRole, comment: input.comment, rating: input.rating, roundId: input.roundId, version: 1, createdAt: now(), updatedAt: now() }
     recruitmentReviews.push(rev)
     a.reviewIds.push(rev.id)
   }
@@ -1384,7 +1531,7 @@ export function saveJointApplicationDraft(jointId: string, applicantId: string, 
     app = {
       id: 'japp-' + Date.now(), jointId, applicantId, applicantName, studentId,
       status: 'draft', consented: false, consentAt: null, agreementVersion: null,
-      allowJointAdjustment: true, answers: {}, formVersion: ja.formVersion, submittedAt: null, version: 1,
+      allowJointAdjustment: true, volunteerClubIds: [], agreementClubSnapshot: [], answers: {}, formVersion: ja.formVersion, submittedAt: null, version: 1,
     }
     jointApplications.push(app)
     ja.applicantIds.push(app.id)
@@ -1392,7 +1539,7 @@ export function saveJointApplicationDraft(jointId: string, applicantId: string, 
   return ok(app)
 }
 
-export function submitJointApplication(jointId: string, applicantId: string, input: { consented: boolean; allowJointAdjustment: boolean; answers?: Record<string, unknown> }): { ok: boolean; error?: string; data?: JointApplication } {
+export function submitJointApplication(jointId: string, applicantId: string, input: { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown> }): { ok: boolean; error?: string; data?: JointApplication } {
   const ja = findJoint(jointId)
   if (!ja) return err('联合活动不存在')
   if (ja.channelStatus !== 'open') return err('联合报名通道当前未开放')
@@ -1406,7 +1553,12 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
   app.consented = true
   app.consentAt = now()
   app.agreementVersion = ja.sharedAgreement.version
+  app.agreementClubSnapshot = ja.clubs.map((c) => c.clubName)
   app.allowJointAdjustment = input.allowJointAdjustment
+  const availableClubIds = ja.clubs.map((c) => c.clubId)
+  app.volunteerClubIds = input.volunteerClubIds && input.volunteerClubIds.length > 0
+    ? availableClubIds.filter((id) => input.volunteerClubIds!.includes(id))
+    : availableClubIds
   app.answers = { ...(input.answers || {}) }
   app.formVersion = ja.formVersion
   app.submittedAt = now()
@@ -1507,6 +1659,13 @@ export function invalidateJointInterview(jointId: string, applicantId: string, r
   it.status = 'invalidated'
   it.invalidReason = reason
   it.version += 1
+  if (it.slotId) {
+    const slot = jointSlots.find((s) => s.id === it.slotId)
+    if (slot) slot.taken = Math.max(0, slot.taken - 1)
+    it.slotId = null
+    it.startAt = null
+    it.endAt = null
+  }
   for (const con of jointConclusions) {
     if (con.jointId !== jointId || con.applicantId !== applicantId) continue
     if (con.status === 'accepted_locked') continue
@@ -1597,7 +1756,7 @@ export function createJointInvitation(jointId: string, applicantId: string, club
   const isParticipant = ja.clubs.some((c) => c.clubId === clubId && (c.status === 'locked' || c.status === 'force_suspended'))
   if (!isParticipant) return err('该社团不是参与社团')
   const con = jointConclusions.find((c) => c.jointId === jointId && c.applicantId === applicantId && c.clubId === clubId)
-  const hasVolunteered = ja.clubs.some((c) => c.clubId === clubId)
+  const hasVolunteered = app.volunteerClubIds.includes(clubId)
   const type: 'admit' | 'join' = hasVolunteered ? 'admit' : 'join'
   if (type === 'join' && !app.allowJointAdjustment) return err('申请人未选择服从联合调剂，不能发出加入邀请')
   const dup = jointInvitations.some((i) => i.jointId === jointId && i.applicantId === applicantId && i.clubId === clubId && i.status === 'pending_acceptance')

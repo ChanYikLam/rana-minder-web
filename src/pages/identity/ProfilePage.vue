@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
@@ -40,6 +40,24 @@ const verifyError = ref('')
 const codeSent = ref(false)
 const sendingCode = ref(false)
 const verifying = ref(false)
+const resendCountdown = ref(0)
+let resendTimer: ReturnType<typeof setInterval> | null = null
+
+function startResendCountdown() {
+  resendCountdown.value = 60
+  if (resendTimer) clearInterval(resendTimer)
+  resendTimer = setInterval(() => {
+    resendCountdown.value -= 1
+    if (resendCountdown.value <= 0 && resendTimer) {
+      clearInterval(resendTimer)
+      resendTimer = null
+    }
+  }, 1000)
+}
+
+onUnmounted(() => {
+  if (resendTimer) clearInterval(resendTimer)
+})
 
 const profileSchema = z.object({
   email: z.string().email('请输入正确的邮箱格式'),
@@ -111,12 +129,13 @@ async function handleSave() {
 }
 
 async function handleSendCode() {
-  if (sendingCode.value) return
+  if (sendingCode.value || resendCountdown.value > 0) return
   sendingCode.value = true
   const result = await post<{ sent: boolean }>('/auth/profile/send-email-code')
   sendingCode.value = false
   if (result.kind === 'completed') {
     codeSent.value = true
+    startResendCountdown()
   }
 }
 
@@ -195,7 +214,7 @@ async function handleResolveConflicts() {
   conflictDone.value = true
   profile.value = { ...profile.value }
   buildConflicts(profile.value)
-  setTimeout(() => router.push('/me/profile'), 1200)
+  router.push('/me/profile')
 }
 </script>
 
@@ -384,15 +403,15 @@ async function handleResolveConflicts() {
           <span class="text-sm font-medium text-primary">验证邮箱</span>
         </div>
         <p class="text-xs text-text-secondary mb-3">
-          验证码将发送至 <span class="font-medium">{{ profile.email }}</span>
+          验证码 5 分钟内有效，将发送至 <span class="font-medium">{{ profile.email }}</span>
         </p>
         <div class="flex gap-2">
           <button
             class="px-3 py-2 rounded-md border border-border text-sm text-primary hover:bg-elevated transition-colors disabled:opacity-60"
-            :disabled="sendingCode || codeSent"
+            :disabled="sendingCode || codeSent || resendCountdown > 0"
             @click="handleSendCode"
           >
-            {{ codeSent ? '已发送（mock 验证码：123456）' : sendingCode ? '发送中...' : '发送验证码' }}
+            {{ codeSent ? '已发送（mock 验证码：123456）' : resendCountdown > 0 ? `${resendCountdown}s 后可重发` : sendingCode ? '发送中...' : '发送验证码' }}
           </button>
           <template v-if="codeSent">
             <input

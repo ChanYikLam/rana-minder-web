@@ -20,13 +20,13 @@ const state = ref<PageState>('loading')
 const items = ref<InvitationRow[]>([])
 const applications = ref<AppItem[]>([])
 const sendOpen = ref(false)
-const sendForm = ref({ applicantId: '', departmentId: '' })
+const sendForm = ref({ applicantId: '', departmentId: '', expireDays: 7 })
 const departments = ref<{ id: string; name: string }[]>([])
 const actionLoading = ref(false)
 const actionError = ref('')
 
-const clubId = computed(() => (route.params.clubId as string) || 'club-001')
-const actId = computed(() => (route.params.activityId as string) || 'act-001')
+const clubId = computed(() => (route.params.clubId as string) || '')
+const actId = computed(() => (route.params.activityId as string) || '')
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
@@ -75,12 +75,12 @@ async function handleSend() {
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations`, {
     applicantId: sendForm.value.applicantId,
     departmentId: sendForm.value.departmentId,
-    expireDays: 7,
+    expireDays: sendForm.value.expireDays,
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
     sendOpen.value = false
-    sendForm.value = { applicantId: '', departmentId: '' }
+    sendForm.value = { applicantId: '', departmentId: '', expireDays: 7 }
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
     actionError.value = (result.error as { message?: string }).message || '发送失败'
@@ -145,10 +145,20 @@ onMounted(async () => {
               <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
             </select>
           </div>
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">有效期（天）</label>
+            <input
+              v-model.number="sendForm.expireDays"
+              type="number"
+              min="1"
+              max="30"
+              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            />
+          </div>
           <div class="flex items-end">
             <button
               class="flex items-center gap-1.5 px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
-              :disabled="actionLoading || !sendForm.applicantId || !sendForm.departmentId"
+              :disabled="actionLoading || !sendForm.applicantId || !sendForm.departmentId || !sendForm.expireDays || sendForm.expireDays < 1 || sendForm.expireDays > 30"
               @click="handleSend"
             >
               <Send :size="15" /> {{ actionLoading ? '发送中...' : '发送' }}
@@ -156,7 +166,7 @@ onMounted(async () => {
           </div>
         </div>
         <p class="text-xs text-text-secondary flex items-center gap-1">
-          <Users :size="13" /> 仅可向已提交申请的申请人发送，有效期默认 7 天
+          <Users :size="13" /> 仅可向已提交申请的申请人发送，有效期默认 7 天（1~30 天可调）
         </p>
       </Card>
 

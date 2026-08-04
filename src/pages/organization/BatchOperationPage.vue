@@ -27,6 +27,9 @@ const executing = ref(false)
 const retrying = ref(false)
 const candidates = ref<BatchCandidate[]>([])
 const loadingCandidates = ref(false)
+const candidatesError = ref(false)
+const interviewers = ref<{ id: string; name: string }[]>([])
+const interviewerId = ref('')
 
 const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'assign_interviewer', label: '批量分配面试官', desc: '为多个申请人分配同一面试官' },
@@ -47,16 +50,27 @@ async function loadCandidates() {
   if (candidatesAbort) candidatesAbort.abort()
   candidatesAbort = new AbortController()
   loadingCandidates.value = true
+  candidatesError.value = false
   try {
     const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`, undefined, candidatesAbort.signal)
     if (res.kind === 'completed') candidates.value = res.data.items
-    else toast.error('候选人加载失败，请重试')
+    else candidatesError.value = true
   } finally {
     loadingCandidates.value = false
   }
 }
 
-onMounted(loadCandidates)
+onMounted(() => {
+  loadCandidates()
+  loadInterviewers()
+})
+
+async function loadInterviewers() {
+  if (!clubId.value) return
+  const res = await get<{ items: { id: string; name: string }[] }>(`/org/${clubId.value}/batch/interviewers`)
+  if (res.kind === 'completed') interviewers.value = res.data.items
+  else toast.error('面试官列表加载失败，请重试')
+}
 
 onBeforeUnmount(() => {
   candidatesAbort?.abort()
@@ -66,6 +80,7 @@ onBeforeUnmount(() => {
 function selectType(type: BatchType) {
   selectedType.value = type
   selectedItems.value = []
+  interviewerId.value = ''
   step.value = 'preview'
 }
 
@@ -98,6 +113,7 @@ async function runBatch(memberIds: string[]) {
   const result = await post<{ results: { memberId: string; success: boolean; message: string }[] }>(`/org/${clubId.value}/batch/execute`, {
     action: selectedType.value,
     memberIds,
+    interviewerId: selectedType.value === 'assign_interviewer' ? interviewerId.value : undefined,
   })
   if (result.kind === 'completed') {
     applyResults(result.data.results)
@@ -199,6 +215,10 @@ const batchResults = computed<PartialResult[]>(() =>
           </button>
         </div>
         <p v-if="loadingCandidates" class="text-sm text-text-secondary py-6 text-center">正在加载候选人...</p>
+        <div v-else-if="candidatesError" class="py-6 text-center">
+          <p class="text-sm text-text-secondary mb-3">候选人加载失败，请重试</p>
+          <button class="px-4 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="loadCandidates">重试</button>
+        </div>
         <p v-else-if="candidates.length === 0" class="text-sm text-text-secondary py-6 text-center">暂无报名申请</p>
         <div v-else class="space-y-2">
           <label
@@ -221,6 +241,20 @@ const batchResults = computed<PartialResult[]>(() =>
         </div>
       </Card>
 
+      <Card class="mb-4">
+        <div v-if="selectedType === 'assign_interviewer'">
+          <label class="block text-sm font-medium text-text-primary mb-2" for="batch-interviewer">选择面试官（批量分配目标）</label>
+          <select
+            id="batch-interviewer"
+            v-model="interviewerId"
+            class="w-full h-10 rounded-md border border-border bg-bg-base px-3 text-sm text-text-primary"
+          >
+            <option value="" disabled>请选择面试官</option>
+            <option v-for="iv in interviewers" :key="iv.id" :value="iv.id">{{ iv.name }}</option>
+          </select>
+        </div>
+      </Card>
+
       <div class="flex gap-3">
         <button class="px-4 h-11 rounded-md border border-border text-text-primary hover:bg-subtle" @click="reset">
           <ArrowLeft :size="16" class="inline mr-1" /> 返回
@@ -230,6 +264,8 @@ const batchResults = computed<PartialResult[]>(() =>
             :selected="batchSelected"
             :executing="executing"
             :action-label="batchTypes.find((b) => b.type === selectedType)?.label || '执行批量操作'"
+            :disabled="selectedType === 'assign_interviewer' && !interviewerId"
+            :disabled-reason="selectedType === 'assign_interviewer' && !interviewerId ? '请先选择面试官' : ''"
             @execute="execute"
           />
         </div>

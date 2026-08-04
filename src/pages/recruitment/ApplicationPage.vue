@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -104,6 +104,10 @@ function removePreference(index: number) {
   preferences.value.splice(index, 1)
 }
 
+watch([formData, preferences], () => {
+  savedDraft.value = false
+}, { deep: true })
+
 function movePreference(index: number, direction: 'up' | 'down') {
   const target = direction === 'up' ? index - 1 : index + 1
   if (target < 0 || target >= preferences.value.length) return
@@ -121,7 +125,6 @@ async function handleSaveDraft() {
   if (result.kind === 'completed') {
     const savedAt = (result.data as { savedAt?: string }).savedAt
     savedDraft.value = true
-    setTimeout(() => { savedDraft.value = false }, 2000)
     toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
   } else {
     toast.error('草稿保存失败，请稍后重试')

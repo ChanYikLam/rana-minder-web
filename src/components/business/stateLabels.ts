@@ -42,6 +42,8 @@ export const STATE_LABELS: Record<string, StatusLabel> = {
 
   // ===== 社团接入（SM-ORG-001）=====
   wizard_pending: { variant: 'info', label: '接入引导中' },
+  pending_review: { variant: 'warning', label: '待审核' },
+  emergency_suspended: { variant: 'danger', label: '紧急停用' },
   pending_rebind: { variant: 'warning', label: '待重绑' },
   enabled: { variant: 'success', label: '已启用' },
   bound: { variant: 'success', label: '已绑定' },

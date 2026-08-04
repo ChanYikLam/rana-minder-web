@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, type DOMWrapper } from '@vue/test-utils'
 import Pagination from './Pagination.vue'
 
 function getPageButtons(wrapper: ReturnType<typeof mount>) {
-  return wrapper.findAll('button').filter((b) => {
+  return wrapper.findAll('button').filter((b: DOMWrapper<Element>) => {
     const label = b.attributes('aria-label') || ''
     return label.startsWith('第 ') && label.endsWith(' 页')
   })
 }
 
 function getEllipsisSpans(wrapper: ReturnType<typeof mount>) {
-  return wrapper.findAll('span').filter((s) => s.text() === '\u2026')
+  return wrapper.findAll('span').filter((s: DOMWrapper<Element>) => s.text() === '\u2026')
 }
 
 describe('Pagination', () => {

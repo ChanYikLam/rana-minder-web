@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
@@ -23,13 +24,18 @@ const pageError = ref<{ code: string; message: string; supportId?: string } | nu
 const items = ref<ExitMember[]>([])
 const resignations = ref<Resignation[]>([])
 
-// 移除/标记退出确认弹窗（共用：均需必填原因）
+// 移除/标记退出确认（标记退出用自定义弹窗；移除走高风险确认流）
 const actingId = ref<string | null>(null)
 const actingAction = ref<'remove' | 'mark_exit' | null>(null)
 const actingMember = computed(() => items.value.find((m) => m.id === actingId.value) ?? null)
 const reason = ref('')
 const reasonError = ref('')
 const actingSubmitting = ref(false)
+
+// 移除成员（高风险：需重认证 + 必填原因）
+const removeOpen = ref(false)
+const removeSucceeded = ref(false)
+const removeError = ref('')
 
 async function loadData() {
   state.value = 'loading'
@@ -66,6 +72,11 @@ function openAction(id: string, action: 'remove' | 'mark_exit') {
   actingAction.value = action
   reason.value = ''
   reasonError.value = ''
+  if (action === 'remove') {
+    removeOpen.value = true
+    removeSucceeded.value = false
+    removeError.value = ''
+  }
 }
 
 function closeAction() {
@@ -97,6 +108,33 @@ async function handleConfirmAction() {
     await loadData()
   } else {
     toastError(r, action === 'remove' ? '移除失败，请重试' : '标记失败，请重试')
+  }
+}
+
+async function handleConfirmRemove() {
+  if (!reason.value.trim()) {
+    reasonError.value = '移除原因不能为空'
+    return
+  }
+  if (!actingId.value) return
+  actingSubmitting.value = true
+  removeSucceeded.value = false
+  removeError.value = ''
+  const clubId = route.params.clubId as string
+  const targetId = actingId.value
+  const r = await post(`/org/${clubId}/members/exit`, {
+    memberId: targetId,
+    action: 'remove',
+    reason: reason.value.trim(),
+  })
+  actingSubmitting.value = false
+  if (r.kind === 'completed') {
+    removeSucceeded.value = true
+    toast.success('成员已移除')
+    closeAction()
+    await loadData()
+  } else {
+    removeError.value = (r as { error?: { message?: string } }).error?.message || '移除失败，请重试'
   }
 }
 
@@ -252,45 +290,67 @@ onMounted(loadData)
         </Card>
       </div>
 
-      <!-- 移除/标记退出确认弹窗（共用：均必填原因） -->
-      <div v-if="actingId && actingAction" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" :aria-label="actingAction === 'remove' ? '移除成员确认' : '标记退出确认'">
+      <!-- 标记退出确认弹窗 -->
+      <div v-if="actingId && actingAction === 'mark_exit'" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" :aria-label="'标记退出确认'">
         <div class="bg-elevated rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
           <div class="flex items-center gap-2 mb-3">
-            <AlertTriangle :size="20" :class="actingAction === 'remove' ? 'text-danger' : 'text-warning'" />
-            <h3 class="text-base font-medium" :class="actingAction === 'remove' ? 'text-danger' : 'text-warning'">
-              {{ actingAction === 'remove' ? '确认移除成员' : '确认标记退出' }}
-            </h3>
+            <AlertTriangle :size="20" class="text-warning" />
+            <h3 class="text-base font-medium text-warning">确认标记退出</h3>
           </div>
-          <p v-if="actingAction === 'remove'" class="text-sm text-text-secondary mb-3">此操作不可撤销，将移除该成员的全部部门、职位和访问权限，并通知当事人。</p>
-          <p v-else class="text-sm text-text-secondary mb-3">此操作将记录该成员退出社团、所属部门和职位，请填写退出原因以便后续审计。</p>
+          <p class="text-sm text-text-secondary mb-3">此操作将记录该成员退出社团、所属部门和职位，请填写退出原因以便后续审计。</p>
           <div v-if="actingMember" class="rounded-lg border border-border p-3 mb-3 text-sm">
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">目标成员</span><span class="text-text-primary">{{ actingMember.name }}</span></div>
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">学号</span><span class="text-text-primary">{{ actingMember.studentId }}</span></div>
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">部门 · 职位</span><span class="text-text-primary">{{ actingMember.department }} · {{ actingMember.title }}</span></div>
           </div>
-          <p class="text-xs text-warning mb-2">{{ actingAction === 'remove' ? '移除必须填写原因' : '标记退出必须填写原因' }}</p>
+          <p class="text-xs text-warning mb-2">标记退出必须填写原因</p>
           <textarea
             v-model="reason"
             rows="3"
             class="w-full px-3 py-2 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             :class="reasonError ? 'border-danger' : 'border-border'"
-            :placeholder="actingAction === 'remove' ? '请填写移除原因...' : '请填写退出原因...'"
+            placeholder="请填写退出原因..."
             aria-label="操作原因"
           />
           <p v-if="reasonError" class="mt-2 text-xs text-danger" role="alert">{{ reasonError }}</p>
           <div class="flex gap-2 mt-4">
             <button class="flex-1 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="closeAction">取消</button>
             <button
-              class="flex-1 h-9 rounded-md text-text-on-primary text-sm font-medium hover:opacity-90"
-              :class="actingAction === 'remove' ? 'bg-danger' : 'bg-warning'"
+              class="flex-1 h-9 rounded-md text-text-on-primary text-sm font-medium hover:opacity-90 bg-warning"
               :disabled="actingSubmitting"
               @click="handleConfirmAction"
             >
-              {{ actingSubmitting ? '处理中...' : (actingAction === 'remove' ? '确认移除' : '确认标记退出') }}
+              {{ actingSubmitting ? '处理中...' : '确认标记退出' }}
             </button>
           </div>
         </div>
       </div>
+
+      <HighRiskConfirm
+        v-model:open="removeOpen"
+        title="移除成员"
+        description="此操作不可撤销，将移除该成员的全部部门、职位和访问权限，并通知当事人。"
+        :targets="actingMember ? [{ id: actingMember.id, label: actingMember.name, detail: `${actingMember.department} · ${actingMember.title}` }] : []"
+        impact-summary="移除必须填写原因；操作者不能移除自己，最后一位负责人需先交接。"
+        confirm-label="确认移除"
+        reauth-required
+        :executing="actingSubmitting"
+        :succeeded="removeSucceeded"
+        :error-message="removeError"
+        @confirm="handleConfirmRemove"
+      >
+        <template #extra>
+          <textarea
+            v-model="reason"
+            rows="3"
+            class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            :class="reasonError ? 'border-danger' : ''"
+            placeholder="请填写移除原因（必填）"
+            aria-label="移除原因"
+          />
+          <p v-if="reasonError" class="mt-2 text-xs text-danger" role="alert">{{ reasonError }}</p>
+        </template>
+      </HighRiskConfirm>
     </div>
   </PageStateBoundary>
 </template>

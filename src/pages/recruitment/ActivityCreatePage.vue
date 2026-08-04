@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Card } from '@/components/common'
-import { post } from '@/services/client'
-import { ArrowLeft, Plus, X, Save } from '@lucide/vue'
+import { get, post } from '@/services/client'
+import { ArrowLeft, Plus, X, Save, FileText, Copy } from '@lucide/vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,8 +17,26 @@ const form = reactive({
   description: '',
   deadline: '',
   departments: [] as { id: string; name: string }[],
-  formId: 'form-001',
+  formId: '',
+  formTitle: '',
 })
+
+// 可用表单（已发布）
+const forms = ref<{ id: string; title: string; status: string }[]>([])
+const formsState = ref<'loading' | 'normal' | 'error'>('loading')
+
+async function loadForms() {
+  const clubId = route.params.clubId as string
+  const result = await get<{ items: { id: string; title: string; status: string }[] }>(`/org/${clubId}/forms`)
+  if (result.kind === 'completed') {
+    forms.value = result.data.items.filter((f) => f.status === 'published')
+    formsState.value = 'normal'
+  } else {
+    formsState.value = 'error'
+  }
+}
+
+onMounted(loadForms)
 
 const newDeptName = ref('')
 
@@ -32,16 +50,23 @@ function removeDepartment(index: number) {
   form.departments.splice(index, 1)
 }
 
+function selectForm(id: string) {
+  form.formId = id
+  form.formTitle = forms.value.find((f) => f.id === id)?.title || ''
+}
+
 const canProceed = computed(() => {
   if (step.value === 1) return form.title.trim() !== '' && form.deadline !== ''
-  if (step.value === 2) return form.departments.length > 0
+  if (step.value === 2) return form.formId !== ''
+  if (step.value === 3) return form.departments.length > 0
   return true
 })
 
 const steps = [
   { num: 1, label: '基本信息' },
-  { num: 2, label: '招新方向' },
-  { num: 3, label: '预览发布' },
+  { num: 2, label: '报名表单' },
+  { num: 3, label: '招新方向' },
+  { num: 4, label: '预览发布' },
 ]
 
 async function handlePublish() {
@@ -119,8 +144,44 @@ async function handlePublish() {
       </div>
     </Card>
 
-    <!-- Step 2: 招新方向 -->
+    <!-- Step 2: 报名表单 -->
     <Card v-if="step === 2" class="mb-4">
+      <h2 class="text-base font-medium text-text-primary mb-2">报名表单</h2>
+      <p class="text-xs text-text-secondary mb-4">选择本社团已发布的报名表单，申请人将使用该表单提交报名材料</p>
+
+      <div v-if="formsState === 'loading'" class="py-6 text-center text-sm text-text-secondary">正在加载表单...</div>
+      <div v-else-if="formsState === 'error'" class="py-6 text-center">
+        <p class="text-sm text-text-secondary mb-3">表单加载失败</p>
+        <button class="px-4 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="loadForms">重试</button>
+      </div>
+      <div v-else-if="forms.length === 0" class="rounded-lg border border-dashed border-border p-6 text-center">
+        <FileText :size="24" class="mx-auto text-text-secondary mb-2" />
+        <p class="text-sm text-text-secondary">暂无已发布表单，请先在表单设计器创建并发布</p>
+      </div>
+      <div v-else class="space-y-2">
+        <div
+          v-for="f in forms"
+          :key="f.id"
+          class="flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors"
+          :class="form.formId === f.id ? 'border-primary bg-primary-subtle' : 'border-border hover:border-primary'"
+          @click="selectForm(f.id)"
+        >
+          <input type="radio" :checked="form.formId === f.id" class="accent-primary" :aria-label="`选择表单 ${f.title}`" @click="selectForm(f.id)" />
+          <div class="flex-1">
+            <p class="text-sm font-medium text-text-primary">{{ f.title }}</p>
+            <p class="text-xs text-text-secondary">{{ f.status === 'published' ? '已发布' : '草稿' }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center gap-2 rounded-md bg-subtle px-3 py-2">
+        <Copy :size="14" class="text-text-secondary shrink-0" />
+        <p class="text-xs text-text-secondary">如需新表，请先在“动态表单”中创建并发布，再回到本步骤选择。</p>
+      </div>
+    </Card>
+
+    <!-- Step 3: 招新方向 -->
+    <Card v-if="step === 3" class="mb-4">
       <h2 class="text-base font-medium text-text-primary mb-2">招新方向</h2>
       <p class="text-xs text-text-secondary mb-4">添加本次招新的部门或方向，申请人将按优先级选择</p>
 
@@ -157,8 +218,8 @@ async function handlePublish() {
       </div>
     </Card>
 
-    <!-- Step 3: 预览 -->
-    <Card v-if="step === 3" class="mb-4">
+    <!-- Step 4: 预览 -->
+    <Card v-if="step === 4" class="mb-4">
       <h2 class="text-base font-medium text-text-primary mb-4">预览确认</h2>
       <dl class="space-y-3 text-sm">
         <div class="flex justify-between border-b border-border pb-2">
@@ -168,6 +229,10 @@ async function handlePublish() {
         <div class="flex justify-between border-b border-border pb-2">
           <dt class="text-text-secondary">报名截止</dt>
           <dd class="text-text-primary">{{ form.deadline }}</dd>
+        </div>
+        <div class="flex justify-between border-b border-border pb-2">
+          <dt class="text-text-secondary">报名表单</dt>
+          <dd class="text-text-primary">{{ form.formTitle || form.formId }}</dd>
         </div>
         <div class="flex justify-between border-b border-border pb-2">
           <dt class="text-text-secondary">招新方向</dt>
@@ -192,7 +257,7 @@ async function handlePublish() {
         上一步
       </button>
       <button
-        v-if="step < 3"
+        v-if="step < 4"
         class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
         :disabled="!canProceed"
         @click="step++"
@@ -200,7 +265,7 @@ async function handlePublish() {
         下一步
       </button>
       <button
-        v-if="step === 3"
+        v-if="step === 4"
         class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
         :disabled="submitting"
         @click="handlePublish"

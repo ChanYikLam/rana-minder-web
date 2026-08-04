@@ -72,6 +72,14 @@ export const ERROR_RESUBMIT_ALLOWED: Record<ErrorCode, boolean> = {
 
 export type PageStateFromError = 'error' | 'forbidden' | 'loading'
 
+export function errorCodeOf(result: ApiResult<unknown>): ErrorCode {
+  if (result.kind === 'rejected' || result.kind === 'concurrency_conflict' || result.kind === 'external_uncertain' || result.kind === 'dependency_unavailable') {
+    const code = result.error?.code
+    return code && isErrorCode(code) ? code : 'IFC-ERR-016'
+  }
+  return 'IFC-ERR-016'
+}
+
 export function errorToPageState(code: ErrorCode): PageStateFromError {
   if (code === 'IFC-ERR-001' || code === 'IFC-ERR-002' || code === 'IFC-ERR-003' || code === 'IFC-ERR-004' || code === 'IFC-ERR-011' || code === 'IFC-ERR-015') {
     return 'forbidden'

@@ -228,7 +228,7 @@ onBeforeUnmount(stopAllPolling)
       title="创建成员名单导出"
       description="导出将生成包含社团成员信息的文件，请确认导出范围与安全规则。"
       :targets="[{ id: 'members', label: '本社团全部成员', detail: '仅基础字段，不含敏感列' }]"
-      impact-summary="导出任务生成后 7 天内可下载，过期自动失效；每次下载实时校验权限。"
+      impact-summary="导出任务生成后 24 小时内可下载，过期自动失效；每次下载实时校验权限。"
       confirm-label="开始导出"
       :executing="executing"
       :succeeded="succeeded"

@@ -1,12 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import { workspacePermissionForRoute, ADMIN_PERMISSIONS, INTERVIEW_ACCESS_PERMISSIONS } from './permissions'
 import { mockUsers, getPermissions } from '@/mock/auth'
+import router from '@/router'
 
 describe('ADMIN_PERMISSIONS', () => {
   it('maps all admin route names to a permission', () => {
     expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-ORG-01']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-OPS-01']).toBe('platform:ops:view')
+  })
+
+  it('covers every requiresAdmin route (guard rejects missing keys unconditionally)', () => {
+    const adminRoutes = router
+      .getRoutes()
+      .filter((r) => r.meta.requiresAdmin === true)
+      .map((r) => String(r.name))
+    expect(adminRoutes.length).toBeGreaterThan(0)
+    for (const name of adminRoutes) {
+      expect(ADMIN_PERMISSIONS[name], `missing ADMIN_PERMISSIONS for route ${name}`).toBeTruthy()
+    }
+  })
+
+  it('resolves every requiresWorkspace route (exact or prefix fallback)', () => {
+    const wsRoutes = router
+      .getRoutes()
+      .filter((r) => r.meta.requiresWorkspace === true)
+      .map((r) => String(r.name))
+    expect(wsRoutes.length).toBeGreaterThan(0)
+    for (const name of wsRoutes) {
+      expect(workspacePermissionForRoute(name), `unresolved workspace permission for route ${name}`).not.toBeNull()
+    }
   })
 })
 

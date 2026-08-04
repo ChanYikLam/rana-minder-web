@@ -397,6 +397,12 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, requiresAdmin: true },
   },
   {
+    path: '/admin/clubs/wizard',
+    name: 'P-ORG-01-wizard',
+    component: () => import('@/pages/organization/ClubAccessWizardPage.vue'),
+    meta: { layout: 'default', requiresAuth: true, requiresAdmin: true },
+  },
+  {
     path: '/admin/forms/designer/:formId',
     name: 'P-FORM-01-admin',
     component: () => import('@/pages/form/FormDesignerPage.vue'),

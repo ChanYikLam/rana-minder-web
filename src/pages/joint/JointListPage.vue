@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Plus, ChevronRight, Users } from '@lucide/vue'
 
@@ -21,7 +22,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: JointActivity[] } }).data.items
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 onMounted(loadData)

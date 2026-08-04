@@ -94,8 +94,9 @@ onMounted(loadData)
         :targets="target ? [{ id: target.id, label: target.title, detail: `${target.clubName} · ${target.applicantCount} 报名` }] : []"
         impact-summary="强制结束后活动进入平台强制结束状态，社团不可再恢复。"
         confirm-label="确认强制结束"
+        reauth-required
         :executing="busy"
-        :error="reasonError || null"
+        :error-message="reasonError || undefined"
         @confirm="handleForceComplete"
       >
         <template #extra>
@@ -104,7 +105,6 @@ onMounted(loadData)
             class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             placeholder="强制结束原因（必填）"
           />
-          <p v-if="reasonError" class="mt-2 text-xs text-destructive">{{ reasonError }}</p>
         </template>
       </HighRiskConfirm>
     </div>

@@ -18,6 +18,7 @@ const currentVersion = ref(1)
 const fields = ref<Field[]>([])
 const selectedFieldId = ref<string | null>(null)
 const saving = ref(false)
+const previewOpen = ref(false)
 
 const selectedField = computed(() => {
   if (!selectedFieldId.value) return null
@@ -105,7 +106,7 @@ onMounted(loadData)
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">{{ formTitle }}</h1>
         <div class="flex gap-2">
-          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"><Eye :size="16" /> 预览</button>
+          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="previewOpen = true"><Eye :size="16" /> 预览</button>
           <button
             class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
             :disabled="saving"
@@ -202,6 +203,51 @@ onMounted(loadData)
           </div>
           <p v-else class="text-xs text-text-secondary">请从画布中选择一个字段进行编辑</p>
         </Card>
+      </div>
+
+      <div v-if="previewOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="form-preview-title">
+        <div class="absolute inset-0 bg-black/40" aria-hidden="true" />
+        <div class="relative w-full max-w-lg rounded-lg border border-border bg-background shadow-xl max-h-[85vh] overflow-y-auto">
+          <div class="flex items-center justify-between border-b border-border px-5 py-4">
+            <h2 id="form-preview-title" class="text-base font-semibold text-text-primary">表单预览</h2>
+            <button class="text-sm text-text-secondary hover:text-text-primary" @click="previewOpen = false">关闭</button>
+          </div>
+          <div class="px-5 py-4 space-y-4">
+            <div v-if="fields.length === 0" class="text-sm text-text-secondary py-8 text-center">暂未添加字段</div>
+            <div v-for="field in fields" :key="field.id">
+              <label class="block text-sm font-medium text-text-primary mb-1">
+                {{ field.label }}<span v-if="field.required" class="text-danger"> *</span>
+              </label>
+              <p v-if="field.description" class="text-xs text-text-secondary mb-1">{{ field.description }}</p>
+              <input
+                v-if="['text', 'date'].includes(field.type)"
+                :type="field.type === 'date' ? 'date' : 'text'"
+                :placeholder="field.type === 'text' ? '请输入' : ''"
+                disabled
+                class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70"
+              />
+              <textarea
+                v-else-if="field.type === 'textarea'"
+                rows="2"
+                disabled
+                placeholder="请输入"
+                class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70"
+              />
+              <select v-else-if="field.type === 'select'" disabled class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70">
+                <option v-for="opt in field.options || ['请选择']" :key="opt">{{ opt }}</option>
+              </select>
+              <label v-else-if="field.type === 'checkbox'" class="flex items-center gap-2 text-sm text-text-primary">
+                <input type="checkbox" disabled class="rounded border-border" /> 勾选
+              </label>
+              <div v-else-if="field.type === 'file'" class="w-full h-9 px-3 rounded-md border border-dashed border-border flex items-center justify-center text-xs text-text-secondary">
+                文件上传区域（预览）
+              </div>
+            </div>
+          </div>
+          <div class="flex justify-end border-t border-border px-5 py-3">
+            <button class="px-4 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="previewOpen = false">关闭预览</button>
+          </div>
+        </div>
       </div>
     </div>
   </PageStateBoundary>

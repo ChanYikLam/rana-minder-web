@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Plus, Shield, Check } from '@lucide/vue'
@@ -14,6 +16,9 @@ const items = ref<Template[]>([])
 const selected = ref<Template | null>(null)
 const editing = ref(false)
 const publishing = ref(false)
+const publishOpen = ref(false)
+const publishSucceeded = ref(false)
+const publishError = ref('')
 const draft = ref({ name: '', permissions: '' })
 
 async function loadData() {
@@ -22,10 +27,24 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = result.data.items
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 const saving = ref(false)
+
+function startCreate() {
+  const tpl: Template = {
+    id: `tpl-${Date.now()}`,
+    name: '未命名模板',
+    permissions: [],
+    version: 1,
+    status: 'draft',
+  }
+  items.value.unshift(tpl)
+  selected.value = tpl
+  draft.value = { name: tpl.name, permissions: '' }
+  editing.value = true
+}
 
 function startEdit() {
   if (!selected.value) return
@@ -59,17 +78,20 @@ async function saveDraft() {
 }
 
 async function handlePublish() {
-  if (!selected.value) return
+  if (!selected.value || publishing.value) return
   publishing.value = true
+  publishSucceeded.value = false
+  publishError.value = ''
   const result = await post(`/admin/config/permission-templates/${selected.value.id}/publish`)
   publishing.value = false
   if (result.kind === 'completed') {
+    publishSucceeded.value = true
     selected.value.status = 'published'
     const idx = items.value.findIndex((t) => t.id === selected.value!.id)
     if (idx >= 0) items.value[idx] = { ...selected.value }
     toast.success('模板已发布')
   } else {
-    toast.error('发布失败，请重试')
+    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
   }
 }
 
@@ -81,7 +103,7 @@ onMounted(loadData)
     <div class="max-w-3xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">权限模板管理</h1>
-        <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover">
+        <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="startCreate">
           <Plus :size="16" /> 新建模板
         </button>
       </div>
@@ -133,10 +155,9 @@ onMounted(loadData)
               <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="startEdit">编辑</button>
               <button
                 class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
-                :disabled="publishing"
-                @click="handlePublish"
+                @click="publishOpen = true"
               >
-                {{ publishing ? '发布中...' : '发布' }}
+                发布
               </button>
             </template>
             <template v-else>
@@ -150,5 +171,19 @@ onMounted(loadData)
         </Card>
       </div>
     </div>
+
+    <HighRiskConfirm
+      v-model:open="publishOpen"
+      title="发布权限模板"
+      description="发布后立即作用于全部关联成员并原子切换权限，此操作不可撤销。"
+      :targets="selected ? [{ id: selected.id, label: selected.name, detail: `${selected.permissions.length} 项权限 · v${selected.version}` }] : []"
+      impact-summary="发布失败时全部成员继续使用旧版本；权限缓存将按新版本刷新。"
+      confirm-label="确认发布"
+      reauth-required
+      :executing="publishing"
+      :succeeded="publishSucceeded"
+      :error-message="publishError"
+      @confirm="handlePublish"
+    />
   </PageStateBoundary>
 </template>

@@ -289,7 +289,7 @@ export const mockUsers: Record<string, MockUser> = {
   applicant3: {
     id: 'user-applicant-003',
     studentId: '20240006',
-    name: '孙一凡',
+    name: '林婉婷',
     email: 'applicant3@example.edu.cn',
     phone: '13800000003',
     avatar: null,
@@ -390,6 +390,13 @@ export const USER_MEMBER_MAP: Record<string, string> = {
   'user-interviewer-001': 'mem-002',
   'user-member-001': 'mem-001',
   'user-deptleader-001': 'mem-006',
+}
+
+/** mock 用户 id → 候选人 id 映射（申请人视角操作者；通知/业务侧经此反查接收用户） */
+export const USER_APPLICANT_MAP: Record<string, string> = {
+  'user-applicant-001': 'u-001',
+  'user-applicant-002': 'u-002',
+  'user-applicant-003': 'u-006',
 }
 
 /** 获取当前用户的默认工作空间（有社团归属时返回） */

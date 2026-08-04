@@ -221,6 +221,8 @@ const remainingSeconds = computed(() => {
           <p>即将执行：<span class="font-medium text-primary">{{ title }}</span></p>
         </div>
 
+        <slot name="extra" />
+
         <div v-if="reauthRequired" class="space-y-2">
           <label class="block text-sm font-medium text-text-primary flex items-center gap-1.5">
             <KeyRound :size="14" /> 重新认证（剩余 {{ remainingSeconds }} 秒）

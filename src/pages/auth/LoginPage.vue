@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
@@ -49,6 +49,13 @@ function resolveTargetAfterLogin(): string {
   if (session.hasPermission('platform:club:manage')) return '/admin/clubs'
   return '/me'
 }
+
+onMounted(async () => {
+  await session.loadSession()
+  if (session.isAuthenticated) {
+    await router.replace(resolveTargetAfterLogin())
+  }
+})
 
 async function handleLogin() {
   if (loggingIn.value || authMode === 'disabled') return

@@ -3,6 +3,8 @@
  * 单一数据源，页面刷新即重置；状态流转经 state-machines 校验
  */
 
+import { assertTransition } from './state-machines/transitions'
+
 export type MockRoleKey = 'club_leader' | 'hr' | 'department_leader' | 'interviewer' | 'member'
 
 export interface MockDepartment {
@@ -402,12 +404,16 @@ export function decideDepartmentApplication(appId: string, decision: 'approve' |
   if (app.applicantId === actorId) return { ok: false, error: '不能审批自己的申请' }
   if (decision === 'reject') {
     if (!rejectReason?.trim()) return { ok: false, error: '驳回必须填写原因' }
+    const t = assertTransition('SM-MEM-003', app.status, 'rejected', 'reject')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可驳回' }
     app.status = 'rejected'
     app.rejectReason = rejectReason
     app.decidedAt = now
     app.decidedBy = actorName
     return { ok: true, app }
   }
+  const t = assertTransition('SM-MEM-003', app.status, 'approved_pending_exec', 'approve')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可通过' }
   app.status = 'approved_pending_exec'
   app.decidedAt = now
   app.decidedBy = actorName
@@ -417,12 +423,18 @@ export function decideDepartmentApplication(appId: string, decision: 'approve' |
 export function executeDepartmentApplication(appId: string): { ok: boolean; error?: string; app?: MockDeptApplication } {
   const app = departmentApplications.find((a) => a.id === appId)
   if (!app) return { ok: false, error: '申请不存在' }
-  if (app.status !== 'approved_pending_exec' && app.status !== 'exec_failed') return { ok: false, error: '当前状态不可执行' }
+  const entry = app.status === 'approved_pending_exec' ? 'execute' : 'retry'
+  const t1 = assertTransition('SM-MEM-003', app.status, 'executing', entry)
+  if (!t1.ok) return { ok: false, error: t1.reason || '当前状态不可执行' }
+  app.status = 'executing'
   if (app.execFailOn === 'first' && !app.execRetried) {
     app.execRetried = true
-    app.status = 'exec_failed'
+    const t2 = assertTransition('SM-MEM-003', app.status, 'exec_failed', 'failed')
+    if (t2.ok) app.status = 'exec_failed'
     return { ok: false, error: '执行失败：目标部门关系写入未确认，保持原关系', app }
   }
+  const t2 = assertTransition('SM-MEM-003', app.status, 'effective', 'confirmed')
+  if (!t2.ok) return { ok: false, error: t2.reason || '执行写入未确认' }
   app.status = 'effective'
   const member = findMember(app.clubId, app.applicantId)
   if (member) {
@@ -435,6 +447,8 @@ export function executeDepartmentApplication(appId: string): { ok: boolean; erro
     if (app.type === 'leave' || app.type === 'transfer') {
       const pos = member.positions.find((p) => p.status === 'active' && p.departmentName === app.currentDept)
       if (pos) {
+        const t3 = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+        if (!t3.ok) return { ok: false, error: t3.reason || '当前职位状态无法结束' }
         pos.endDate = new Date().toISOString().slice(0, 10)
         pos.status = 'ended'
       }
@@ -466,6 +480,11 @@ export function withdrawInvitation(invitationId: string): { ok: boolean; error?:
   const inv = membershipInvitations.find((i) => i.id === invitationId)
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status !== 'sent' && inv.status !== 'pending_acceptance') return { ok: false, error: '仅待处理的邀请可撤回' }
+  // SM-MEM-004 状态机仅定义 pending_acceptance --withdraw--> withdrawn（sent 为发出态，撤回属状态机外补充）
+  if (inv.status === 'pending_acceptance') {
+    const t = assertTransition('SM-MEM-004', inv.status, 'withdrawn', 'withdraw')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可撤回' }
+  }
   inv.status = 'withdrawn'
   inv.withdrawnAt = now
   return { ok: true, invitation: inv }
@@ -476,14 +495,22 @@ export function respondInvitation(invitationId: string, action: 'accept' | 'reje
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status !== 'sent' && inv.status !== 'pending_acceptance') return { ok: false, error: '该邀请已处理，无法再次操作' }
   if (new Date(inv.expiredAt).getTime() < Date.now()) {
-    inv.status = 'expired'
+    const t = assertTransition('SM-MEM-004', inv.status, 'expired', 'expire')
+    if (t.ok) {
+      inv.status = 'expired'
+      return { ok: false, error: '邀请已过期' }
+    }
     return { ok: false, error: '邀请已过期' }
   }
   if (action === 'reject') {
+    const t = assertTransition('SM-MEM-004', inv.status, 'rejected', 'reject')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可拒绝' }
     inv.status = 'rejected'
     return { ok: true, invitation: inv }
   }
   // 整体接受：加入社团 + 初始部门必须整体生效，部分失败则整体回滚
+  const t = assertTransition('SM-MEM-004', inv.status, 'accepted_pending_sync', 'accept')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可接受' }
   inv.status = 'accepted_pending_sync'
   inv.acceptedAt = now
   return { ok: true, invitation: inv }
@@ -494,6 +521,8 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
   const inv = membershipInvitations.find((i) => i.id === invitationId)
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status === 'accepted_pending_sync') {
+    const t = assertTransition('SM-MEM-004', inv.status, 'effective', 'confirmed')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可确认生效' }
     inv.status = 'effective'
     members.push({
       id: 'mem-' + Date.now(), clubId: inv.clubId, studentId: inv.candidateStudentId, name: inv.candidateName,
@@ -528,7 +557,8 @@ export function createAppointmentCommand(clubId: string, input: { action: Appoin
 export function cancelAppointmentCommand(commandId: string): { ok: boolean; error?: string } {
   const cmd = appointmentCommands.find((c) => c.id === commandId)
   if (!cmd) return { ok: false, error: '命令不存在' }
-  if (cmd.status === 'executed' || cmd.status === 'executing' || cmd.status === 'cancelled') return { ok: false, error: '当前状态不可取消' }
+  const t = assertTransition('SM-ORG-003', cmd.status, 'cancelled', 'cancel')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可取消' }
   cmd.status = 'cancelled'
   return { ok: true }
 }
@@ -536,7 +566,14 @@ export function cancelAppointmentCommand(commandId: string): { ok: boolean; erro
 export function reconfirmAppointmentCommand(commandId: string, scheduledAt: string): { ok: boolean; error?: string } {
   const cmd = appointmentCommands.find((c) => c.id === commandId)
   if (!cmd) return { ok: false, error: '命令不存在' }
-  if (cmd.status !== 'initiator_lost_rights' && cmd.status !== 'precondition_failed' && cmd.status !== 'pending_exec') return { ok: false, error: '当前状态不可重新确认' }
+  // pending_exec 属待执行态，仅更新计划时间不触发状态转换
+  if (cmd.status === 'pending_exec') {
+    cmd.scheduledAt = scheduledAt
+    return { ok: true }
+  }
+  const event = cmd.status === 'initiator_lost_rights' ? 'reconfirm' : 'reconfirm_new_time'
+  const t = assertTransition('SM-ORG-003', cmd.status, 'reconfirmed', event)
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可重新确认' }
   cmd.scheduledAt = scheduledAt
   cmd.status = 'reconfirmed'
   return { ok: true }
@@ -545,14 +582,19 @@ export function reconfirmAppointmentCommand(commandId: string, scheduledAt: stri
 export function executeAppointmentCommand(commandId: string): { ok: boolean; error?: string; command?: MockAppointmentCommand } {
   const cmd = appointmentCommands.find((c) => c.id === commandId)
   if (!cmd) return { ok: false, error: '命令不存在' }
-  if (cmd.status !== 'pending_exec' && cmd.status !== 'reconfirmed' && cmd.status !== 'exec_failed') return { ok: false, error: '当前状态不可执行' }
+  const entryEvent = cmd.status === 'exec_failed' ? 'retry' : 'execute_ok'
+  const t1 = assertTransition('SM-ORG-003', cmd.status, 'executing', entryEvent)
+  if (!t1.ok) return { ok: false, error: t1.reason || '当前状态不可执行' }
   cmd.status = 'executing'
   if (cmd.execFailOn === 'first' && !cmd.execRetried) {
     cmd.execRetried = true
-    cmd.status = 'exec_failed'
+    const t2 = assertTransition('SM-ORG-003', cmd.status, 'exec_failed', 'external_failed')
+    if (t2.ok) cmd.status = 'exec_failed'
     cmd.failReason = '执行失败：Casdoor 回读未确认，保持原关系'
     return { ok: false, error: cmd.failReason, command: cmd }
   }
+  const t2 = assertTransition('SM-ORG-003', cmd.status, 'executed', 'group_confirmed')
+  if (!t2.ok) return { ok: false, error: t2.reason || '执行结果未确认' }
   cmd.status = 'executed'
   cmd.executedAt = now
   const member = findMember(cmd.clubId, cmd.memberId)
@@ -560,8 +602,11 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
     if (cmd.action === 'dismiss') {
       const pos = member.positions.find((p) => p.status === 'active')
       if (pos) {
-        pos.endDate = new Date().toISOString().slice(0, 10)
-        pos.status = 'ended'
+        const t3 = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+        if (t3.ok) {
+          pos.endDate = new Date().toISOString().slice(0, 10)
+          pos.status = 'ended'
+        }
       }
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: pos?.departmentName || '', title: pos?.title || '', startDate: pos?.startDate || '', endDate: new Date().toISOString().slice(0, 10), endReason: '免职' })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: pos?.departmentName || '', at: now })
@@ -570,8 +615,11 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
       if (cmd.action === 'transfer') {
         const oldPos = member.positions.find((p) => p.status === 'active')
         if (oldPos) {
-          oldPos.endDate = new Date().toISOString().slice(0, 10)
-          oldPos.status = 'ended'
+          const t3 = assertTransition('SM-MEM-002', oldPos.status, 'ended', 'end_change')
+          if (t3.ok) {
+            oldPos.endDate = new Date().toISOString().slice(0, 10)
+            oldPos.status = 'ended'
+          }
           member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: oldPos.departmentName, title: oldPos.title, startDate: oldPos.startDate, endDate: oldPos.endDate, endReason: '调岗' })
         }
       }
@@ -611,11 +659,16 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
   req.decidedBy = actorName
   const member = findMember(req.clubId, req.memberId)
   if (member) {
+    const t = assertTransition('SM-MEM-001', member.status, 'exiting', 'exit_approved')
+    if (!t.ok) return { ok: false, error: t.reason || '当前成员状态不可进入退出流程' }
     member.status = 'exiting'
     const pos = member.positions.find((p) => p.status === 'active' && p.departmentName === req.departmentName)
     if (pos) {
-      pos.endDate = new Date().toISOString().slice(0, 10)
-      pos.status = 'ended'
+      const t2 = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+      if (t2.ok) {
+        pos.endDate = new Date().toISOString().slice(0, 10)
+        pos.status = 'ended'
+      }
     }
     member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: req.departmentName, title: req.title, startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), endReason: '辞职' })
     member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: req.departmentName, at: now })
