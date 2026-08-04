@@ -8,7 +8,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Calendar, Users, AlertTriangle, Play, CheckCircle2, XCircle, Clock3, CalendarPlus, Star } from '@lucide/vue'
+import { Calendar, Users, AlertTriangle, Play, CheckCircle2, XCircle, Clock3, CalendarPlus, Star, Plus } from '@lucide/vue'
 
 interface JointInterview {
   id: string; jointId: string; applicantId: string; applicantName: string
@@ -17,6 +17,8 @@ interface JointInterview {
 }
 interface JointApp { applicantId: string; applicantName: string; status: string }
 interface Slot { id: string; startAt: string; capacity: number; available: number }
+interface JointInterviewerTask { id: string; userId: string; userName: string; scope: string; status: string }
+interface CandidateItem { id: string; name: string; role: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -96,9 +98,68 @@ const canStart = (s: string) => ['scheduled', 'late'].includes(s)
 const canComplete = (s: string) => s === 'in_progress'
 const canInvalidate = (s: string) => !['cancelled', 'invalidated', 'completed'].includes(s)
 
+// 临时联合面试官任务（JNT-031/ORG-037：本社团当前成员，活动级）
+const interviewerOpen = ref(false)
+const defaultReviewers = ref<{ id: string; name: string; source: string }[]>([])
+const jointTasks = ref<JointInterviewerTask[]>([])
+const candidates = ref<CandidateItem[]>([])
+const taskForm = ref<{ userId: string }>({ userId: '' })
+const taskError = ref('')
+const revokingTaskId = ref<string | null>(null)
+
+async function loadInterviewers() {
+  const [t, c] = await Promise.all([
+    get<{ defaultReviewers: { id: string; name: string; source: string }[]; tasks: JointInterviewerTask[] }>(`/org/${clubId.value}/joint/${jointId.value}/interviewers`),
+    get<{ items: CandidateItem[] }>(`/org/${clubId.value}/joint/${jointId.value}/interviewers/candidates`),
+  ])
+  if (t.kind === 'completed') {
+    defaultReviewers.value = t.data.defaultReviewers
+    jointTasks.value = t.data.tasks
+  }
+  if (c.kind === 'completed') candidates.value = c.data.items
+}
+
+async function handleAssignTask() {
+  if (!taskForm.value.userId) {
+    taskError.value = '请选择要指派的成员'
+    return
+  }
+  if (actionLoading.value) return
+  actionLoading.value = true
+  taskError.value = ''
+  const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers`, {
+    userId: taskForm.value.userId,
+    userName: candidate?.name || '',
+  })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    taskForm.value = { userId: '' }
+    taskError.value = ''
+    await loadInterviewers()
+  } else if (result.kind === 'rejected' && result.error) {
+    taskError.value = (result.error as { message?: string }).message || '指派失败'
+  }
+}
+
+async function handleRevokeTask(taskId: string) {
+  if (actionLoading.value) return
+  actionLoading.value = true
+  taskError.value = ''
+  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers/${taskId}/revoke`, {})
+  actionLoading.value = false
+  revokingTaskId.value = null
+  if (result.kind === 'completed') {
+    await loadInterviewers()
+  } else if (result.kind === 'rejected' && result.error) {
+    taskError.value = (result.error as { message?: string }).message || '撤销失败'
+  }
+}
+
 onMounted(async () => {
   await loadData()
   await loadOptions()
+  await loadInterviewers()
 })
 </script>
 
@@ -160,6 +221,74 @@ onMounted(async () => {
           </div>
         </div>
       </Card>
+
+      <!-- 临时联合面试官任务（JNT-031/ORG-037） -->
+      <PermissionGuard permission="club:joint:manage">
+        <Card class="mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-medium text-text-primary">面试官与临时任务</h2>
+            <button
+              class="flex items-center gap-1.5 px-3 h-8 rounded-md border border-border text-text-secondary text-xs font-medium hover:border-primary hover:text-primary disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="interviewerOpen = !interviewerOpen"
+            >
+              <Users :size="14" /> {{ interviewerOpen ? '收起' : '指派临时面试官' }}
+            </button>
+          </div>
+
+          <div class="space-y-3 text-sm">
+            <p class="text-xs text-text-secondary">
+              默认面试官：{{ defaultReviewers.map((d) => d.name).join('、') || '无' }}。临时面试官须为本社团当前成员，撤销或联合活动结束即失效。
+            </p>
+
+            <div v-if="interviewerOpen" class="rounded-lg border border-border p-3 space-y-3">
+              <p class="text-sm font-medium text-text-primary flex items-center gap-1"><Plus :size="14" /> 指派临时联合面试官（覆盖全部联合面试）</p>
+              <div class="grid sm:grid-cols-3 gap-3">
+                <select v-model="taskForm.userId" class="px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary">
+                  <option value="" disabled>选择成员</option>
+                  <option v-for="c in candidates" :key="c.id" :value="c.id">{{ c.name }}（{{ c.role }}）</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  class="px-4 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading || !taskForm.userId"
+                  @click="handleAssignTask"
+                >
+                  {{ actionLoading ? '指派中...' : '确认指派' }}
+                </button>
+                <p v-if="taskError" class="text-xs text-destructive">{{ taskError }}</p>
+              </div>
+            </div>
+
+            <div v-if="jointTasks.length" class="space-y-2">
+              <div v-for="t in jointTasks" :key="t.id" class="flex items-center justify-between rounded-lg border border-border p-3">
+                <div>
+                  <p class="text-sm font-medium text-text-primary">{{ t.userName }}</p>
+                  <p class="text-xs text-text-secondary mt-0.5">
+                    活动级 · 全部联合面试 <StateTag :status="t.status" />
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <template v-if="revokingTaskId === t.id">
+                    <span class="text-xs text-text-secondary">撤销后立即失效</span>
+                    <button class="px-2 h-8 rounded-md bg-destructive text-text-on-primary text-xs font-medium" :disabled="actionLoading" @click="handleRevokeTask(t.id)">确认</button>
+                    <button class="px-2 h-8 rounded-md border border-border text-xs" @click="revokingTaskId = null">取消</button>
+                  </template>
+                  <button
+                    v-else-if="t.status === 'active'"
+                    class="px-2 h-8 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
+                    :disabled="actionLoading"
+                    @click="revokingTaskId = t.id"
+                  >
+                    <XCircle :size="12" class="inline mr-1" />撤销
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </PermissionGuard>
 
       <p v-if="actionError" class="mb-3 text-xs text-destructive">{{ actionError }}</p>
 

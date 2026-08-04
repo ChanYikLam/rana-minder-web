@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { Search } from '@lucide/vue'
 
 export interface SearchResult {
@@ -34,6 +34,8 @@ const grouped = computed(() => {
   return Array.from(map.entries())
 })
 
+let blurTimer: ReturnType<typeof setTimeout> | null = null
+
 function onSelect(r: SearchResult) {
   emit('select', r)
   open.value = false
@@ -44,8 +46,13 @@ function onFocus() {
 }
 
 function onBlur() {
-  setTimeout(() => { open.value = false }, 120)
+  if (blurTimer) clearTimeout(blurTimer)
+  blurTimer = setTimeout(() => { open.value = false }, 120)
 }
+
+onUnmounted(() => {
+  if (blurTimer) { clearTimeout(blurTimer); blurTimer = null }
+})
 </script>
 
 <template>

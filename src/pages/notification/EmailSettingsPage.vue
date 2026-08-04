@@ -113,7 +113,6 @@ async function handleSave() {
   saving.value = false
   if (result.kind === 'completed') {
     config.value.verified = true
-    toast.success('配置已保存')
   } else {
     toast.error('保存失败，请稍后重试')
   }

@@ -10,6 +10,7 @@ export interface SysNotification {
   read: boolean
   createdAt: string
   link: string | null
+  clubName: string | null
 }
 
 export interface NotificationPayload {
@@ -17,6 +18,7 @@ export interface NotificationPayload {
   title: string
   body: string
   link?: string | null
+  clubName?: string | null
 }
 
 export const notificationSeqBase = 1000
@@ -32,10 +34,10 @@ const now = (): string => new Date().toISOString()
 
 /** 初始站内信种子（动态业务操作未发生时展示） */
 export const sysNotifications: SysNotification[] = [
-  { id: 'ntf-001', userId: 'user-applicant-002', type: 'application', title: '报名申请已提交', body: '您的报名申请已提交，请等待审核。', read: false, createdAt: '2025-08-01T10:00:00+08:00', link: '/me/todo' },
-  { id: 'ntf-002', userId: 'user-applicant-002', type: 'interview', title: '面试已排期', body: '您的面试已安排，请查看日程。', read: false, createdAt: '2025-08-01T09:00:00+08:00', link: '/me/schedule' },
-  { id: 'ntf-003', userId: 'user-applicant-002', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/rinv-001' },
-  { id: 'ntf-004', userId: 'user-member-001', type: 'system', title: '系统维护通知', body: '系统将于本周六凌晨进行维护。', read: true, createdAt: '2025-07-30T18:00:00+08:00', link: null },
+  { id: 'ntf-001', userId: 'user-applicant-002', type: 'application', title: '报名申请已提交', body: '您的报名申请已提交，请等待审核。', read: false, createdAt: '2025-08-01T10:00:00+08:00', link: '/me/todo', clubName: '计算机协会' },
+  { id: 'ntf-002', userId: 'user-applicant-002', type: 'interview', title: '面试已排期', body: '您的面试已安排，请查看日程。', read: false, createdAt: '2025-08-01T09:00:00+08:00', link: '/me/schedule', clubName: '计算机协会' },
+  { id: 'ntf-003', userId: 'user-applicant-002', type: 'invitation', title: '收到录取邀请', body: '恭喜！您已收到录取邀请，请及时确认。', read: false, createdAt: '2025-07-31T14:00:00+08:00', link: '/me/invitations/recruitment/rinv-001', clubName: '计算机协会' },
+  { id: 'ntf-004', userId: 'user-member-001', type: 'system', title: '系统维护通知', body: '系统将于本周六凌晨进行维护。', read: true, createdAt: '2025-07-30T18:00:00+08:00', link: null, clubName: null },
 ]
 
 /** 向一批用户推送站内信（同一时刻进入列表顶部） */
@@ -51,6 +53,7 @@ export function pushNotifications(userIds: string[], payload: NotificationPayloa
       read: false,
       createdAt,
       link: payload.link ?? null,
+      clubName: payload.clubName ?? null,
     })
   }
 }

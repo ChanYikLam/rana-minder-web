@@ -24,7 +24,7 @@ async function loadData() {
   const result = await get<{ title: string; description: string; participants: { id: string; name: string }[]; clubName: string }>(`/explore/joint/${jointId}`)
   if (result.kind === 'completed') {
     detail.value = result.data
-    volunteerClubIds.value = result.data.participants.map((p) => p.id)
+    volunteerClubIds.value = (result.data.participants || []).map((p) => p.id)
     state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }

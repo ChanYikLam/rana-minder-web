@@ -18,7 +18,7 @@ const items = ref<JointActivity[]>([])
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const result = await get<{ items: JointActivity[] }>(`/org/${clubId}/joint`)
+  const result = await get<{ items: JointActivity[] }>(`/org/${clubId}/joint/list`)
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: JointActivity[] } }).data.items
     state.value = 'normal'

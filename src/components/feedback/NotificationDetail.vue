@@ -11,6 +11,7 @@ export interface NotificationDetailData {
   type: string
   read?: boolean
   link?: string | null
+  clubName?: string | null
   actions?: { label: string; key: string; variant?: 'default' | 'outline'; primary?: boolean }[]
 }
 
@@ -48,6 +49,7 @@ const typeLabel = computed(() => {
         <ArrowLeft :size="14" /> 返回
       </button>
       <span class="text-xs rounded-full border border-border px-2 py-0.5 text-text-secondary">{{ typeLabel }}</span>
+      <span v-if="notification.clubName" class="text-xs rounded-full border border-border px-2 py-0.5 text-text-secondary">{{ notification.clubName }}</span>
       <span class="ml-auto text-xs text-text-secondary flex items-center gap-1">
         <Clock3 :size="12" aria-hidden="true" /> {{ timeLabel }}
       </span>

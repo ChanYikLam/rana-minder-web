@@ -46,7 +46,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:open': [value: boolean]
   'update:errorMessage': [value: string]
-  confirm: []
+  confirm: [proof?: string]
   cancel: []
   retry: []
 }>()
@@ -146,7 +146,8 @@ async function handleConfirm() {
   reauthBusy.value = false
   if (result.kind === 'completed') {
     step.value = 'executing'
-    emit('confirm')
+    const proof = (result as { kind: 'completed'; data?: { proof?: string } }).data?.proof
+    emit('confirm', proof)
   } else if (result.kind === 'rejected' && result.error) {
     const fieldMsg = (result.error as { fieldErrors?: Record<string, string[]> }).fieldErrors?.password?.[0]
     reauthError.value = fieldMsg || (result.error as { message?: string }).message || '密码错误，请重试'
