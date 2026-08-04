@@ -27,6 +27,7 @@ const executing = ref(false)
 const retrying = ref(false)
 const candidates = ref<BatchCandidate[]>([])
 const loadingCandidates = ref(false)
+const loadFailed = ref(false)
 
 const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'assign_interviewer', label: '批量分配面试官', desc: '为多个申请人分配同一面试官' },
@@ -47,10 +48,15 @@ async function loadCandidates() {
   if (candidatesAbort) candidatesAbort.abort()
   candidatesAbort = new AbortController()
   loadingCandidates.value = true
+  loadFailed.value = false
   try {
     const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`, undefined, candidatesAbort.signal)
-    if (res.kind === 'completed') candidates.value = res.data.items
-    else toast.error('候选人加载失败，请重试')
+    if (res.kind === 'completed') {
+      candidates.value = res.data.items
+      loadFailed.value = false
+    } else {
+      loadFailed.value = true
+    }
   } finally {
     loadingCandidates.value = false
   }
@@ -199,6 +205,10 @@ const batchResults = computed<PartialResult[]>(() =>
           </button>
         </div>
         <p v-if="loadingCandidates" class="text-sm text-text-secondary py-6 text-center">正在加载候选人...</p>
+        <div v-else-if="loadFailed" class="py-6 text-center">
+          <p class="text-sm text-text-secondary mb-3">候选人列表加载失败</p>
+          <button class="px-3 py-1.5 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="loadCandidates">重新加载</button>
+        </div>
         <p v-else-if="candidates.length === 0" class="text-sm text-text-secondary py-6 text-center">暂无报名申请</p>
         <div v-else class="space-y-2">
           <label

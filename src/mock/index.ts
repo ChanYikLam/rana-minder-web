@@ -2,6 +2,7 @@ import type { MockMethod } from './types'
 import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUsers, USER_MEMBER_MAP, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
+import * as orgdb from './db-organization'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
@@ -77,6 +78,64 @@ function canManageMembersFull(user: MockUser, clubId: string): boolean {
 function canAppointments(user: MockUser, clubId: string): boolean {
   return getPermissions(user, clubId).includes('club:appointment:manage')
 }
+
+/** US-ORG-01/03：社团接入/停用/解除/重绑仅平台超级管理员（P-ORG-01 → platform:club:manage） */
+function isPlatformClubManager(url: string): boolean {
+  return getPermissions(resolveMockUser(url), '').includes('platform:club:manage')
+}
+
+/** 某社团是否存在进行中业务（普通停用的阻止依据，覆盖招新/联合活动） */
+function hasActiveBusinessFor(clubId: string): boolean {
+  const rec = (rdb.recruitmentActivities as { clubId: string; status: string }[]).some(
+    (a) => a.clubId === clubId && ['in_progress', 'paused'].includes(a.status),
+  )
+  const joint = (rdb.jointActivities as { clubs: { clubId: string }[]; status: string }[]).some(
+    (j) => j.clubs.some((c) => c.clubId === clubId) && ['published', 'invite_phase', 'closing_confirm'].includes(j.status),
+  )
+  return rec || joint
+}
+
+/** 社团批量操作允许的动作枚举（US-ORG-05：只支持这四类，无任意字段） */
+const BATCH_ACTIONS = ['assign_interviewer', 'schedule_interview', 'publish_result', 'send_invitation'] as const
+
+/** 权限模板（US-CFG-01/SRS-INV-019：不可变版本，草稿 → 差异预览 → 重认证发布；发布失败保留旧版） */
+interface PermissionTemplate {
+  id: string
+  name: string
+  permissions: string[]
+  status: 'published' | 'draft'
+  version: number
+  draftVersion: number | null
+}
+function templateSeed(): PermissionTemplate[] {
+  const leaderPerms = mockUsers.leader.roles.find((r) => r.role === 'club_leader')?.permissions ?? []
+  const hrPerms = mockUsers.hr.roles[0]?.permissions ?? []
+  return [
+    { id: 'tpl-001', name: '社团负责人模板', permissions: leaderPerms, version: 2, status: 'published', draftVersion: null },
+    { id: 'tpl-002', name: '人事模板', permissions: hrPerms, version: 1, status: 'published', draftVersion: null },
+    { id: 'tpl-003', name: '面试官模板', permissions: ['club:interview:view', 'club:interview:evaluate'], version: 1, status: 'published', draftVersion: null },
+  ]
+}
+const permissionTemplates = templateSeed()
+let templatePreviewVersion = 1
+
+/** 保留策略（US-AUD-04：不可变版本发布；缩短期限对已有数据 ≥7 天缓冲） */
+interface RetentionPolicy {
+  id: string
+  scope: string
+  retentionDays: number
+  action: 'auto_delete' | 'archive' | 'keep'
+  status: 'active' | 'draft'
+  version: number
+  updatedAt: string
+  publishedAt: string | null
+}
+const retentionPolicies: RetentionPolicy[] = [
+  { id: 'rp-001', scope: '已退出成员数据', retentionDays: 365, action: 'auto_delete', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
+  { id: 'rp-002', scope: '过期招新活动', retentionDays: 730, action: 'archive', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
+  { id: 'rp-003', scope: '审计日志', retentionDays: 1095, action: 'keep', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
+]
+let retentionPreviewVersion = 1
 
 /** 辞职申请审批（MEM-005，仅社团负责人/人事可查看与审批） */
 function canApproveResignation(user: MockUser, clubId: string): boolean {
@@ -1285,22 +1344,148 @@ const memberHandlers: MockMethod[] = [
 
 /** 支撑与平台处理器 */
 const platformHandlers: MockMethod[] = [
-  // 社团接入管理
+  // 社团接入管理（US-ORG-01/03：仅超管，数据来自 db-organization，状态机 SM-ORG-001 校验）
   {
     url: '/api/admin/clubs',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          items: [
-            { id: 'club-001', name: '计算机协会', status: 'approved', memberCount: 128, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-002', name: '电子设计协会', status: 'approved', memberCount: 86, createdAt: '2022-09-01', groupMapped: true },
-            { id: 'club-004', name: '摄影协会', status: 'pending_review', memberCount: 0, createdAt: '2025-07-28', groupMapped: false },
-          ],
-          nextCursor: null,
-        },
-      }
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const items = orgdb.listClubAccesses().map((c) => ({ ...c, hasActiveBusiness: hasActiveBusinessFor(c.clubId) }))
+      return { code: 0, data: { items, nextCursor: null } }
+    },
+  },
+  // Group 分层搜索（精确 → 中文连续子串 → 受控错别字近似，3 有效字符门槛）
+  {
+    url: '/api/admin/groups/search',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      return { code: 0, data: { items: orgdb.searchGroups(query.q || ''), threshold: 3 } }
+    },
+  },
+  // Group 详情（含已有成员与负责人职位 Group）
+  {
+    url: '/api/admin/groups/:groupId',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const detail = orgdb.getGroupDetail(query.groupId)
+      if (!detail) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: 'Group 不存在' } }
+      return { code: 0, data: detail }
+    },
+  },
+  // 接入向导：保存步骤（save_step）
+  {
+    url: '/api/admin/clubs/wizard/save-step',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const input = body.input || {}
+      if (!input.clubId) return businessError('缺少社团 ID')
+      const result = orgdb.saveWizardStep(input.clubId, { step: input.step ?? 0, selectedGroupId: input.selectedGroupId, leaderGroupId: input.leaderGroupId })
+      if (!result.ok) return businessError(result.error || '保存失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 接入向导：完成校验并启用（complete_validation）
+  {
+    url: '/api/admin/clubs/wizard/complete',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: { clubId?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const input = body.input || {}
+      if (!input.clubId) return businessError('缺少社团 ID')
+      const result = orgdb.completeWizard(input.clubId)
+      if (!result.ok) return businessError(result.error || '接入失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 成员导入（接入时已有成员成为当前关系）
+  {
+    url: '/api/admin/clubs/:clubId/import',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { memberIds?: string[] } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.importMembers(query.clubId, body.input?.memberIds || [])
+      if (!result.ok) return businessError(result.error || '导入失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 普通停用（进行中业务阻止）
+  {
+    url: '/api/admin/clubs/:clubId/normal-suspend',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.suspendClub(query.clubId, 'normal', body.input?.reason || '', { hasActiveBusiness: hasActiveBusinessFor(query.clubId) })
+      if (!result.ok) return businessError(result.error || '停用失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 紧急停用（只读 + 期限暂停，需原因）
+  {
+    url: '/api/admin/clubs/:clubId/force-suspend',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.suspendClub(query.clubId, 'force', body.input?.reason || '', { hasActiveBusiness: false })
+      if (!result.ok) return businessError(result.error || '紧急停用失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 恢复启用（按停用时长一次性顺延冻结期限）
+  {
+    url: '/api/admin/clubs/:clubId/recover',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.recoverClub(query.clubId)
+      if (!result.ok) return businessError(result.error || '恢复失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 解除接入（普通角色失权，进入待重新接入）
+  {
+    url: '/api/admin/clubs/:clubId/disconnect',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.disconnectClub(query.clubId)
+      if (!result.ok) return businessError(result.error || '解除接入失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 修复原 Group（统一先进入已停用，PRD-OPT-041）
+  {
+    url: '/api/admin/clubs/:clubId/repair',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.repairGroup(query.clubId)
+      if (!result.ok) return businessError(result.error || '修复失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 重新绑定新 Group（统一先进入已停用）
+  {
+    url: '/api/admin/clubs/:clubId/rebind',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { groupId?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.rebindClub(query.clubId, body.input?.groupId || '')
+      if (!result.ok) return businessError(result.error || '重新绑定失败')
+      return { code: 0, data: result.data }
+    },
+  },
+  // 从待重新接入状态重新接入
+  {
+    url: '/api/admin/clubs/:clubId/reaccess',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { groupId?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const result = orgdb.reaccessClub(query.clubId, body.input?.groupId || '')
+      if (!result.ok) return businessError(result.error || '重新接入失败')
+      return { code: 0, data: result.data }
     },
   },
   // 表单设计器
@@ -1361,18 +1546,79 @@ const platformHandlers: MockMethod[] = [
       return { code: 0, data: { ...body.input, version: 2, savedAt: new Date().toISOString() } }
     },
   },
-  // 批量操作执行
+  // 批量操作候选对象（US-ORG-05：按当前社团作用域返回，带 club:batch:execute 鉴权）
+  {
+    url: '/api/org/:clubId/batch/candidates',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      const clubId = query.clubId
+      if (!getPermissions(user, clubId).includes('club:batch:execute')) return forbidden()
+      if (!orgdb.getClubAccess(clubId)) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '社团不存在' } }
+      const items = (rdb.recruitmentApplications as { clubId: string; id: string; applicantName: string; studentId: string; status: string; preferences: { departmentName: string }[] }[])
+        .filter((a) => a.clubId === clubId)
+        .map((a) => ({
+          id: a.id,
+          memberId: a.id,
+          name: a.applicantName,
+          studentId: a.studentId,
+          status: a.status,
+          department: a.preferences[0]?.departmentName || '未选择',
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id))
+      return { code: 0, data: { items, nextCursor: null } }
+    },
+  },
+  // 批量操作执行（US-ORG-05：逐项领域校验，允许部分成功；每个单项保留原因）
   {
     url: '/api/org/:clubId/batch/execute',
     method: 'post',
-    response: ({ body }: { body: { input: { memberIds: string[]; action: string } } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { action?: string; memberIds?: string[] } } }) => {
+      const user = resolveMockUser(url)
+      const clubId = query.clubId
+      if (!getPermissions(user, clubId).includes('club:batch:execute')) return forbidden()
+      const access = orgdb.getClubAccess(clubId)
+      if (!access) return businessError('目标社团不存在')
+      const input = body.input || {}
+      const action = input.action || ''
+      if (!(BATCH_ACTIONS as readonly string[]).includes(action)) return businessError('不支持的批量操作类型')
+      const memberIds = input.memberIds || []
+      if (memberIds.length === 0) return businessError('未选择任何操作对象')
+      const applications = (rdb.recruitmentApplications as { id: string; clubId: string; activityId: string; status: string }[]).filter((a) => a.clubId === clubId)
+      const activities = (rdb.recruitmentActivities as { id: string; status: string }[]).filter((a) => ['in_progress', 'paused'].includes(a.status))
+      const activeActivityIds = new Set(activities.map((a) => a.id))
+      const interviews = rdb.recruitmentInterviews
+      const invitations = rdb.recruitmentInvitations
+      const results = memberIds.map((memberId) => {
+        const app = applications.find((a) => a.id === memberId)
+        if (!app) return { memberId, success: false, message: '对象不属于当前社团' }
+        if (!activeActivityIds.has(app.activityId)) return { memberId, success: false, message: '关联活动未在进行中，无法执行' }
+        if (action === 'assign_interviewer') {
+          const assigned = (interviews as { applicantId: string; roundId: string; status: string }[]).some(
+            (iv) => iv.applicantId === app.id && ['pending_selection', 'scheduled'].includes(iv.status),
+          )
+          return { memberId, success: !assigned, message: assigned ? '已存在待处理/已安排的面试记录' : '已分配面试官' }
+        }
+        if (action === 'schedule_interview') {
+          const scheduled = (interviews as { applicantId: string; status: string }[]).some((iv) => iv.applicantId === app.id && iv.status === 'scheduled')
+          return { memberId, success: !scheduled, message: scheduled ? '该申请人已安排面试' : '已安排面试时段' }
+        }
+        if (action === 'publish_result') {
+          const published = app.status === 'accepted' || (invitations as { applicantId: string }[]).some((i) => i.applicantId === app.id)
+          return { memberId, success: !published, message: published ? '结论或邀请已发布' : '结论已发布' }
+        }
+        const invited = (invitations as { applicantId: string }[]).some((i) => i.applicantId === app.id)
+        return { memberId, success: !invited, message: invited ? '重复邀请被拒绝' : '邀请已发送' }
+      })
       return {
         code: 0,
         data: {
-          results: (body.input?.memberIds || []).map((id: string, i: number) => ({
-            memberId: id, success: i % 3 !== 2, message: i % 3 === 2 ? '目标职位已存在' : '成功',
-          })),
+          action,
+          clubId,
+          frozenCount: results.length,
+          results,
           completedAt: new Date().toISOString(),
+          auditRef: 'BATCH-' + Date.now(),
         },
       }
     },
@@ -1501,30 +1747,104 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
-  // 数据保留策略
+  // 数据保留策略（US-AUD-04：不可变版本，草稿与已发布并存）
   {
     url: '/api/admin/retention',
     method: 'get',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
       return {
         code: 0,
         data: {
-          policies: [
-            { id: 'rp-001', scope: '已退出成员数据', retentionDays: 365, action: 'auto_delete', status: 'active', updatedAt: '2025-07-01' },
-            { id: 'rp-002', scope: '过期招新活动', retentionDays: 730, action: 'archive', status: 'active', updatedAt: '2025-07-01' },
-            { id: 'rp-003', scope: '审计日志', retentionDays: 1095, action: 'keep', status: 'active', updatedAt: '2025-07-01' },
-          ],
-          draftVersion: null,
+          policies: retentionPolicies,
+          draftVersion: retentionPolicies.some((p) => p.status === 'draft') ? Math.max(...retentionPolicies.filter((p) => p.status === 'draft').map((p) => p.version)) : null,
         },
       }
     },
   },
-  // 新建保留策略草稿
+  // 新建保留策略草稿（未发布前不生效）
   {
     url: '/api/admin/retention',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { id: 'rp-draft-' + Date.now(), status: 'draft', updatedAt: new Date().toISOString(), ...body.input } }
+    response: ({ url, body }: { url: string; body: { input: { scope?: string; retentionDays?: number; action?: string } } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      const input = body.input || {}
+      const scope = (input.scope || '').trim()
+      if (!scope) return businessError('必须填写策略范围')
+      if (!input.retentionDays || input.retentionDays < 1) return businessError('保留天数必须为正整数')
+      const existing = retentionPolicies.find((p) => p.scope === scope)
+      if (existing && existing.status === 'draft') return businessError('该范围已存在待发布的草稿')
+      const policy: RetentionPolicy = {
+        id: 'rp-draft-' + Date.now(), scope,
+        retentionDays: input.retentionDays,
+        action: (input.action as RetentionPolicy['action']) || 'auto_delete',
+        status: 'draft', version: existing ? existing.version + 1 : 1,
+        updatedAt: new Date().toISOString(), publishedAt: null,
+      }
+      retentionPolicies.unshift(policy)
+      return { code: 0, data: policy }
+    },
+  },
+  // 保留策略发布（重认证 + 原因 + 影响预览 + 二次确认；缩短期限需 ≥7 天缓冲）
+  {
+    url: '/api/admin/retention/:policyId/publish',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string; reauthProof?: string; previewVersion?: number } } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      if (body.input?.previewVersion !== retentionPreviewVersion) {
+        return { statusCode: 409, body: { code: 'IFC-ERR-008', message: '保留策略影响预览已变化' } }
+      }
+      if (!body.input?.reason?.trim()) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '必须填写发布原因' } }
+      }
+      const policy = retentionPolicies.find((p) => p.id === query.policyId)
+      if (!policy) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '策略不存在' } }
+      if (policy.status !== 'draft') return businessError('仅草稿状态可发布')
+      const active = retentionPolicies.find((p) => p.scope === policy.scope && p.status === 'active')
+      const shortening = !!active && policy.retentionDays < active.retentionDays
+      policy.status = 'active'
+      policy.version += 1
+      policy.updatedAt = new Date().toISOString()
+      policy.publishedAt = new Date().toISOString()
+      retentionPreviewVersion += 1
+      return {
+        code: 0,
+        data: {
+          ...policy,
+          publishedAt: policy.publishedAt,
+          bufferDays: shortening ? 7 : 0,
+          notice: shortening ? '保留期限被缩短，已有数据将获得至少 7 天缓冲期后按新策略处理' : null,
+          auditRef: 'RP-' + Date.now(),
+        },
+      }
+    },
+  },
+  // 保留策略发布预览（差异 + 受影响对象）
+  {
+    url: '/api/admin/retention/:policyId/preview',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      const policy = retentionPolicies.find((p) => p.id === query.policyId)
+      if (!policy) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '策略不存在' } }
+      if (policy.status !== 'draft') return businessError('仅草稿状态可预览')
+      const active = retentionPolicies.find((p) => p.scope === policy.scope && p.status === 'active')
+      retentionPreviewVersion += 1
+      return {
+        code: 0,
+        data: {
+          scope: policy.scope,
+          fromDays: active?.retentionDays ?? null,
+          toDays: policy.retentionDays,
+          action: policy.action,
+          affectedObjects: { records: 1260, members: 214 },
+          bufferDays: active && policy.retentionDays < active.retentionDays ? 7 : 0,
+          previewVersion: retentionPreviewVersion,
+        },
+      }
     },
   },
   // 正式删除执行
@@ -1652,49 +1972,105 @@ const platformHandlers: MockMethod[] = [
       }
     },
   },
-  // 权限模板（与 mockUsers 内置权限集同源，避免漂移）
+  // 权限模板（US-CFG-01：内存态持久化，不可变版本；与 mockUsers 内置权限集同源）
   {
     url: '/api/admin/config/permission-templates',
     method: 'get',
     response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden()
-      const leaderPerms = mockUsers.leader.roles.find((r) => r.role === 'club_leader')?.permissions ?? []
-      const hrPerms = mockUsers.hr.roles[0]?.permissions ?? []
+      return { code: 0, data: { items: permissionTemplates } }
+    },
+  },
+  // 新建权限模板（直接进入草稿状态）
+  {
+    url: '/api/admin/config/permission-templates',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: { name?: string; permissions?: string[] } } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      const input = body.input || {}
+      const name = (input.name || '').trim()
+      if (!name) return businessError('模板名称不能为空')
+      if (!input.permissions || input.permissions.length === 0) return businessError('权限列表不能为空')
+      const template: PermissionTemplate = {
+        id: `tpl-${Date.now().toString(36)}`,
+        name,
+        permissions: [...input.permissions],
+        version: 0,
+        draftVersion: 1,
+        status: 'draft',
+      }
+      permissionTemplates.push(template)
+      return { code: 0, data: template }
+    },
+  },
+  // 保存权限模板草稿（当前缺失的 saveDraft 依赖）
+  {
+    url: '/api/admin/config/permission-templates/:templateId/save',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { name?: string; permissions?: string[] } } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      const template = permissionTemplates.find((t) => t.id === query.templateId)
+      if (!template) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '模板不存在' } }
+      const input = body.input || {}
+      const name = (input.name || '').trim()
+      if (!name) return businessError('模板名称不能为空')
+      if (!input.permissions || input.permissions.length === 0) return businessError('权限列表不能为空')
+      template.name = name
+      template.permissions = [...input.permissions]
+      template.status = 'draft'
+      template.draftVersion = (template.version || 1) + 1
+      return { code: 0, data: { ...template, savedAt: new Date().toISOString() } }
+    },
+  },
+  // 权限模板差异预览（旧版 vs 草稿 + 受影响对象 + previewVersion）
+  {
+    url: '/api/admin/config/permission-templates/:templateId/diff',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      const template = permissionTemplates.find((t) => t.id === query.templateId)
+      if (!template) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '模板不存在' } }
+      if (template.status !== 'draft' || template.draftVersion === null) return businessError('当前没有可预览的草稿')
+      const published = templateSeed().find((t) => t.id === template.id)?.permissions ?? []
+      const added = template.permissions.filter((p) => !published.includes(p))
+      const removed = published.filter((p) => !template.permissions.includes(p))
+      templatePreviewVersion += 1
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'tpl-001', name: '社团负责人模板', permissions: leaderPerms, version: 2, status: 'published' },
-            { id: 'tpl-002', name: '人事模板', permissions: hrPerms, version: 1, status: 'published' },
-            { id: 'tpl-003', name: '面试官模板', permissions: ['club:interview:view', 'club:interview:evaluate'], version: 1, status: 'draft' },
-          ],
+          added,
+          removed,
+          affectedGroups: ['计算机协会负责人', '电子设计协会负责人'],
+          affectedMembers: 214,
+          previewVersion: templatePreviewVersion,
         },
       }
     },
   },
-  // 发布权限模板
+  // 发布权限模板（重认证 + 差异预览 + 二次确认；失败保留旧版；回滚 = 发布新版本）
   {
     url: '/api/admin/config/permission-templates/:templateId/publish',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
-      return { code: 0, data: { id: query.templateId, status: 'published', publishedAt: new Date().toISOString() } }
-    },
-  },
-  // 批准社团接入
-  {
-    url: '/api/admin/clubs/:clubId/approve',
-    method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
-      return { code: 0, data: { id: query.clubId, status: 'approved', approvedAt: new Date().toISOString() } }
-    },
-  },
-  // 拒绝社团接入
-  {
-    url: '/api/admin/clubs/:clubId/reject',
-    method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
-      return { code: 0, data: { id: query.clubId, status: 'rejected', rejectedAt: new Date().toISOString() } }
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reauthProof?: string; previewVersion?: number; reason?: string } } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      if (body.input?.previewVersion !== templatePreviewVersion) {
+        return { statusCode: 409, body: { code: 'IFC-ERR-008', message: '权限差异预览已变化' } }
+      }
+      if (!body.input?.reason?.trim()) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '必须填写发布原因' } }
+      }
+      const template = permissionTemplates.find((t) => t.id === query.templateId)
+      if (!template) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '模板不存在' } }
+      if (template.status !== 'draft' || template.draftVersion === null) return businessError('仅草稿状态可发布')
+      template.version = template.draftVersion
+      template.draftVersion = null
+      template.status = 'published'
+      templatePreviewVersion += 1
+      return { code: 0, data: { id: template.id, status: 'published', version: template.version, publishedAt: new Date().toISOString(), auditRef: 'TPL-' + Date.now() } }
     },
   },
   // 运维状态
