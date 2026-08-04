@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
-import { pushNotifications, listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, userIdOfApplicant } from './notifications'
+import { pushNotifications, listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, userIdOfApplicant, resetNotifications } from './notifications'
+
+beforeEach(() => {
+  resetNotifications()
+})
 
 describe('通知动态化（P1-B5/B6）', () => {
   it('列表按当前用户隔离，种子数据归属正确', () => {
@@ -12,7 +16,7 @@ describe('通知动态化（P1-B5/B6）', () => {
     expect(member[0]?.type).toBe('system')
   })
 
-  it('业务操作 push 后进入未读列表顶部并可过滤', () => {
+  it('pushNotifications 直接入未读列表顶部并可过滤', () => {
     pushNotifications(['ntf-test-user'], { type: 'conclusion', title: '结论已发布', body: '请查看最终结果。', link: '/me/todo' })
     const all = listNotifications('ntf-test-user', false)
     expect(all.length).toBe(1)
@@ -23,6 +27,7 @@ describe('通知动态化（P1-B5/B6）', () => {
   })
 
   it('已读单条与全部已读真实落状态', () => {
+    pushNotifications(['ntf-test-user'], { type: 'conclusion', title: '结论已发布', body: '请查看最终结果。', link: '/me/todo' })
     pushNotifications(['ntf-test-user'], { type: 'interview', title: '面试已排期', body: '面试已安排。', link: '/me/schedule' })
     expect(unreadCountOf('ntf-test-user')).toBe(2)
     markNotificationRead('ntf-test-user', listNotifications('ntf-test-user', false)[0]!.id)

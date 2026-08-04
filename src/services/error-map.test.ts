@@ -31,6 +31,19 @@ describe('ERROR_CODES completeness', () => {
       expect(ERROR_RESUBMIT_ALLOWED).toHaveProperty(code)
     }
   })
+
+  it('auto-retry semantics: only dependency_unavailable (012) is retryable', () => {
+    for (const code of ERROR_CODES) {
+      expect(ERROR_AUTO_RETRY[code], `auto-retry 语义漂移: ${code}`).toBe(code === 'IFC-ERR-012')
+    }
+  })
+
+  it('resubmit semantics: 校验/前置/状态/并发/依赖/内部错误可重提，鉴权与幂等类不可重提', () => {
+    const allowed = new Set(['IFC-ERR-002', 'IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008', 'IFC-ERR-010', 'IFC-ERR-012', 'IFC-ERR-016'])
+    for (const code of ERROR_CODES) {
+      expect(ERROR_RESUBMIT_ALLOWED[code], `resubmit 语义漂移: ${code}`).toBe(allowed.has(code))
+    }
+  })
 })
 
 describe('parseApiError', () => {

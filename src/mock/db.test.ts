@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  resetDb,
   departmentApplications,
   membershipInvitations,
   appointmentCommands,
@@ -14,6 +15,10 @@ import {
   reconfirmAppointmentCommand,
   decideResignationRequest,
 } from './db'
+
+beforeEach(() => {
+  resetDb()
+})
 
 describe('成员状态机接线（P1-C7 SM-MEM/SM-ORG）', () => {
   it('SM-MEM-003：部门申请 approve→execute(首次失败)→重试→effective，非法重复审批被拒', () => {

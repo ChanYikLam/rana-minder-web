@@ -97,3 +97,14 @@ export function markAllNotificationsRead(userId: string): void {
     if (n.userId === userId) n.read = true
   }
 }
+
+// ================= 测试隔离：恢复初始种子 =================
+
+const seedSysNotifications = structuredClone(sysNotifications)
+const seedNotificationSeq = notificationSeq
+
+/** 恢复站内信 mock 域到初始种子态（供测试隔离：每个用例回到种子起点） */
+export function resetNotifications(): void {
+  sysNotifications.splice(0, sysNotifications.length, ...structuredClone(seedSysNotifications))
+  notificationSeq = seedNotificationSeq
+}

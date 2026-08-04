@@ -65,9 +65,9 @@ describe('状态机 spec-306 精确转换表', () => {
     expect(isValidState('SM-REC-001', 'in_progress')).toBe(true)
     // 非法目标状态
     expect(isValidState('SM-REC-001', 'not_a_state')).toBe(false)
-    // 非法转换（不匹配事件）
+    // 非法转换（事件不匹配目标状态）
     expect(assertTransition('SM-REC-001', 'draft', 'cancelled', 'publish').ok).toBe(false)
-    expect(isValidTransition('SM-REC-001', 'draft', 'cancelled')).toBe(true) // cancel 事件合法
+    expect(isValidTransition('SM-REC-001', 'draft', 'cancelled')).toBe(true) // draft 存在到达 cancelled 的合法路径
     // 未列出的 from → 目标存在但事件不允许
     expect(isValidTransition('SM-REC-001', 'in_progress', 'archived')).toBe(false)
   })

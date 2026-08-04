@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, recruitmentActivities, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
+import { resetRecruitmentDB, saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
+
+beforeEach(() => {
+  resetRecruitmentDB()
+})
 /** 身份域（auth.mockUsers）与业务域（db-recruitment APPLICANT_PROFILES）同实体姓名/学号必须一致 */
 describe('申请人档案跨域一致性', () => {
   it('USER_APPLICANT_MAP 每个映射的姓名与学号与业务域档案一致', () => {
@@ -27,8 +31,6 @@ describe('申请人档案填充', () => {
     const app = recruitmentApplications.find((a) => a.applicantId === 'u-006')
     expect(app?.applicantName).toBe('林婉婷')
     expect(app?.studentId).toBe('20240006')
-    const idx = recruitmentApplications.findIndex((a) => a.applicantId === 'u-006')
-    if (idx >= 0) recruitmentApplications.splice(idx, 1)
   })
 })
 /** PRD-OPT-013：明确面试官任务硬冲突检测 */
@@ -99,6 +101,14 @@ describe('联合邀请类型（意向社团 vs 调剂加入）', () => {
 })
 
 describe('规则收紧补救窗口（REC-007/REC-044）', () => {
+  /** 每个用例自建前置：收紧规则 → 把指定申请人的补救窗口改为已过期 → 惰性推进 */
+  function expireAdjustmentWindow(applicantId: string): void {
+    tightenRecruitmentRules('act-001', '学院范围收紧为信息学院', 7)
+    const app = recruitmentApplications.find((x) => x.applicantId === applicantId)!
+    app.adjustmentDeadline = new Date(Date.now() - 60_000).toISOString()
+    applyAdjustmentTimeouts('act-001')
+  }
+
   it('收紧规则暂停通道并为已提交申请开放补救窗口', () => {
     const r = tightenRecruitmentRules('act-001', '学院范围收紧为信息学院', 7)
     expect(r.ok).toBe(true)
@@ -119,6 +129,7 @@ describe('规则收紧补救窗口（REC-007/REC-044）', () => {
   })
 
   it('调整逾期可填写原因作出资格不符结论', () => {
+    expireAdjustmentWindow('u-002')
     const r = resolveAdjustment('act-001', 'u-002', 'not_qualified', '不满足收紧后的学院条件')
     expect(r.ok).toBe(true)
     expect(r.data?.status).toBe('not_qualified')
@@ -126,6 +137,7 @@ describe('规则收紧补救窗口（REC-007/REC-044）', () => {
   })
 
   it('窗口有效期内可延长截止（submitted 保持）', () => {
+    tightenRecruitmentRules('act-001', '学院范围收紧为信息学院', 7)
     const r = resolveAdjustment('act-001', 'u-003', 'extend', '申请人需要更多时间调整志愿')
     expect(r.ok).toBe(true)
     expect(r.data?.status).toBe('submitted')
@@ -133,6 +145,7 @@ describe('规则收紧补救窗口（REC-007/REC-044）', () => {
   })
 
   it('通道暂停且无补救窗口时拒绝提交', () => {
+    tightenRecruitmentRules('act-001', '学院范围收紧为信息学院', 7)
     const r = submitApplication('act-001', 'u-012', {
       preferences: [{ departmentId: 'dept-001' }],
       allowAdjustment: true,
@@ -142,8 +155,9 @@ describe('规则收紧补救窗口（REC-007/REC-044）', () => {
   })
 
   it('无补救窗口的申请不能作出资格不符结论', () => {
-    const r = resolveAdjustment('act-001', 'u-011', 'not_qualified', '测试')
+    const r = resolveAdjustment('act-001', 'u-001', 'not_qualified', '测试')
     expect(r.ok).toBe(false)
+    expect(r.error).toContain('无补救窗口')
   })
 })
 
@@ -184,9 +198,6 @@ describe('状态机事件名对齐（SM-REC-003/SM-REC-005）', () => {
   })
 
   it('补充材料请求后重提走 submit_in_window 事件（而非 submit）', () => {
-    const act = recruitmentActivities.find((a) => a.id === 'act-001')!
-    act.channelStatus = 'open'
-    act.status = 'in_progress'
     const req = requestSupplement('act-001', 'u-001', '请补充获奖证明', new Date(Date.now() + 3600_000).toISOString())
     expect(req.ok).toBe(true)
     const app = recruitmentApplications.find((x) => x.id === 'app-001')!

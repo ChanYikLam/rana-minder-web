@@ -688,3 +688,26 @@ export function getMemberStats(clubId: string): { total: number; active: number;
   const list = listMembers(clubId)
   return { total: list.length, active: list.filter((m) => m.status === 'active').length, exited: list.filter((m) => m.status === 'exited' || m.status === 'removed').length }
 }
+
+// ================= 测试隔离：恢复初始种子 =================
+
+const seedDepartments = structuredClone(departments)
+const seedCandidates = structuredClone(candidates)
+const seedMembers = structuredClone(members)
+const seedDepartmentApplications = structuredClone(departmentApplications)
+const seedMembershipInvitations = structuredClone(membershipInvitations)
+const seedAppointmentCommands = structuredClone(appointmentCommands)
+const seedResignationRequests = structuredClone(resignationRequests)
+const seedTransitionState = structuredClone(transitionState)
+
+/** 恢复组织/成员 mock 域到初始种子态（供测试隔离：每个用例回到种子起点） */
+export function resetDb(): void {
+  departments.splice(0, departments.length, ...structuredClone(seedDepartments))
+  candidates.splice(0, candidates.length, ...structuredClone(seedCandidates))
+  members.splice(0, members.length, ...structuredClone(seedMembers))
+  departmentApplications.splice(0, departmentApplications.length, ...structuredClone(seedDepartmentApplications))
+  membershipInvitations.splice(0, membershipInvitations.length, ...structuredClone(seedMembershipInvitations))
+  appointmentCommands.splice(0, appointmentCommands.length, ...structuredClone(seedAppointmentCommands))
+  resignationRequests.splice(0, resignationRequests.length, ...structuredClone(seedResignationRequests))
+  Object.assign(transitionState, structuredClone(seedTransitionState))
+}
