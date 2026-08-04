@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get } from '@/services/client'
@@ -32,6 +32,7 @@ const customFrom = ref('')
 const customTo = ref('')
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+let requestSeq = 0
 
 const activeTab = computed<'activities' | 'clubs'>(() => (route.meta.tab as 'activities' | 'clubs') || 'activities')
 
@@ -40,6 +41,24 @@ const fuzzyMatches = computed(() => activities.value.filter((a) => a.layer === '
 
 const directClubs = computed(() => clubs.value.filter((c) => c.layer === 'exact' || c.layer === 'substring'))
 const fuzzyClubs = computed(() => clubs.value.filter((c) => c.layer === 'fuzzy'))
+
+async function loadData() {
+  const seq = ++requestSeq
+  state.value = 'loading'
+  const [clubsRes, actRes] = await Promise.all([
+    get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true)}`),
+    get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false)}`),
+  ])
+  if (seq !== requestSeq) return
+  if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
+    clubs.value = (clubsRes as { kind: 'completed'; data: { items: Club[] } }).data.items
+    activities.value = (actRes as { kind: 'completed'; data: { items: Activity[] } }).data.items
+    historyActivities.value = (actRes as { kind: 'completed'; data: { history: Activity[] } }).data.history
+    state.value = 'normal'
+  } else {
+    state.value = 'error'
+  }
+}
 
 function buildActivityParams(withClubs: boolean): string {
   const params = new URLSearchParams()
@@ -54,22 +73,6 @@ function buildActivityParams(withClubs: boolean): string {
     }
   }
   return params.toString()
-}
-
-async function loadData() {
-  state.value = 'loading'
-  const [clubsRes, actRes] = await Promise.all([
-    get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true)}`),
-    get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false)}`),
-  ])
-  if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
-    clubs.value = (clubsRes as { kind: 'completed'; data: { items: Club[] } }).data.items
-    activities.value = (actRes as { kind: 'completed'; data: { items: Activity[] } }).data.items
-    historyActivities.value = (actRes as { kind: 'completed'; data: { history: Activity[] } }).data.history
-    state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
 }
 
 function scheduleSearch() {
@@ -102,6 +105,10 @@ function typeLabel(t: 'recruitment' | 'joint'): string {
 watch([typeFilter, statusFilter, deadlineRange, customFrom, customTo], onFilterChange)
 
 onMounted(loadData)
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  requestSeq++
+})
 </script>
 
 <template>

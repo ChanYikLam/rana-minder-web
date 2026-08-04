@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
 import { identityApi } from '@/services/modules'
+import { authMode } from '@/services/auth'
 import type { PageState } from '@/types/machine'
 import { MailCheck, ShieldCheck, RefreshCw, CheckCircle2, AlertTriangle, Scale } from '@lucide/vue'
 
@@ -411,7 +412,7 @@ async function handleResolveConflicts() {
             :disabled="sendingCode || codeSent || resendCountdown > 0"
             @click="handleSendCode"
           >
-            {{ codeSent ? '已发送（mock 验证码：123456）' : resendCountdown > 0 ? `${resendCountdown}s 后可重发` : sendingCode ? '发送中...' : '发送验证码' }}
+            {{ codeSent ? (authMode === 'mock' ? '已发送（演示验证码：123456）' : '已发送') : resendCountdown > 0 ? `${resendCountdown}s 后可重发` : sendingCode ? '发送中...' : '发送验证码' }}
           </button>
           <template v-if="codeSent">
             <input
