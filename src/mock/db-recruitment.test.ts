@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, recruitmentActivities, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, recruitmentActivities, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks } from './db-recruitment'
 /** 身份域（auth.mockUsers）与业务域（db-recruitment APPLICANT_PROFILES）同实体姓名/学号必须一致 */
 describe('申请人档案跨域一致性', () => {
   it('USER_APPLICANT_MAP 每个映射的姓名与学号与业务域档案一致', () => {
@@ -194,6 +194,79 @@ describe('状态机事件名对齐（SM-REC-003/SM-REC-005）', () => {
     const resubmit = submitApplication('act-001', 'u-001', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: true })
     expect(resubmit.ok, resubmit.error || '').toBe(true)
     expect(resubmit.data?.status).toBe('submitted')
+  })
+})
+
+describe('临时面试官任务指派（ORG-037 scope 覆盖规则）', () => {
+  const created: string[] = []
+
+  function cleanupTasks() {
+    for (const id of created) {
+      const idx = interviewerTasks.findIndex((t) => t.id === id)
+      if (idx >= 0) interviewerTasks.splice(idx, 1)
+    }
+    created.length = 0
+  }
+
+  afterEach(cleanupTasks)
+
+  it('已有活动级任务时，轮次级指派被拒', () => {
+    const first = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(first.ok, first.error || '').toBe(true)
+    created.push(first.data!.id)
+    const dup = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(dup.ok).toBe(false)
+    expect(dup.error).toContain('活动级')
+  })
+
+  it('已有轮次级任务时，活动级升级指派允许（覆盖全部轮次）', () => {
+    const first = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(first.ok, first.error || '').toBe(true)
+    created.push(first.data!.id)
+    const upgrade = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(upgrade.ok, upgrade.error || '').toBe(true)
+    created.push(upgrade.data!.id)
+  })
+
+  it('同轮次重复轮次级被拒，不同轮次允许并存', () => {
+    const first = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(first.ok, first.error || '').toBe(true)
+    created.push(first.data!.id)
+    const sameRound = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(sameRound.ok).toBe(false)
+    const otherRound = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-002', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(otherRound.ok, otherRound.error || '').toBe(true)
+    created.push(otherRound.data!.id)
+  })
+})
+
+describe('临时面试官任务失效（ORG-037/JNT-031）', () => {
+  it('联合活动全部参与社团确认取消后，临时任务立即失效', () => {
+    const task = assignInterviewerTask({ clubId: 'club-001', activityId: 'jnt-001', kind: 'joint', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(task.ok, task.error || '').toBe(true)
+    const ja = jointActivities.find((j) => j.id === 'jnt-001')!
+    try {
+      ja.status = 'published'
+      ja.firstInviteAt = null
+      const first = cancelJointActivity('jnt-001', 'club-001', '张明远')
+      expect(first.ok, first.error || '').toBe(true)
+      expect(tasksOfActivity('jnt-001').find((t) => t.id === task.data!.id)?.status).toBe('active')
+      const second = cancelJointActivity('jnt-001', 'club-002', '林晓峰')
+      expect(second.ok, second.error || '').toBe(true)
+      expect(ja.status).toBe('cancelled')
+      expect(tasksOfActivity('jnt-001').find((t) => t.id === task.data!.id)?.status).toBe('expired')
+    } finally {
+      const idx = interviewerTasks.findIndex((t) => t.id === task.data!.id)
+      if (idx >= 0) interviewerTasks.splice(idx, 1)
+      ja.status = 'published'
+      ja.channelStatus = 'open'
+      ja.closedAt = null
+      ja.firstInviteAt = null
+      ja.cancelConfirmRound = 0
+      ja.cancelConfirmDeadline = null
+      ja.cancelConfirmations = {}
+      ja.version += 1
+    }
   })
 })
 

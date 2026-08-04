@@ -453,11 +453,11 @@ export const recruitmentInterviews: RecInterview[] = [
   {
     id: 'int-002', activityId: 'act-001', clubId: 'club-001',
     applicantId: 'u-002', applicantName: '陈雨桐', roundId: 'rd-001',
-    status: 'completed', slotId: 'slot-001', startAt: daysFromNow(35), endAt: plusHours(daysFromNow(35), 1),
-    actualStartAt: daysFromNow(35), actualEndAt: daysFromNow(35), attendance: 'present',
+    status: 'pending_selection', slotId: null, startAt: null, endAt: null,
+    actualStartAt: null, actualEndAt: null, attendance: 'none',
     invalidReason: null, skipReason: null, cancelReason: null,
     interviewerIds: ['user-interviewer-001'],
-    version: 2,
+    version: 1,
   },
 ]
 
@@ -473,7 +473,7 @@ export const recruitmentReviews: RecReview[] = [
 export const recruitmentInvitations: RecInvitation[] = [
   {
     id: 'rinv-001', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-003', applicantName: '王梓涵',
+    applicantId: 'u-002', applicantName: '陈雨桐',
     departmentId: 'dept-001', departmentName: '技术部',
     status: 'pending_acceptance', sentAt: daysFromNow(-22), expiredAt: daysFromNow(5),
     acceptedAt: null, casdoorSync: 'none', version: 1,
@@ -827,6 +827,7 @@ export function completeActivity(activityId: string): { ok: boolean; error?: str
   a.status = 'completed'
   a.completedAt = now()
   a.version += 1
+  expireActivityTasks(activityId)
   return ok()
 }
 
@@ -847,6 +848,7 @@ export function cancelActivity(activityId: string, reason: string, confirmAccept
       it.cancelReason = '活动取消'
     }
   }
+  expireActivityTasks(activityId)
   for (const inv of recruitmentInvitations) {
     if (a.invitationIds.includes(inv.id) && inv.status === 'pending_acceptance') {
       inv.status = 'expired'
@@ -877,6 +879,7 @@ export function forceCompleteActivity(activityId: string, reason: string): { ok:
       inv.status = 'expired'
     }
   }
+  expireActivityTasks(activityId)
   a.version += 1
   return ok()
 }
@@ -926,6 +929,7 @@ export function cancelRound(activityId: string, roundId: string, reason: string)
       if (slot) slot.taken = Math.max(0, slot.taken - 1)
     }
   }
+  expireRoundTasks(activityId, roundId)
   a!.version += 1
   return ok()
 }
@@ -1961,6 +1965,7 @@ export function cancelJointActivity(jointId: string, clubId: string, actorName: 
         it.status = 'cancelled_archived'
       }
     }
+    expireActivityTasks(jointId)
   }
   ja.version += 1
   return ok()
@@ -2007,6 +2012,7 @@ export function submitJointEndConfirm(jointId: string, clubId: string, actorName
   for (const con of jointConclusions) {
     if (con.jointId === ja.id && con.status !== 'accepted_locked') con.status = 'archived'
   }
+  expireActivityTasks(jointId)
   ja.version += 1
   return ok()
 }
@@ -2037,6 +2043,7 @@ export function forceCloseJointActivity(jointId: string, reason: string): { ok: 
       con.reviewFlag = false
     }
   }
+  expireActivityTasks(jointId)
   ja.version += 1
   return ok()
 }
@@ -2064,4 +2071,98 @@ export function reEnableJointClub(jointId: string, clubId: string): { ok: boolea
   club.suspendedSince = null
   ja!.version += 1
   return ok()
+}
+
+// ================= 面试官任务模型（ORG-037 / REC-013 / JNT-031） =================
+
+export interface InterviewerTask {
+  id: string
+  clubId: string
+  activityId: string
+  kind: 'recruitment' | 'joint'
+  scope: 'activity' | 'round'
+  roundId: string | null
+  userId: string
+  userName: string
+  status: 'active' | 'revoked' | 'expired'
+  createdAt: string
+  revokedAt: string | null
+  revokedBy: string | null
+}
+
+export const interviewerTasks: InterviewerTask[] = []
+
+let interviewerTaskSeq = 1
+
+/** 指派临时面试官（ORG-037：仅本社团当前成员；活动级覆盖全部轮次，轮次级只覆盖指定轮次） */
+export function assignInterviewerTask(input: {
+  clubId: string
+  activityId: string
+  kind: 'recruitment' | 'joint'
+  scope: 'activity' | 'round'
+  roundId?: string
+  userId: string
+  userName: string
+}): { ok: boolean; error?: string; data?: InterviewerTask } {
+  if (input.scope === 'round') {
+    if (!input.roundId) return err('轮次级任务必须指定轮次')
+    if (input.kind === 'recruitment') {
+      const act = recruitmentActivities.find((a) => a.id === input.activityId)
+      const roundOk = act ? act.rounds.some((r) => r.id === input.roundId) : false
+      if (!roundOk) return err('指定轮次不存在')
+    }
+  }
+  const activeTasks = interviewerTasks.filter(
+    (t) => t.clubId === input.clubId && t.activityId === input.activityId && t.userId === input.userId && t.status === 'active',
+  )
+  if (activeTasks.some((t) => t.scope === 'activity')) {
+    return err('该成员已存在活动级面试任务（覆盖全部轮次），无需重复指派')
+  }
+  if (input.scope === 'round' && activeTasks.some((t) => t.roundId === input.roundId)) {
+    return err('该轮次已存在有效面试任务，请先撤销')
+  }
+  const task: InterviewerTask = {
+    id: `itask-${interviewerTaskSeq++}`,
+    clubId: input.clubId, activityId: input.activityId, kind: input.kind,
+    scope: input.scope, roundId: input.roundId || null,
+    userId: input.userId, userName: input.userName,
+    status: 'active', createdAt: now(), revokedAt: null, revokedBy: null,
+  }
+  interviewerTasks.push(task)
+  return ok(task)
+}
+
+/** 撤销临时面试官任务（ORG-037：任务撤销立即失效） */
+export function revokeInterviewerTask(taskId: string, byName: string): { ok: boolean; error?: string; data?: InterviewerTask } {
+  const task = interviewerTasks.find((t) => t.id === taskId)
+  if (!task) return err('任务不存在')
+  if (task.status !== 'active') return err('任务已失效，无需撤销')
+  task.status = 'revoked'
+  task.revokedAt = now()
+  task.revokedBy = byName
+  return ok(task)
+}
+
+/** 轮次关闭 → 该轮全部轮次级任务立即失效（REC-013：轮次关闭后临时赋职失效） */
+export function expireRoundTasks(activityId: string, roundId: string): void {
+  for (const t of interviewerTasks) {
+    if (t.activityId === activityId && t.roundId === roundId && t.status === 'active') t.status = 'expired'
+  }
+}
+
+/** 活动/批次结束 → 全部任务立即失效（REC-013/JNT-031：活动结束对应临时赋职失效） */
+export function expireActivityTasks(activityId: string): void {
+  for (const t of interviewerTasks) {
+    if (t.activityId === activityId && t.status === 'active') t.status = 'expired'
+  }
+}
+
+/** 用户在指定活动内的有效任务 */
+export function activeTasksOfActivity(userId: string, activityId: string): InterviewerTask[] {
+  return interviewerTasks.filter((t) => t.userId === userId && t.activityId === activityId && t.status === 'active')
+}
+
+/** 指定活动的全部任务（管理列表） */
+export function tasksOfActivity(activityId: string, clubId?: string): InterviewerTask[] {
+  return interviewerTasks.filter((t) => t.activityId === activityId && (!clubId || t.clubId === clubId))
 }

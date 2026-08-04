@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { Timeline, type TimelineEntry } from '@/components/display'
@@ -25,24 +25,31 @@ const timelineItems = computed<TimelineEntry[]>(() =>
   })),
 )
 
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let requestSeq = 0
 async function loadData() {
+  const seq = ++requestSeq
   state.value = 'loading'
   const apiScope = resolveApiScope(route)
   if (!apiScope) { state.value = 'error'; return }
   const result = await get<{ items: AuditLog[] }>(`${apiScope.prefix}/audit/logs`, { search: searchKeyword.value || undefined })
+  if (seq !== requestSeq) return
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: AuditLog[] } }).data.items
     state.value = 'normal'
   } else { state.value = 'error' }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(loadData, 300)
 }
 
 onMounted(loadData)
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  requestSeq++
+})
 </script>
 
 <template>

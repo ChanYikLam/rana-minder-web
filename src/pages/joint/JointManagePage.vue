@@ -82,6 +82,10 @@ const canOpenChannel = computed(() => {
 
 const canCloseChannel = computed(() => detail.value?.channelStatus === 'open')
 
+/** draft 阶段仍有社团未确认参与 → 发布暂不可用（联合活动需全部拟参与社团确认后才能首次公布） */
+const pendingConfirmCount = computed(() => detail.value?.participants.filter((p) => p.status === 'invited').length || 0)
+const publishBlocked = computed(() => !!detail.value && detail.value.status === 'draft' && pendingConfirmCount.value > 0)
+
 // 名单调整
 const clubOptions = [
   { id: 'club-001', name: '计算机协会' },
@@ -228,11 +232,15 @@ onMounted(loadDetail)
             <button
               v-if="['draft', 'confirmed'].includes(detail.status)"
               class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
-              :disabled="actionLoading"
+              :disabled="actionLoading || publishBlocked"
+              :title="publishBlocked ? '等待全部参与社团确认后即可发布' : undefined"
               @click="runAction('publish')"
             >
               <Rocket :size="15" /> 发布活动
             </button>
+            <p v-if="publishBlocked" class="w-full text-xs text-warning mt-1">
+              尚有 {{ pendingConfirmCount }} 个参与社团未确认，待全部确认后即可发布（各社团在其工作台确认参与）。
+            </p>
             <button
               v-if="detail.status === 'draft'"
               class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
