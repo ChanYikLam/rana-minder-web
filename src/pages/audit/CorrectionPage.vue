@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
@@ -28,6 +28,13 @@ function flashSubmitted() {
   if (submittedTimer.value) clearTimeout(submittedTimer.value)
   submittedTimer.value = setTimeout(() => { justSubmitted.value = false }, 4000)
 }
+
+onUnmounted(() => {
+  if (submittedTimer.value) {
+    clearTimeout(submittedTimer.value)
+    submittedTimer.value = null
+  }
+})
 
 function correctionsPrefix(): string | null {
   if (view.value === 'self') return '/me/corrections'

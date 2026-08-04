@@ -2042,6 +2042,7 @@ export function forceCloseJointActivity(jointId: string, reason: string): { ok: 
       con.reviewFlag = false
     }
   }
+  expireActivityTasks(jointId)
   ja.version += 1
   return ok()
 }

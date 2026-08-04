@@ -209,6 +209,26 @@ function interviewerWorkspace(url: string, clubId: string, activityId: string): 
   return { full: false, roundIds }
 }
 
+/** 按轮次范围鉴权（REC-013）：管理/全量职能可操作任意轮次；轮次级任务仅限其轮次 */
+function canAccessInterview(url: string, clubId: string, activityId: string, roundId: string | null | undefined): boolean {
+  const ws = interviewerWorkspace(url, clubId, activityId)
+  return ws.full || (roundId != null && ws.roundIds.has(roundId))
+}
+
+/** 申请是否落在操作者的面试工作区（轮次级任务仅可见其轮次对应的申请人） */
+function appInWorkspace(ws: { full: boolean; roundIds: Set<string> }, app: { activityId: string; applicantId: string }): boolean {
+  if (ws.full) return true
+  return rdb.recruitmentInterviews.some(
+    (i) => i.activityId === app.activityId && i.applicantId === app.applicantId && ws.roundIds.has(i.roundId),
+  )
+}
+
+/** 申请人当前的轮次（以其最近一场面试为准；REC-013 轮次隔离用） */
+function roundOfApplicant(activityId: string, applicantId: string): string | null {
+  const it = rdb.recruitmentInterviews.find((i) => i.activityId === activityId && i.applicantId === applicantId)
+  return it?.roundId || null
+}
+
 /** 面试官任务行（管理列表） */
 function interviewerTaskRow(t: rdb.InterviewerTask) {
   const act = rdb.findAnyActivity(t.activityId)
@@ -810,6 +830,7 @@ const recHandlers: MockMethod[] = [
       if (!act) return notFound('活动不存在')
       const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
       if (!it) return notFound('面试不存在')
+      if (!canAccessInterview(url, query.clubId, query.activityId, it.roundId)) return forbidden()
       const a = rdb.findAnyActivity(it.activityId)
       const round = a?.rounds.find((r) => r.id === it.roundId)
       const app = rdb.recruitmentApplications.find((x) => x.activityId === it.activityId && x.applicantId === it.applicantId)
@@ -855,9 +876,12 @@ const recHandlers: MockMethod[] = [
   {
     url: '/api/me/interviews/recruitment/:interviewId',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
       const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId)
       if (!it) return notFound('面试不存在')
+      if (it.applicantId !== applicantId) return forbidden()
       const a = rdb.findAnyActivity(it.activityId)
       const round = a?.rounds.find((r) => r.id === it.roundId)
       const app = rdb.recruitmentApplications.find((x) => x.applicantId === it.applicantId)
@@ -908,6 +932,9 @@ const recHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
+      if (!it) return notFound('面试不存在')
+      if (!canAccessInterview(url, query.clubId, query.activityId, it.roundId)) return forbidden()
       const input = unwrap(body) as { event: 'leave' | 'late' | 'absent' }
       return result(rdb.markAttendance(query.interviewId, input.event, canManageRec(url, query.clubId)))
     },
@@ -918,6 +945,9 @@ const recHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
+      if (!it) return notFound('面试不存在')
+      if (!canAccessInterview(url, query.clubId, query.activityId, it.roundId)) return forbidden()
       return result(rdb.startInterview(query.interviewId))
     },
   },
@@ -927,6 +957,9 @@ const recHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
+      if (!it) return notFound('面试不存在')
+      if (!canAccessInterview(url, query.clubId, query.activityId, it.roundId)) return forbidden()
       return result(rdb.completeInterview(query.interviewId))
     },
   },
@@ -936,6 +969,9 @@ const recHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId && i.activityId === query.activityId)
+      if (!it) return notFound('面试不存在')
+      if (!canAccessInterview(url, query.clubId, query.activityId, it.roundId)) return forbidden()
       const input = unwrap(body) as { reason?: string }
       if (!input.reason?.trim()) return businessError('作废面试必须填写原因')
       return result(rdb.invalidateInterview(query.interviewId, input.reason))
@@ -961,9 +997,10 @@ const recHandlers: MockMethod[] = [
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const me = actorInfo(url)
       const isManager = canManageRec(url, query.clubId)
+      const ws = interviewerWorkspace(url, query.clubId, query.activityId)
       const act = rdb.findAnyActivity(query.activityId)
       const items = rdb.recruitmentApplications
-        .filter((a) => a.activityId === query.activityId && a.status !== 'draft')
+        .filter((a) => a.activityId === query.activityId && a.status !== 'draft' && appInWorkspace(ws, a))
         .map((app) => {
           const reviews = act
             ? rdb.recruitmentReviews.filter((r) => act.reviewIds.includes(r.id) && r.applicantId === app.applicantId)
@@ -1014,9 +1051,14 @@ const recHandlers: MockMethod[] = [
         : undefined
       if (!app) return notFound('申请人不存在')
       const me = actorInfo(url)
+      const ws = interviewerWorkspace(url, query.clubId, query.activityId)
       if (!canManageRec(url, query.clubId)) {
+        const roundId = roundOfApplicant(query.activityId, applicantId || '')
+        if (!ws.full && (roundId == null || !ws.roundIds.has(roundId))) return forbidden()
+        const meUser = resolveMockUser(url)
         const assigned = rdb.recruitmentInterviews.some(
-          (i) => i.activityId === query.activityId && i.applicantId === applicantId && i.status !== 'cancelled' && i.interviewerIds.includes(me.memberId || ''),
+          (i) => i.activityId === query.activityId && i.applicantId === applicantId && i.status !== 'cancelled'
+            && (i.interviewerIds.includes(me.memberId || '') || i.interviewerIds.includes(meUser.id)),
         )
         if (!assigned) return forbidden()
       }

@@ -1803,11 +1803,12 @@ const platformHandlers: MockMethod[] = [
     url: '/api/files/:fileId/download',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
-return {
+      const fileId = query.fileId || query.id || ''
+      return {
         code: 0,
         data: {
-          fileId: query.id, status: 'downloaded',
-          downloadUrl: '/api/mock-files/' + query.id + '.csv',
+          fileId, status: 'downloaded',
+          downloadUrl: '/api/mock-files/' + fileId + '.csv',
           expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         },
       }
@@ -1837,7 +1838,9 @@ return {
   {
     url: '/api/org/:clubId/audit/corrections',
     method: 'get',
-    response: () => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:audit:view')) return forbidden()
       return {
         code: 0,
         data: {
@@ -1871,7 +1874,9 @@ return {
   {
     url: '/api/org/:clubId/audit/corrections/:correctionId/decide',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { decision: string } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:audit:view')) return forbidden()
       const record = correctionsDb.find((c) => c.id === query.correctionId)
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
@@ -1884,11 +1889,13 @@ return {
   {
     url: '/api/org/:clubId/audit/corrections/:correctionId/withdraw',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
       const record = correctionsDb.find((c) => c.id === query.correctionId)
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      if (record.submitterName !== user.name) return forbidden()
       record.status = 'withdrawn'
       return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
     },
@@ -1902,12 +1909,6 @@ return {
       const items = correctionsDb
         .filter((c) => c.submitterName === user.name)
         .map((c) => ({ ...c }))
-      if (items.length === 0) {
-        items.push(
-          { ...correctionsDb[0], submitterName: user.name },
-          { ...correctionsDb[1], submitterName: user.name },
-        )
-      }
       return {
         code: 0,
         data: { items, nextCursor: null },
@@ -1938,7 +1939,10 @@ return {
   {
     url: '/api/me/corrections/:correctionId/decide',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { decision: string } } }) => {
+      const user = resolveMockUser(url)
+      const wsClubId = getWorkspace(user)?.clubId
+      if (!wsClubId || !getPermissions(user, wsClubId).includes('club:audit:view')) return forbidden()
       const record = correctionsDb.find((c) => c.id === query.correctionId)
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
@@ -1951,11 +1955,13 @@ return {
   {
     url: '/api/me/corrections/:correctionId/withdraw',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
       const record = correctionsDb.find((c) => c.id === query.correctionId)
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      if (record.submitterName !== user.name) return forbidden()
       record.status = 'withdrawn'
       return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
     },
@@ -2317,8 +2323,11 @@ return {
   {
     url: '/api/admin/clubs/:clubId/emergency-suspend',
     method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
       if (!isPlatformAdmin(url)) return forbidden()
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
       const club = mockClubs.find((c) => c.id === query.clubId)
       if (!club) return businessError('社团不存在')
       if (club.status !== 'approved') return businessError(`当前状态「${club.status}」不允许紧急停用，仅已批准社团可紧急停用`)
@@ -2345,8 +2354,11 @@ return {
   {
     url: '/api/admin/clubs/:clubId/revoke',
     method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
       if (!isPlatformAdmin(url)) return forbidden()
+      if (!consumeReauthProof(body.input?.reauthProof)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
       const club = mockClubs.find((c) => c.id === query.clubId)
       if (!club) return businessError('社团不存在')
       if (!['approved', 'suspended', 'emergency_suspended'].includes(club.status)) {

@@ -67,9 +67,11 @@ async function loadData() {
   } else { state.value = 'error' }
 }
 
-async function runAction(club: ClubItem, action: ClubAction): Promise<boolean> {
+async function runAction(club: ClubItem, action: ClubAction, reauthProof?: string): Promise<boolean> {
   actingId.value = club.id
-  const result = await post<{ status: string }>(`/admin/clubs/${club.id}/${action}`)
+  const result = await post<{ status: string }>(`/admin/clubs/${club.id}/${action}`, {
+    input: { reauthProof },
+  })
   actingId.value = null
   if (result.kind === 'completed') {
     club.status = (result as { kind: 'completed'; data: { status: string } }).data.status
@@ -92,13 +94,13 @@ function handleAction(club: ClubItem, action: ClubAction) {
   })
 }
 
-async function onConfirmHighRisk() {
+async function onConfirmHighRisk(reauthProof?: string) {
   const current = confirmState.value
   if (!current) return
   confirming.value = true
   confirmSucceeded.value = false
   confirmError.value = ''
-  const ok = await runAction(current.club, current.action)
+  const ok = await runAction(current.club, current.action, reauthProof)
   confirming.value = false
   if (ok) {
     confirmSucceeded.value = true
