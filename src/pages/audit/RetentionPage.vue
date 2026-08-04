@@ -72,7 +72,7 @@ async function handleCreate() {
   creating.value = false
   if (result.kind === 'completed') {
     toast.success('保留策略草稿已创建')
-    const created = result.data as { id: string; scope: string; retentionDays: number; action: string; status: string; updatedAt: string }
+    const created = result.data as { id: string; scope: string; retentionDays: number; action: string; status: string; version: number; updatedAt: string; publishedAt: string | null }
     policies.value.unshift(created)
     showForm.value = false
     form.value = { scope: '', retentionDays: 30, action: 'clean' }

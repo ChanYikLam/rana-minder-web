@@ -1484,18 +1484,15 @@ const jointHandlers: MockMethod[] = [
         .filter((i) => i.jointId === query.jointId)
         .map((i) => {
           const ja = rdb.findJoint(i.jointId)
-          const reviews = [...jointReviewExtras.entries()]
-            .filter(([k]) => k.startsWith(i.jointId + ':' + i.applicantId + ':'))
-            .map(([k, v]) => {
-              const clubId = k.slice(k.lastIndexOf(':') + 1)
-              return {
-                clubId,
-                clubName: ja?.clubs.find((c) => c.clubId === clubId)?.clubName || clubId,
-                rating: v.rating,
-                comment: v.comment,
-                concludedAt: v.concludedAt,
-              }
-            })
+          const reviews = rdb.jointReviewExtras
+            .filter((e) => e.jointId === i.jointId && e.applicantId === i.applicantId)
+            .map((e) => ({
+              clubId: e.clubId,
+              clubName: ja?.clubs.find((c) => c.clubId === e.clubId)?.clubName || e.clubId,
+              rating: e.rating,
+              comment: e.comment,
+              concludedAt: e.concludedAt,
+            }))
           return {
             id: i.id, jointId: i.jointId, applicantId: i.applicantId, applicantName: i.applicantName,
             status: i.status, slotId: i.slotId, scheduledTime: i.startAt, endTime: i.endAt,

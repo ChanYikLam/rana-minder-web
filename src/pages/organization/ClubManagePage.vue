@@ -10,7 +10,7 @@ import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { useRouter } from 'vue-router'
 import type { PageState } from '@/types/machine'
-import type { ClubAccessItem, GroupSearchResult } from '@/types/domain/organization'
+import type { ClubAccessItem, ClubAccessStatus, GroupSearchResult } from '@/types/domain/organization'
 import { Building2, CheckCircle2, RefreshCw, ShieldCheck, Users, Link2, Unplug, Info, Plus } from '@lucide/vue'
 
 type ClubItem = ClubAccessItem & { hasActiveBusiness: boolean }
@@ -82,12 +82,12 @@ async function searchGroup() {
 }
 
 async function runAction(club: ClubItem, action: ClubAction) {
-  actingId.value = club.id
-  const result = await post<{ status: string }>(`/admin/clubs/${club.id}/${action}`)
+  actingId.value = club.clubId
+  const result = await post<{ status: string }>(`/admin/clubs/${club.clubId}/${action}`)
   actingId.value = null
   if (result.kind === 'completed') {
-    club.status = (result as { kind: 'completed'; data: { status: string } }).data.status
-    toast.success(`${club.name}：${ACTION_LABELS[action]}成功`)
+    club.status = (result as { kind: 'completed'; data: { status: string } }).data.status as ClubAccessStatus
+    toast.success(`${club.clubName}：${ACTION_LABELS[action]}成功`)
   }
 }
 
@@ -463,10 +463,10 @@ onMounted(loadData)
     <ConfirmScope
       v-if="confirmState"
       :open="true"
-      :club-name="confirmState.club.name"
+      :club-name="confirmState.club.clubName"
       :irreversible="confirmState.action === 'revoke'"
       :confirming="confirming"
-      :targets="[{ id: confirmState.club.id, label: confirmState.club.name, detail: `${confirmState.club.memberCount} 名成员` }]"
+      :targets="[{ id: confirmState.club.clubId, label: confirmState.club.clubName, detail: `${confirmState.club.memberCount} 名成员` }]"
       @update:open="(v: boolean) => { if (!v) confirmState = null }"
       @cancel="confirmState = null"
       @confirm="onConfirmScope"
