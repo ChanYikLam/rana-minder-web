@@ -241,6 +241,11 @@ const identityHandlers: MockMethod[] = [
           phone: user.phone,
           emailVerified: user.emailVerified,
           profileComplete: user.profileComplete,
+          // 白名单字段与 Casdoor 双向同步状态（演示：手机号处于同步中）
+          syncStatus: {
+            email: 'synced',
+            phone: user.profileComplete ? 'pending' : 'synced',
+          },
         },
       }
     },
@@ -276,6 +281,11 @@ const identityHandlers: MockMethod[] = [
           phone: (input.phone as string) || user.phone,
           emailVerified: user.emailVerified,
           profileComplete: true,
+          // 保存后同步启动：白名单字段进入「同步中」
+          syncStatus: {
+            email: 'synced',
+            phone: 'pending',
+          },
         },
       }
     },

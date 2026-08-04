@@ -81,12 +81,22 @@ function scheduleSearch() {
 }
 
 function switchTab(tab: 'activities' | 'clubs') {
+  // REC-047：切换模式清空全部筛选与搜索条件
+  suppressFilterWatch = true
+  typeFilter.value = 'all'
+  statusFilter.value = 'all'
+  deadlineRange.value = 'all'
+  customFrom.value = ''
+  customTo.value = ''
+  searchKeyword.value = ''
   router.push(tab === 'clubs' ? '/explore/clubs' : '/explore/activities')
 }
 
 function onFilterChange() {
   void loadData()
 }
+
+let suppressFilterWatch = false
 
 function openActivity(a: Activity) {
   router.push(a.type === 'joint' ? `/activity/joint/${a.id}` : `/activity/recruitment/${a.id}`)
@@ -102,7 +112,16 @@ function typeLabel(t: 'recruitment' | 'joint'): string {
 }
 
 // 筛选变化即重新查询（截止/状态/类型都是服务端语义）；搜索 300ms 防抖
-watch([typeFilter, statusFilter, deadlineRange, customFrom, customTo], onFilterChange)
+watch([typeFilter, statusFilter, deadlineRange, customFrom, customTo], () => {
+  if (suppressFilterWatch) {
+    suppressFilterWatch = false
+    return
+  }
+  onFilterChange()
+})
+
+// 切换找社团/找活动模式后重新查询（同组件复用不重新挂载，需显式监听）
+watch(activeTab, () => void loadData())
 
 onMounted(loadData)
 onUnmounted(() => {

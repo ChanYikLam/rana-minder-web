@@ -91,6 +91,10 @@ function formatTime(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function isOverdue(deadline: string): boolean {
+  return new Date(deadline).getTime() < Date.now()
+}
+
 onMounted(loadData)
 </script>
 
@@ -137,8 +141,10 @@ onMounted(loadData)
               <div>
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
-                <p v-if="item.deadline" class="text-xs text-warning mt-1 flex items-center gap-1">
-                  <Clock :size="12" /> 截止：{{ formatTime(item.deadline) }}
+                <p v-if="item.deadline" class="text-xs mt-1 flex items-center gap-1" :class="isOverdue(item.deadline) ? 'text-danger' : 'text-warning'">
+                  <Clock :size="12" />
+                  <template v-if="isOverdue(item.deadline)">已逾期（截止 {{ formatTime(item.deadline) }}）</template>
+                  <template v-else>截止：{{ formatTime(item.deadline) }}</template>
                 </p>
               </div>
               <ChevronRight :size="18" class="text-muted-foreground" />
