@@ -66,12 +66,47 @@ const notifications = useNotificationViewStore()
       </nav>
     </header>
 
-    <!-- Main Content -->
-    <main id="public-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
-      <div class="mx-auto max-w-[1400px] p-4 md:p-6">
-        <div class="mb-4"><DegradedBanner /></div>
-        <slot />
-      </div>
-    </main>
+    <!-- Body: Sidebar + Content -->
+    <div class="flex flex-1">
+      <aside
+        class="flex flex-col w-56 border-r bg-elevated overflow-y-auto"
+        role="complementary"
+        aria-label="主导航"
+      >
+        <nav class="p-2" role="navigation" aria-label="个人导航">
+          <p class="px-3 pt-1 pb-1 text-xs font-medium text-text-secondary">发现与个人</p>
+          <router-link
+            to="/explore"
+            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
+            :class="$route.path.startsWith('/explore') ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+          >
+            <Search :size="16" /> 公开发现
+          </router-link>
+          <router-link
+            v-if="session.isAuthenticated"
+            to="/me"
+            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors"
+            :class="$route.path.startsWith('/me') ? 'text-primary font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+          >
+            <User :size="16" /> 个人空间
+          </router-link>
+          <router-link
+            v-else
+            to="/login"
+            class="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors text-text-secondary hover:text-primary hover:bg-subtle"
+          >
+            <User :size="16" /> 登录
+          </router-link>
+        </nav>
+      </aside>
+
+      <!-- Main Content -->
+      <main id="public-main" class="flex-1 overflow-y-auto" role="main" tabindex="-1">
+        <div class="mx-auto max-w-[1400px] p-4 md:p-6">
+          <div class="mb-4"><DegradedBanner /></div>
+          <slot />
+        </div>
+      </main>
+    </div>
   </div>
 </template>

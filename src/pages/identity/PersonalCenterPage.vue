@@ -136,7 +136,7 @@ onMounted(loadData)
               <div>
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
-                <p class="text-xs text-warning mt-1 flex items-center gap-1">
+                <p v-if="item.deadline" class="text-xs text-warning mt-1 flex items-center gap-1">
                   <Clock :size="12" /> 截止：{{ formatTime(item.deadline) }}
                 </p>
               </div>

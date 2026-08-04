@@ -126,7 +126,7 @@ async function handleDownload(task: ExportTask) {
     toast.info('导出尚未完成，请稍候')
     return
   }
-  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/${task.id}/download`, {})
+  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/exports/${task.id}/download`, {})
   if (result.kind === 'completed') {
     if (openAuthorizedDownload(result.data.downloadUrl)) {
       toast.success('已开始下载')

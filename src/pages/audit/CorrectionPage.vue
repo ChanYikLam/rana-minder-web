@@ -4,7 +4,6 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
-import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Plus, FileSearch } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
@@ -19,6 +18,16 @@ const showForm = ref(false)
 const form = ref({ targetType: '', targetId: '', reason: '', evidence: '' })
 const creating = ref(false)
 const actingId = ref<string | null>(null)
+const formError = ref('')
+const actError = ref('')
+const justSubmitted = ref(false)
+const submittedTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+function flashSubmitted() {
+  justSubmitted.value = true
+  if (submittedTimer.value) clearTimeout(submittedTimer.value)
+  submittedTimer.value = setTimeout(() => { justSubmitted.value = false }, 4000)
+}
 
 function correctionsPrefix(): string | null {
   if (view.value === 'self') return '/me/corrections'
@@ -39,45 +48,48 @@ async function loadData() {
 
 async function handleCreate() {
   creating.value = true
+  formError.value = ''
   const prefix = correctionsPrefix()
-  if (!prefix) { creating.value = false; return }
+  if (!prefix) { creating.value = false; formError.value = '页面作用域不可用，无法提交'; return }
   const result = await post(prefix, { ...form.value })
   creating.value = false
   if (result.kind === 'completed') {
-    toast.success('纠错申请已提交')
     showForm.value = false
     form.value = { targetType: '', targetId: '', reason: '', evidence: '' }
+    flashSubmitted()
     await loadData()
   } else {
-    toast.error('提交失败，请重试')
+    formError.value = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
   }
 }
 
 async function handleDecide(item: Correction, decision: 'approve' | 'reject') {
   actingId.value = item.id
+  actError.value = ''
   const prefix = correctionsPrefix()
-  if (!prefix) { actingId.value = null; return }
+  if (!prefix) { actingId.value = null; actError.value = '页面作用域不可用，无法处理'; return }
   const result = await post(`${prefix}/${item.id}/decide`, { decision })
   actingId.value = null
   if (result.kind === 'completed') {
-    toast.success(decision === 'approve' ? '已批准纠错' : '已拒绝纠错')
+    flashSubmitted()
     await loadData()
   } else {
-    toast.error('操作失败，请重试')
+    actError.value = '操作失败，请重试'
   }
 }
 
 async function handleWithdraw(item: Correction) {
   actingId.value = item.id
+  actError.value = ''
   const prefix = correctionsPrefix()
-  if (!prefix) { actingId.value = null; return }
+  if (!prefix) { actingId.value = null; actError.value = '页面作用域不可用，无法撤回'; return }
   const result = await post(`${prefix}/${item.id}/withdraw`, {})
   actingId.value = null
   if (result.kind === 'completed') {
-    toast.success('纠错申请已撤回')
+    flashSubmitted()
     await loadData()
   } else {
-    toast.error('撤回失败，请重试')
+    actError.value = '撤回失败，请重试'
   }
 }
 
@@ -122,6 +134,7 @@ onMounted(loadData)
             <label class="block text-sm font-medium text-text-primary mb-1">证据</label>
             <input v-model="form.evidence" type="text" class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
           </div>
+          <p v-if="formError" class="text-sm text-danger mb-3" role="alert">{{ formError }}</p>
           <button
             class="w-full h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
             :disabled="creating || !form.targetType || !form.targetId || !form.reason"
@@ -131,6 +144,11 @@ onMounted(loadData)
           </button>
         </div>
       </Card>
+
+      <div v-if="justSubmitted" class="mb-4 rounded-md bg-success-subtle border border-success px-4 py-3 text-sm text-success" role="status">
+        纠错申请已提交，等待审核
+      </div>
+      <p v-if="actError" class="text-sm text-danger mb-4" role="alert">{{ actError }}</p>
 
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无纠错申请" />
 

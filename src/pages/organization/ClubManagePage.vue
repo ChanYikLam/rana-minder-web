@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
-import ConfirmScope from '@/components/operation/ConfirmScope.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { useRouter } from 'vue-router'
@@ -22,11 +22,40 @@ const ACTION_LABELS: Record<ClubAction, string> = {
   revoke: '解除接入',
 }
 
+const HIGH_RISK_ACTIONS: ClubAction[] = ['suspend', 'emergency-suspend', 'revoke']
+
+const CONFIRM_META: Record<ClubAction, { title: string; description: string; impact: string; reauth: boolean }> = {
+  approve: { title: '', description: '', impact: '', reauth: false },
+  reject: { title: '', description: '', impact: '', reauth: false },
+  suspend: {
+    title: '停用社团',
+    description: '停用后社团对外功能将暂停，成员无法继续使用相关服务。',
+    impact: '停用期间全部对外功能暂停；可通过「恢复」重新启用。',
+    reauth: false,
+  },
+  'emergency-suspend': {
+    title: '紧急停用社团',
+    description: '紧急停用将立即暂停社团全部对外服务，适用于安全事件等紧急处置场景。',
+    impact: '立即生效，全部对外功能暂停；需重新认证后执行。',
+    reauth: true,
+  },
+  're-enable': { title: '', description: '', impact: '', reauth: false },
+  revoke: {
+    title: '解除社团接入',
+    description: '解除接入后社团将从平台注销，成员将无法继续使用相关功能，影响重大。',
+    impact: '社团从平台移除，此操作不可撤销；需重新认证后执行。',
+    reauth: true,
+  },
+}
+
 const state = ref<PageState>('loading')
 const items = ref<ClubItem[]>([])
 const actingId = ref<string | null>(null)
 const confirmState = ref<{ club: ClubItem; action: ClubAction } | null>(null)
+const confirmOpen = ref(false)
 const confirming = ref(false)
+const confirmSucceeded = ref(false)
+const confirmError = ref('')
 const router = useRouter()
 
 async function loadData() {
@@ -38,33 +67,50 @@ async function loadData() {
   } else { state.value = 'error' }
 }
 
-async function runAction(club: ClubItem, action: ClubAction) {
+async function runAction(club: ClubItem, action: ClubAction): Promise<boolean> {
   actingId.value = club.id
   const result = await post<{ status: string }>(`/admin/clubs/${club.id}/${action}`)
   actingId.value = null
   if (result.kind === 'completed') {
     club.status = (result as { kind: 'completed'; data: { status: string } }).data.status
-    toast.success(`${club.name}：${ACTION_LABELS[action]}成功`)
-  } else {
-    toast.error('操作失败，请重试')
+    return true
   }
+  return false
 }
 
 function handleAction(club: ClubItem, action: ClubAction) {
-  if (action === 'revoke' || action === 'emergency-suspend') {
+  if (HIGH_RISK_ACTIONS.includes(action)) {
     confirmState.value = { club, action }
+    confirmOpen.value = true
+    confirmSucceeded.value = false
+    confirmError.value = ''
     return
   }
-  runAction(club, action)
+  void runAction(club, action).then((ok) => {
+    if (ok) toast.success(`${club.name}：${ACTION_LABELS[action]}成功`)
+    else toast.error('操作失败，请重试')
+  })
 }
 
-async function onConfirmScope() {
+async function onConfirmHighRisk() {
   const current = confirmState.value
   if (!current) return
   confirming.value = true
-  await runAction(current.club, current.action)
+  confirmSucceeded.value = false
+  confirmError.value = ''
+  const ok = await runAction(current.club, current.action)
   confirming.value = false
-  confirmState.value = null
+  if (ok) {
+    confirmSucceeded.value = true
+    toast.success(`${current.club.name}：${ACTION_LABELS[current.action]}成功`)
+  } else {
+    confirmError.value = '操作失败，请重试'
+  }
+}
+
+function closeConfirm() {
+  confirmOpen.value = false
+  setTimeout(() => { confirmState.value = null }, 150)
 }
 
 onMounted(loadData)
@@ -161,16 +207,22 @@ onMounted(loadData)
       </div>
     </div>
 
-    <ConfirmScope
+    <HighRiskConfirm
       v-if="confirmState"
-      :open="true"
-      :club-name="confirmState.club.name"
-      :irreversible="confirmState.action === 'revoke'"
-      :confirming="confirming"
+      v-model:open="confirmOpen"
+      :title="CONFIRM_META[confirmState.action].title"
+      :description="CONFIRM_META[confirmState.action].description"
       :targets="[{ id: confirmState.club.id, label: confirmState.club.name, detail: `${confirmState.club.memberCount} 名成员` }]"
-      @update:open="(v: boolean) => { if (!v) confirmState = null }"
-      @cancel="confirmState = null"
-      @confirm="onConfirmScope"
+      :impact-summary="CONFIRM_META[confirmState.action].impact"
+      confirm-label="确认执行"
+      :reauth-required="CONFIRM_META[confirmState.action].reauth"
+      :executing="confirming"
+      :succeeded="confirmSucceeded"
+      :error-message="confirmError"
+      @update:error-message="(v: string) => confirmError = v"
+      @confirm="onConfirmHighRisk"
+      @retry="onConfirmHighRisk"
+      @cancel="closeConfirm"
     />
   </PageStateBoundary>
 </template>
