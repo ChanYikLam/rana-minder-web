@@ -515,20 +515,6 @@ const casdoorGroups: CasdoorGroup[] = [
 
 let nextClubSeq = 5
 
-function editDistance(a: string, b: string): number {
-  const dp: number[] = Array.from({ length: b.length + 1 }, (_, j) => j)
-  for (let i = 1; i <= a.length; i++) {
-    let prev = dp[0]
-    dp[0] = i
-    for (let j = 1; j <= b.length; j++) {
-      const cur = dp[j]
-      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(dp[j], dp[j - 1], prev)
-      prev = cur
-    }
-  }
-  return dp[b.length]
-}
-
 /** 分层搜索：精确 -> 子串 -> 近似；不足 3 个有效字符仅做精确与子串 */
 function searchCasdoorGroups(keyword: string): CasdoorGroup[] {
   const kw = keyword.trim()
@@ -2099,12 +2085,6 @@ response: ({ url }: { url: string }) => {
         data: {
 policies: retentionPolicies,
           draftVersion: retentionPolicies.some((p) => p.status === 'draft') ? Math.max(...retentionPolicies.filter((p) => p.status === 'draft').map((p) => p.version)) : null,
-          policies: [
-            { id: 'rp-001', scope: '草稿及其附件', retentionDays: 30, action: 'clean', status: 'active', updatedAt: '2025-07-01' },
-            { id: 'rp-002', scope: '成功导出文件', retentionDays: 1, action: 'clean', status: 'active', updatedAt: '2025-07-01' },
-            { id: 'rp-003', scope: '正式业务数据（长期保留，不自动删除）', retentionDays: 36500, action: 'keep', status: 'active', updatedAt: '2025-07-01' },
-          ],
-          draftVersion: null,
         },
       }
     },
