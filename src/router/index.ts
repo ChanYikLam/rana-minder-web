@@ -122,6 +122,12 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, scope: 'personal' },
   },
   {
+    path: '/me/interviews/tasks',
+    name: 'P-REC-04-tasks',
+    component: () => import('@/pages/recruitment/MyInterviewTasksPage.vue'),
+    meta: { layout: 'default', requiresAuth: true, view: 'self' },
+  },
+  {
     path: '/me/interviews/recruitment/:interviewId',
     name: 'P-REC-04-self',
     component: () => import('@/pages/recruitment/InterviewSchedulePage.vue'),

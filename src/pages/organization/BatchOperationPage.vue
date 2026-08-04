@@ -27,6 +27,7 @@ const executing = ref(false)
 const retrying = ref(false)
 const candidates = ref<BatchCandidate[]>([])
 const loadingCandidates = ref(false)
+const loadFailed = ref(false)
 const candidatesError = ref(false)
 const interviewers = ref<{ id: string; name: string }[]>([])
 const interviewerId = ref('')
@@ -50,11 +51,17 @@ async function loadCandidates() {
   if (candidatesAbort) candidatesAbort.abort()
   candidatesAbort = new AbortController()
   loadingCandidates.value = true
+  loadFailed.value = false
   candidatesError.value = false
   try {
     const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`, undefined, candidatesAbort.signal)
-    if (res.kind === 'completed') candidates.value = res.data.items
-    else candidatesError.value = true
+    if (res.kind === 'completed') {
+      candidates.value = res.data.items
+      loadFailed.value = false
+    } else {
+      loadFailed.value = true
+      candidatesError.value = true
+    }
   } finally {
     loadingCandidates.value = false
   }
@@ -215,6 +222,10 @@ const batchResults = computed<PartialResult[]>(() =>
           </button>
         </div>
         <p v-if="loadingCandidates" class="text-sm text-text-secondary py-6 text-center">正在加载候选人...</p>
+        <div v-else-if="loadFailed" class="py-6 text-center">
+          <p class="text-sm text-text-secondary mb-3">候选人列表加载失败</p>
+          <button class="px-3 py-1.5 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="loadCandidates">重新加载</button>
+        </div>
         <div v-else-if="candidatesError" class="py-6 text-center">
           <p class="text-sm text-text-secondary mb-3">候选人加载失败，请重试</p>
           <button class="px-4 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="loadCandidates">重试</button>
@@ -298,4 +309,3 @@ const batchResults = computed<PartialResult[]>(() =>
     </div>
   </div>
 </template>
-
