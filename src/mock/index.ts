@@ -68,6 +68,56 @@ function departmentScopeFor(user: MockUser, clubId: string): string | null {
   return member?.positions.find((p) => p.status === 'active')?.departmentName ?? null
 }
 
+/** 公开目录：活动「正在报名」派生（US-REC-08） */
+type ExploreRecruitStatus = 'recruiting' | 'upcoming' | 'ended'
+function exploreRecruitStatus(a: { status: string; channelStatus: string; deadline: string }): ExploreRecruitStatus {
+  const now = Date.now()
+  if (a.status === 'in_progress' && a.channelStatus === 'open' && new Date(a.deadline).getTime() > now) return 'recruiting'
+  if (new Date(a.deadline).getTime() > now && a.status !== 'completed' && a.status !== 'force_completed') return 'upcoming'
+  return 'ended'
+}
+
+/** Levenshtein 编辑距离（受控错别字近似搜索） */
+function editDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+  let prev = Array.from({ length: n + 1 }, (_, i) => i)
+  for (let i = 1; i <= m; i++) {
+    const cur = [i]
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    }
+    prev = cur
+  }
+  return prev[n]
+}
+
+/** 公开目录分层搜索：精确 → 中文连续子串 → 受控错别字近似（3 有效字符门槛） */
+interface ExploreSearchable {
+  title: string
+  clubName: string
+  description: string
+}
+function tieredExploreSearch<T extends ExploreSearchable>(items: T[], q: string): T[] {
+  const ql = q.toLowerCase()
+  const exact = items.filter((i) => i.title.toLowerCase() === ql || i.clubName.toLowerCase() === ql)
+  const substring = items.filter(
+    (i) => !exact.includes(i) && (i.title.toLowerCase().includes(ql) || i.clubName.toLowerCase().includes(ql) || i.description.toLowerCase().includes(ql)),
+  )
+  const fuzzy =
+    q.length >= 3
+      ? items.filter(
+          (i) =>
+            !exact.includes(i) &&
+            !substring.includes(i) &&
+            (editDistance(i.title.toLowerCase(), ql) <= 2 || editDistance(i.clubName.toLowerCase(), ql) <= 1),
+        )
+      : []
+  return [...exact, ...substring, ...fuzzy]
+}
+
 /** 仅社团负责人/人事管理员（不含部门负责人）可执行的成员管理操作 */
 function canManageMembersFull(user: MockUser, clubId: string): boolean {
   if (!canManageMembers(user, clubId)) return false
@@ -444,39 +494,25 @@ const publicHandlers: MockMethod[] = [
   {
     url: '/api/explore/activities',
     method: 'get',
-    response: ({ url }: { url: string }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const error = resolveMockError(url)
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      return {
-        code: 0,
-        data: {
-          items: [
-            {
-              id: 'act-001',
-              clubId: 'club-001',
-              clubName: '计算机协会',
-              title: '2025 秋季招新',
-              type: 'recruitment',
-              status: 'open',
-              deadline: '2025-09-15T23:59:00+08:00',
-              description: '面向全校新生的秋季招新活动',
-            },
-            {
-              id: 'act-002',
-              clubId: 'club-002',
-              clubName: '电子设计协会',
-              title: '嵌入式方向招新',
-              type: 'recruitment',
-              status: 'open',
-              deadline: '2025-09-20T23:59:00+08:00',
-              description: '嵌入式开发方向招新',
-            },
-          ],
-          nextCursor: null,
-        },
-      }
+      const q = (query.q || '').trim()
+      const statusFilter = (query.status || 'all').trim()
+      const items = rdb.recruitmentActivities
+        .filter((a) => !['draft', 'cancelled', 'archived'].includes(a.status))
+        .map((a) => ({
+          id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, type: 'recruitment',
+          status: a.status === 'in_progress' ? 'open' : a.status,
+          recruitStatus: exploreRecruitStatus(a),
+          deadline: a.deadline, startAt: a.publishedAt || a.createdAt,
+          description: a.description, applicantCount: a.applicantIds.length,
+        }))
+      const filtered = q ? tieredExploreSearch(items, q) : items
+      const result = statusFilter !== 'all' ? filtered.filter((i) => i.recruitStatus === statusFilter) : filtered
+      return { code: 0, data: { items: result, nextCursor: null } }
     },
   },
 ]
@@ -1594,10 +1630,30 @@ const platformHandlers: MockMethod[] = [
         if (!app) return { memberId, success: false, message: '对象不属于当前社团' }
         if (!activeActivityIds.has(app.activityId)) return { memberId, success: false, message: '关联活动未在进行中，无法执行' }
         if (action === 'assign_interviewer') {
-          const assigned = (interviews as { applicantId: string; roundId: string; status: string }[]).some(
+          const existing = (interviews as { id: string; applicantId: string; status: string }[]).find(
             (iv) => iv.applicantId === app.id && ['pending_selection', 'scheduled'].includes(iv.status),
           )
-          return { memberId, success: !assigned, message: assigned ? '已存在待处理/已安排的面试记录' : '已分配面试官' }
+          if (existing) {
+            const it = rdb.recruitmentInterviews.find((x) => x.id === existing.id)
+            if (it && !it.interviewerIds.includes('user-interviewer-001')) {
+              it.interviewerIds.push('user-interviewer-001')
+              it.version += 1
+            }
+            return { memberId, success: true, message: '已分配面试官 user-interviewer-001' }
+          }
+          const activity = rdb.recruitmentActivities.find((a) => a.id === app.activityId)
+          const round = activity?.rounds.find((r) => r.status === 'open')
+          if (!round) return { memberId, success: false, message: '该申请人无可开放的面试轮次' }
+          rdb.recruitmentInterviews.push({
+            id: `int-batch-${Date.now()}-${memberId.slice(-4)}`,
+            activityId: app.activityId, clubId, applicantId: app.id,
+            applicantName: (app as { applicantName?: string }).applicantName || memberId,
+            roundId: round.id, status: 'pending_selection',
+            slotId: null, startAt: null, endAt: null, actualStartAt: null, actualEndAt: null,
+            attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+            interviewerIds: ['user-interviewer-001'], version: 1,
+          })
+          return { memberId, success: true, message: '已创建面试任务并分配面试官' }
         }
         if (action === 'schedule_interview') {
           const scheduled = (interviews as { applicantId: string; status: string }[]).some((iv) => iv.applicantId === app.id && iv.status === 'scheduled')

@@ -218,6 +218,30 @@ const recHandlers: MockMethod[] = [
       })
     },
   },
+  // 公开报名表单（US-REC-08：与活动详情同一 rdb 数据源，仅开放状态可读）
+  {
+    url: '/api/explore/activities/:id/form',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const a = rdb.findAnyActivity(query.id || 'act-001')
+      if (!a) return notFound('活动不存在')
+      if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动不存在或未开放')
+      return ok({
+        id: a.formId, clubId: a.clubId, title: '招新报名表', status: 'published',
+        versions: [
+          {
+            version: 1, status: 'published', publishedAt: a.publishedAt || new Date().toISOString(),
+            fields: [
+              { id: 'f1', type: 'text', label: '自我介绍', description: '简要介绍自己的特长和兴趣', required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+              { id: 'f2', type: 'select', label: '意向部门', description: null, required: true, readonly: false, permission: 'read_write', options: (a.departments || []).map((d) => d.name), conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+              { id: 'f3', type: 'textarea', label: '相关经历', description: '如有相关项目或活动经历请填写', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+              { id: 'f4', type: 'file', label: '作品附件', description: '可选，上传作品集或简历', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            ],
+          },
+        ],
+      })
+    },
+  },
   // 联合活动详情（公开）
   {
     url: '/api/explore/joint/:id',
@@ -471,8 +495,8 @@ const recHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
-      const input = unwrap(body) as { preferences: { departmentId: string }[]; allowAdjustment: boolean; answers?: Record<string, unknown> }
-      const r = rdb.submitApplication(query.activityId, applicantId, input)
+      const input = unwrap(body) as { preferences: { departmentId: string }[]; allowAdjustment: boolean; answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
+      const r = rdb.submitApplication(query.activityId, applicantId, { ...input, answers: input.answers ?? input.formData ?? input.formAnswers })
       return result(r)
     },
   },
@@ -483,8 +507,8 @@ const recHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
-      const input = unwrap(body) as { answers?: Record<string, unknown> }
-      const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers })
+      const input = unwrap(body) as { answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
+      const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers ?? input.formData ?? input.formAnswers })
       if (!r.ok) return businessError(r.error || '保存失败')
       return ok({ activityId: query.activityId, status: 'draft', savedAt: new Date().toISOString(), ...r.data })
     },
@@ -659,6 +683,31 @@ const recHandlers: MockMethod[] = [
       if (!slot) return notFound('面试时段不存在')
       const r = rdb.bookInterview(query.activityId, input.applicantId, slot.roundId, input.slotId, '', true, findInterviewersForClub(query.clubId))
       return result(r)
+    },
+  },
+  // 面试官任务列表（本人视角：我参与面试的普通招新任务，含冲突检测对齐 applicantTimeConflict）
+  {
+    url: '/api/me/interviews/tasks',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const me = resolveMockUser(url)
+      const items = rdb.recruitmentInterviews
+        .filter((it) => (it.interviewerIds || []).includes(me.id))
+        .map((it) => {
+          const a = rdb.findAnyActivity(it.activityId)
+          const round = a?.rounds.find((r) => r.id === it.roundId)
+          const conflict = it.startAt && it.endAt ? rdb.applicantTimeConflict(it.applicantId, it.startAt, it.endAt, it.id) : { conflict: false }
+          return {
+            id: it.id, type: 'recruitment',
+            activityId: it.activityId, activityTitle: a?.title || '',
+            clubId: it.clubId, clubName: a?.clubName || '',
+            applicantId: it.applicantId, applicantName: it.applicantName,
+            roundId: it.roundId, roundName: round?.name || '',
+            status: it.status, startAt: it.startAt, endAt: it.endAt,
+            attendance: it.attendance, conflict,
+          }
+        })
+      return ok({ items, nextCursor: null })
     },
   },
   // 面试详情（本人视角，含可选时段）
@@ -1022,16 +1071,15 @@ function jointRow(ja: rdb.JointActivity, clubId?: string) {
   }
 }
 
-/** 申请人 × 参与社团 派生结论行 */
-function jointConclusionRows(jointId: string, clubId?: string) {
+/** 申请人 × 参与社团 派生结论行（US-JNT-03：跨社团互见，不做本社团过滤） */
+function jointConclusionRows(jointId: string) {
   const ja = rdb.findJoint(jointId)
   if (!ja) return []
   const rows: Record<string, unknown>[] = []
   for (const app of rdb.jointApplications.filter((a) => a.jointId === jointId && a.status !== 'draft')) {
     for (const c of ja.clubs) {
-      if (clubId && c.clubId !== clubId) continue
       const con = rdb.jointConclusions.find((x) => x.jointId === jointId && x.applicantId === app.applicantId && x.clubId === c.clubId)
-      const extra = jointReviewExtras.get(jointId + ':' + app.applicantId + ':' + c.clubId)
+      const extra = rdb.findJointReviewExtra(jointId, app.applicantId, c.clubId)
       const status = con?.status === 'invite_pending' || con?.status === 'accepted_locked' ? con.status : extra ? 'concluded' : con?.status || 'pending'
       rows.push({
         id: con?.id || `${jointId}-${app.applicantId}-${c.clubId}`,
@@ -1040,14 +1088,13 @@ function jointConclusionRows(jointId: string, clubId?: string) {
         conclusion: con?.conclusion || null, reviewFlag: con?.reviewFlag || false,
         rating: extra?.rating || null, comment: extra?.comment || '',
         concludedAt: extra?.concludedAt || null, version: con?.version || 1,
+        authorName: extra?.authorName || null, authorRole: extra?.authorRole || null,
+        versions: con?.versions ?? [],
       })
     }
   }
   return rows
 }
-
-/** 联合结论评价辅助存储 */
-const jointReviewExtras = new Map<string, { rating: number; comment: string; concludedAt: string }>()
 
 const jointHandlers: MockMethod[] = [
   // 联合活动列表
@@ -1433,13 +1480,16 @@ const jointHandlers: MockMethod[] = [
       return result(rdb.bookJointInterview(query.jointId, applicantId, input.slotId, false))
     },
   },
-  // 联合结论列表
+  // 联合结论列表（US-JNT-03：参与社团可见全部社团结论/评分/评语，实时互见）
   {
     url: '/api/org/:clubId/joint/:jointId/conclusions',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageJoint(url, query.clubId)) return forbidden()
-      return ok({ items: jointConclusionRows(query.jointId, query._mock_club || query.clubId), nextCursor: null })
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      if (!ja.clubs.some((c) => c.clubId === query.clubId)) return forbidden()
+      return ok({ items: jointConclusionRows(query.jointId), nextCursor: null })
     },
   },
   // 设置联合结论（admit / not_admit）
@@ -1466,7 +1516,7 @@ const jointHandlers: MockMethod[] = [
       return result(rdb.reviewJointConclusion(query.jointId, query.applicantId, query._mock_club || query.clubId, input.action, me.name, me.role, input.newConclusion))
     },
   },
-  // 联合评价提交（页面级：评分+评语）
+  // 联合评价提交（US-JNT-03：持久化评分+评语，跨社团互见；author_evaluate 接线）
   {
     url: '/api/org/:clubId/joint/:jointId/conclusions/:conclusionId/evaluate',
     method: 'post',
@@ -1477,10 +1527,23 @@ const jointHandlers: MockMethod[] = [
       const con = rdb.jointConclusions.find((c) => c.id === query.conclusionId)
       if (!con) return notFound('联合结论不存在')
       if (con.status === 'accepted_locked' || con.status === 'archived') return businessError('结论已锁定，不可再评价')
-      jointReviewExtras.set(query.jointId + ':' + con.applicantId + ':' + actingClub, {
-        rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString(),
+      const me = actorInfo(url)
+      const extra = rdb.upsertJointReviewExtra(query.jointId, con.applicantId, actingClub, {
+        rating: Number(input.rating) || 0,
+        comment: input.comment || '',
+        authorName: me.name,
+        authorRole: me.role,
       })
-      return ok({ id: query.conclusionId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
+      // author_evaluate 接线（SM-JNT-004）：申请人的联合面试若已完成，评价触发该状态机转换
+      const ja = rdb.findJoint(query.jointId)
+      if (ja && ja.status === 'published') {
+        rdb.applyJointInterviewAuthorEvaluate(query.jointId, con.applicantId)
+      }
+      return ok({
+        id: query.conclusionId, status: 'concluded',
+        rating: extra.rating, comment: extra.comment, concludedAt: extra.concludedAt,
+        authorName: extra.authorName, version: extra.version,
+      })
     },
   },
   // 联合邀请列表

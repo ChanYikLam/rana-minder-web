@@ -280,6 +280,19 @@ export interface JointInvitation {
   version: number
 }
 
+/** 联合结论补充评价（US-JNT-03：各社团评分/评语互见，持久化于 db 层） */
+export interface JointReviewExtra {
+  jointId: string
+  applicantId: string
+  clubId: string
+  rating: number | null
+  comment: string
+  concludedAt: string | null
+  authorName: string
+  authorRole: string
+  version: number
+}
+
 // ================= 种子数据 =================
 
 export const recruitmentActivities: RecActivity[] = [
@@ -322,6 +335,35 @@ export const recruitmentActivities: RecActivity[] = [
     reviewIds: ['rev-001'],
     publishedAt: daysFromNow(-22), completedAt: null, cancelledAt: null, archivedAt: null,
     version: 2, createdAt: daysFromNow(-30),
+  },
+  {
+    id: 'act-002', clubId: 'club-002', clubName: '电子设计协会',
+    title: '嵌入式方向招新',
+    description: '嵌入式开发方向招新，欢迎对单片机与软硬件结合感兴趣的同学。',
+    status: 'in_progress', channelStatus: 'open', channelBeforePause: null, pauseStartAt: null,
+    deadline: daysFromNow(25), deadlineVersion: 1,
+    window: { seq: 1, deadline: daysFromNow(25) },
+    formId: 'form-001', formVersion: 1,
+    departments: [
+      { id: 'dept-101', name: '嵌入式组' },
+      { id: 'dept-102', name: '硬件组' },
+    ],
+    eligibility: { colleges: [], grades: [] },
+    volunteerRules: { min: 1, max: 2 },
+    allowAdjustmentDefault: true,
+    conclusionMode: 'dept_separate',
+    rounds: [
+      {
+        id: 'rd-101', name: '第一轮', status: 'open', mode: 'dept_separate',
+        selectDeadline: daysFromNow(22),
+        slots: [
+          { id: 'slot-101', roundId: 'rd-101', startAt: daysFromNow(18), endAt: daysFromNow(18), capacity: 20, taken: 4 },
+        ],
+      },
+    ],
+    applicantIds: [], invitationIds: [], reviewIds: [],
+    publishedAt: daysFromNow(-14), completedAt: null, cancelledAt: null, archivedAt: null,
+    version: 1, createdAt: daysFromNow(-20),
   },
   {
     id: 'act-003', clubId: 'club-001', clubName: '计算机协会',
@@ -507,6 +549,40 @@ export const jointConclusions: JointConclusion[] = [
 ]
 
 export const jointInvitations: JointInvitation[] = []
+
+export const jointReviewExtras: JointReviewExtra[] = [
+  {
+    jointId: 'jnt-001', applicantId: 'u-006', clubId: 'club-002',
+    rating: 4, comment: '编程基础扎实，沟通表达清晰，建议优先考虑。',
+    concludedAt: daysFromNow(-2), authorName: '林晓峰', authorRole: 'club_leader', version: 1,
+  },
+]
+
+export function findJointReviewExtra(jointId: string, applicantId: string, clubId: string): JointReviewExtra | undefined {
+  return jointReviewExtras.find((e) => e.jointId === jointId && e.applicantId === applicantId && e.clubId === clubId)
+}
+
+export function upsertJointReviewExtra(jointId: string, applicantId: string, clubId: string, input: { rating: number; comment: string; authorName: string; authorRole: string }): JointReviewExtra {
+  const existing = findJointReviewExtra(jointId, applicantId, clubId)
+  if (existing) {
+    existing.rating = input.rating
+    existing.comment = input.comment
+    existing.concludedAt = new Date().toISOString()
+    existing.authorName = input.authorName
+    existing.authorRole = input.authorRole
+    existing.version += 1
+    return existing
+  }
+  const extra: JointReviewExtra = {
+    jointId, applicantId, clubId,
+    rating: input.rating, comment: input.comment,
+    concludedAt: new Date().toISOString(),
+    authorName: input.authorName, authorRole: input.authorRole,
+    version: 1,
+  }
+  jointReviewExtras.push(extra)
+  return extra
+}
 
 export const jointSlots: { id: string; jointId: string; startAt: string; endAt: string; capacity: number; taken: number }[] = [
   { id: 'jslot-001', jointId: 'jnt-001', startAt: daysFromNow(2), endAt: daysFromNow(2), capacity: 20, taken: 1 },
@@ -1491,6 +1567,17 @@ export function completeJointInterview(jointId: string, applicantId: string): { 
   it.status = 'completed'
   it.actualEndAt = now()
   it.attendance = 'present'
+  it.version += 1
+  return ok()
+}
+
+/** author_evaluate 接线（SM-JNT-004）：作者评价完成时对已完成的联合面试应用该转换（自环），校验状态机契约 */
+export function applyJointInterviewAuthorEvaluate(jointId: string, applicantId: string): { ok: boolean; error?: string } {
+  const it = jointInterviews.find((i) => i.jointId === jointId && i.applicantId === applicantId)
+  if (!it) return ok()
+  const t = assertTransition('SM-JNT-004', it.status, 'completed', 'author_evaluate')
+  if (!t.ok) return err(t.reason || '面试未完成，暂不能评价')
+  it.status = 'completed'
   it.version += 1
   return ok()
 }

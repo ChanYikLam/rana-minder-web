@@ -2,12 +2,17 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import FilterPanel from '@/components/display/FilterPanel.vue'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { Search, Users, Calendar, ChevronRight, Building2 } from '@lucide/vue'
+import { Users, Calendar, ChevronRight, Building2 } from '@lucide/vue'
 
 interface Club { id: string; name: string; description: string; memberCount: number; logo: string | null }
-interface Activity { id: string; clubId: string; clubName: string; title: string; type: string; status: string; deadline: string; description: string }
+type RecruitStatus = 'recruiting' | 'upcoming' | 'ended'
+interface Activity {
+  id: string; clubId: string; clubName: string; title: string; type: string; status: string
+  recruitStatus: RecruitStatus; deadline: string; startAt: string; description: string; applicantCount: number
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +21,8 @@ const state = ref<PageState>('loading')
 const clubs = ref<Club[]>([])
 const activities = ref<Activity[]>([])
 const searchKeyword = ref('')
+const statusFilter = ref<string[]>([])
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const activeTab = computed<'activities' | 'clubs'>(() => (route.meta.tab as 'activities' | 'clubs') || 'activities')
 
@@ -24,33 +31,59 @@ const filteredClubs = computed(() => {
   return clubs.value.filter((c) => c.name.includes(searchKeyword.value) || c.description.includes(searchKeyword.value))
 })
 
-const filteredActivities = computed(() => {
-  if (!searchKeyword.value) return activities.value
-  return activities.value.filter((a) => a.title.includes(searchKeyword.value) || a.clubName.includes(searchKeyword.value))
-})
+const statusOptions = [
+  { value: 'recruiting', label: '正在报名' },
+  { value: 'upcoming', label: '即将开始' },
+  { value: 'ended', label: '已结束' },
+]
+
+async function loadActivities() {
+  const q = searchKeyword.value.trim()
+  const res = await get<{ items: Activity[] }>('/explore/activities', {
+    q: q.length >= 2 ? q : undefined,
+    status: statusFilter.value.length === 1 ? statusFilter.value[0] : undefined,
+  })
+  if (res.kind === 'completed') activities.value = res.data.items
+}
 
 async function loadData() {
   state.value = 'loading'
-  const [clubsRes, actRes] = await Promise.all([
-    get<{ items: Club[] }>('/explore/clubs'),
-    get<{ items: Activity[] }>('/explore/activities'),
-  ])
-  if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
-    clubs.value = (clubsRes as { kind: 'completed'; data: { items: Club[] } }).data.items
-    activities.value = (actRes as { kind: 'completed'; data: { items: Activity[] } }).data.items
+  const clubsRes = await get<{ items: Club[] }>('/explore/clubs')
+  if (clubsRes.kind === 'completed') {
+    clubs.value = clubsRes.data.items
     state.value = 'normal'
   } else {
     state.value = 'error'
+    return
   }
+  await loadActivities()
+}
+
+function onFilterChange(v: Record<string, string[] | string>) {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchKeyword.value = typeof v.search === 'string' ? v.search : ''
+    statusFilter.value = Array.isArray(v.recruitStatus) ? (v.recruitStatus as string[]) : []
+    if (activeTab.value === 'activities') {
+      state.value = 'loading'
+      loadActivities().then(() => { state.value = 'normal' })
+    }
+  }, 350)
 }
 
 function switchTab(tab: 'activities' | 'clubs') {
   router.push(tab === 'clubs' ? '/explore/clubs' : '/explore/activities')
 }
 
-function formatDeadline(iso: string): string {
+function formatDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+const recruitStatusLabel: Record<RecruitStatus, { text: string; cls: string }> = {
+  recruiting: { text: '报名中', cls: 'bg-success-subtle text-success' },
+  upcoming: { text: '即将开始', cls: 'bg-primary-subtle text-primary' },
+  ended: { text: '已结束', cls: 'bg-subtle text-text-secondary' },
 }
 
 onMounted(loadData)
@@ -61,19 +94,14 @@ onMounted(loadData)
     <div>
       <h1 class="text-2xl font-bold text-primary mb-6">发现社团与活动</h1>
 
-      <!-- 搜索栏 -->
-      <div class="mb-6">
-        <div class="relative">
-          <Search :size="18" class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-          <input
-            v-model="searchKeyword"
-            type="search"
-            placeholder="搜索社团或活动名称..."
-            class="w-full h-11 pl-10 pr-4 rounded-lg border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-            aria-label="搜索"
-          />
-        </div>
-      </div>
+      <!-- 搜索与筛选（US-REC-08：服务端分层搜索 + 状态范围筛选） -->
+      <FilterPanel
+        class="mb-6"
+        :fields="[{ key: 'recruitStatus', label: '报名状态', options: statusOptions, multiple: true }]"
+        searchable
+        search-placeholder="搜索活动或社团名称（2 个字符起，支持近似匹配）..."
+        @change="onFilterChange"
+      />
 
       <!-- Tab 切换 -->
       <div class="flex gap-1 border-b border-border mb-6">
@@ -98,14 +126,14 @@ onMounted(loadData)
       <!-- 活动列表 -->
       <div v-if="activeTab === 'activities'">
         <EmptyState
-          v-if="filteredActivities.length === 0"
+          v-if="activities.length === 0"
           type="no_result"
           title="未找到匹配的活动"
-          :description="searchKeyword ? '尝试更换关键词' : '当前没有进行中的招新活动'"
+          :description="searchKeyword || statusFilter.length ? '尝试更换关键词或清除筛选' : '当前没有进行中的招新活动'"
         />
         <div v-else class="grid gap-4 md:grid-cols-2">
           <Card
-            v-for="act in filteredActivities"
+            v-for="act in activities"
             :key="act.id"
             class="cursor-pointer"
             @click="router.push(`/activity/recruitment/${act.id}`)"
@@ -115,15 +143,20 @@ onMounted(loadData)
                 <h3 class="text-base font-medium text-text-primary">{{ act.title }}</h3>
                 <p class="text-sm text-text-secondary mt-0.5">{{ act.clubName }}</p>
               </div>
-              <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-success-subtle text-success">
-                报名中
+              <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded whitespace-nowrap" :class="recruitStatusLabel[act.recruitStatus].cls">
+                {{ recruitStatusLabel[act.recruitStatus].text }}
               </span>
             </div>
             <p class="text-sm text-text-secondary line-clamp-2 mb-3">{{ act.description }}</p>
             <div class="flex items-center justify-between text-xs">
-              <span class="flex items-center gap-1 text-warning">
-                <Calendar :size="12" /> 截止 {{ formatDeadline(act.deadline) }}
-              </span>
+              <div class="flex items-center gap-3">
+                <span class="flex items-center gap-1 text-warning">
+                  <Calendar :size="12" /> 截止 {{ formatDate(act.deadline) }}
+                </span>
+                <span class="flex items-center gap-1 text-text-secondary">
+                  <Users :size="12" /> {{ act.applicantCount }} 人已报名
+                </span>
+              </div>
               <span class="flex items-center gap-0.5 text-text-secondary">
                 查看详情 <ChevronRight :size="14" />
               </span>

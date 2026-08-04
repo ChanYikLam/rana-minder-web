@@ -7,12 +7,13 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { Star, Send, Building2, CheckCircle2, ThumbsUp, ThumbsDown, RefreshCw, XCircle } from '@lucide/vue'
+import { Star, Send, CheckCircle2, ThumbsUp, ThumbsDown, RefreshCw, XCircle } from '@lucide/vue'
 
 interface Conclusion {
-  id: string; applicantId?: string; applicantName: string; clubName: string; status: string
+  id: string; applicantId?: string; applicantName: string; clubId: string; clubName: string; status: string
   conclusion: 'admit' | 'not_admit' | null; reviewFlag: boolean
   rating: number | null; comment: string; concludedAt: string | null
+  authorName?: string | null; versions?: { conclusion: 'admit' | 'not_admit'; changedBy: string; changedByRole: string; reason: string | null; at: string }[]
 }
 interface JointInvitation {
   id: string; applicantId: string; applicantName: string; clubId: string
@@ -141,6 +142,13 @@ async function handleInvitationAction(invitationId: string, action: string) {
 
 const invitedFor = (applicantName: string) => invitations.value.filter((i) => i.applicantName === applicantName)
 
+const historyOpen = ref<string | null>(null)
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 onMounted(async () => {
   await loadData()
   await loadInvitations()
@@ -161,11 +169,13 @@ onMounted(async () => {
               <div
                 v-for="c in conclusions.filter((c) => c.applicantName === name)"
                 :key="c.id"
-                class="flex items-center justify-between rounded-lg border border-border p-3"
+                class="rounded-lg border border-border p-3"
               >
+                <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <Building2 :size="16" class="text-text-secondary" />
-                  <span class="text-sm text-text-primary">{{ c.clubName }}</span>
+                  <span :class="c.clubId === clubId ? 'text-text-primary' : 'text-text-secondary'" class="text-sm">
+                    {{ c.clubName }}<span v-if="c.clubId !== clubId" class="ml-1 text-xs">（他社）</span>
+                  </span>
                 </div>
                 <div class="flex items-center gap-2">
                   <template v-if="c.conclusion">
@@ -181,9 +191,9 @@ onMounted(async () => {
                       <Star :size="14" class="text-warning fill-warning" /> {{ c.rating }}
                     </span>
                     <StateTag status="concluded" />
-                    <!-- 复核仅对补面完成后标记了 reviewFlag 的结论开放，后台会拒绝无标志复核 -->
-                    <button v-if="c.reviewFlag" class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
-                    <div v-if="c.reviewFlag && reviewingId === c.id" class="flex items-center gap-1.5">
+                    <!-- 复核仅对补面完成后标记了 reviewFlag 的结论开放，且仅本社团可操作 -->
+                    <button v-if="c.reviewFlag && c.clubId === clubId" class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
+                    <div v-if="c.reviewFlag && c.clubId === clubId && reviewingId === c.id" class="flex items-center gap-1.5">
                       <button
                         class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
                         @click="handleReview(c, 'keep')"
@@ -213,7 +223,7 @@ onMounted(async () => {
                     <StateTag status="rejected" />
                   </template>
                   <template v-else-if="c.status === 'pending'">
-                    <div class="flex items-center gap-1.5">
+                    <div v-if="c.clubId === clubId" class="flex items-center gap-1.5">
                       <button
                         class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
                         @click="handleSetConclusion(c, 'admit')"
@@ -231,8 +241,25 @@ onMounted(async () => {
                   </template>
                   <template v-else>
                     <StateTag :status="c.status" />
-                    <button class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
+                    <button v-if="c.clubId === clubId" class="text-xs text-primary hover:underline" @click="openEvaluate(c)">评价</button>
                   </template>
+                </div>
+                </div>
+                <!-- US-JNT-03：评分/评语/修改历史跨社团实时互见 -->
+                <div v-if="c.status === 'concluded'" class="mt-2 border-t border-border pt-2">
+                  <p class="text-xs text-text-secondary">
+                    <span v-if="c.comment">「{{ c.comment }}」</span>
+                    <span v-if="c.authorName"> — {{ c.authorName }}</span>
+                    <span v-if="c.concludedAt"> · {{ formatDateTime(c.concludedAt) }}</span>
+                  </p>
+                  <button v-if="(c.versions ?? []).length > 0" class="text-xs text-primary hover:underline mt-1" @click="historyOpen = historyOpen === c.id ? null : c.id">
+                    修改历史（{{ (c.versions ?? []).length }} 次）
+                  </button>
+                  <div v-if="historyOpen === c.id && (c.versions ?? []).length > 0" class="mt-1.5 space-y-1">
+                    <p v-for="(v, i) in c.versions ?? []" :key="i" class="text-xs text-text-secondary">
+                      v{{ i + 1 }}：{{ v.conclusion === 'admit' ? '录用' : '不录用' }} · {{ v.changedBy }}<span v-if="v.reason">（{{ v.reason }}）</span> · {{ formatDateTime(v.at) }}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
