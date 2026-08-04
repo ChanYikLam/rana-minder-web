@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { pushNotifications, listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, userIdOfApplicant, resetNotifications } from './notifications'
+import { pushNotifications, listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, userIdOfApplicant } from './notifications'
+import { resetNotifications } from './reset'
 
 beforeEach(() => {
   resetNotifications()

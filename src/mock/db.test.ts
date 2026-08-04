@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
-  resetDb,
   departmentApplications,
   membershipInvitations,
   appointmentCommands,
@@ -15,6 +14,7 @@ import {
   reconfirmAppointmentCommand,
   decideResignationRequest,
 } from './db'
+import { resetDb } from './reset'
 
 beforeEach(() => {
   resetDb()

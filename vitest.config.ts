@@ -24,6 +24,8 @@ export default defineConfig({
         'src/router/index.ts',
         'src/router/guards.ts',
       ],
+// 基线防倒退门槛（2026-08-04 实测 lines 24.4/stmts 22.4/funcs 19.8/branches 17.7）。
+      // 实际覆盖集中在 mock/services 模块；随页面/composables 测试补齐后应上调。
       thresholds: {
         statements: 20,
         functions: 18,

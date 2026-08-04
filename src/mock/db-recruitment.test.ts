@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { resetRecruitmentDB, saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement } from './db-recruitment'
+import { resetRecruitmentDB } from './reset'
 
 beforeEach(() => {
   resetRecruitmentDB()

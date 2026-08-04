@@ -38,7 +38,7 @@ describe('ERROR_CODES completeness', () => {
     }
   })
 
-  it('resubmit semantics: 校验/前置/状态/并发/依赖/内部错误可重提，鉴权与幂等类不可重提', () => {
+  it('resubmit 语义：重认证(002)/校验/前置/状态/并发/依赖/内部可重提，未认证/越权/幂等/限流/不确定/不可见类不可重提', () => {
     const allowed = new Set(['IFC-ERR-002', 'IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008', 'IFC-ERR-010', 'IFC-ERR-012', 'IFC-ERR-016'])
     for (const code of ERROR_CODES) {
       expect(ERROR_RESUBMIT_ALLOWED[code], `resubmit 语义漂移: ${code}`).toBe(allowed.has(code))

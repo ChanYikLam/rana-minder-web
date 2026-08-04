@@ -2065,32 +2065,3 @@ export function reEnableJointClub(jointId: string, clubId: string): { ok: boolea
   ja!.version += 1
   return ok()
 }
-
-// ================= 测试隔离：恢复初始种子 =================
-
-const seedRecruitmentActivities = structuredClone(recruitmentActivities)
-const seedRecruitmentApplications = structuredClone(recruitmentApplications)
-const seedRecruitmentInterviews = structuredClone(recruitmentInterviews)
-const seedRecruitmentReviews = structuredClone(recruitmentReviews)
-const seedRecruitmentInvitations = structuredClone(recruitmentInvitations)
-const seedJointActivities = structuredClone(jointActivities)
-const seedJointApplications = structuredClone(jointApplications)
-const seedJointInterviews = structuredClone(jointInterviews)
-const seedJointConclusions = structuredClone(jointConclusions)
-const seedJointInvitations = structuredClone(jointInvitations)
-const seedJointSlots = structuredClone(jointSlots)
-
-/** 恢复招新/联合 mock 域到初始种子态（供测试隔离：每个用例回到种子起点） */
-export function resetRecruitmentDB(): void {
-  recruitmentActivities.splice(0, recruitmentActivities.length, ...structuredClone(seedRecruitmentActivities))
-  recruitmentApplications.splice(0, recruitmentApplications.length, ...structuredClone(seedRecruitmentApplications))
-  recruitmentInterviews.splice(0, recruitmentInterviews.length, ...structuredClone(seedRecruitmentInterviews))
-  recruitmentReviews.splice(0, recruitmentReviews.length, ...structuredClone(seedRecruitmentReviews))
-  recruitmentInvitations.splice(0, recruitmentInvitations.length, ...structuredClone(seedRecruitmentInvitations))
-  jointActivities.splice(0, jointActivities.length, ...structuredClone(seedJointActivities))
-  jointApplications.splice(0, jointApplications.length, ...structuredClone(seedJointApplications))
-  jointInterviews.splice(0, jointInterviews.length, ...structuredClone(seedJointInterviews))
-  jointConclusions.splice(0, jointConclusions.length, ...structuredClone(seedJointConclusions))
-  jointInvitations.splice(0, jointInvitations.length, ...structuredClone(seedJointInvitations))
-  jointSlots.splice(0, jointSlots.length, ...structuredClone(seedJointSlots))
-}
