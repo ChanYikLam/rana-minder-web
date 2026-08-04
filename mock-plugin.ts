@@ -44,6 +44,19 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body))
 }
 
+/** 支持字符串体与自定义响应头的响应输出（用于模拟文件下载等场景） */
+function sendMockResponse(response: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
+  response.statusCode = status
+  for (const [key, value] of Object.entries(headers || {})) response.setHeader(key, value)
+  if (typeof body === 'string') {
+    if (!response.getHeader('Content-Type')) response.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    response.end(body)
+    return
+  }
+  if (!response.getHeader('Content-Type')) response.setHeader('Content-Type', 'application/json; charset=utf-8')
+  response.end(JSON.stringify(body))
+}
+
 export function localMockPlugin(): Plugin {
   return {
     name: 'rana-local-mock',
@@ -70,8 +83,8 @@ export function localMockPlugin(): Plugin {
             headers: request.headers,
           })
           if (result && typeof result === 'object' && 'statusCode' in result && 'body' in result) {
-            const mockResponse = result as { statusCode: number; body: unknown }
-            sendJson(response, mockResponse.statusCode, mockResponse.body)
+            const mockResponse = result as { statusCode: number; body: unknown; headers?: Record<string, string> }
+            sendMockResponse(response, mockResponse.statusCode, mockResponse.body, mockResponse.headers)
             return
           }
           sendJson(response, 200, result)

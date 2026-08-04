@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { resolveMockUser, clearMockSession, getActiveMockUser } from './auth'
+import { resolveMockUser, clearMockSession, getActiveMockUser, getPermissions } from './auth'
 
 describe('mock 登录角色解析（自锚定）', () => {
   beforeEach(() => {
@@ -30,5 +30,23 @@ describe('mock 登录角色解析（自锚定）', () => {
     clearMockSession()
     expect(getActiveMockUser()).toBeNull()
     expect(resolveMockUser('/api/org/club-001/dashboard').id).toBe('user-leader-001')
+  })
+})
+
+describe('平台管理员权限位（admin 域端点鉴权前提）', () => {
+  beforeEach(() => {
+    clearMockSession()
+  })
+
+  it('admin 用户拥有平台管理权限位（platform:delete:execute）', () => {
+    resolveMockUser('/api/admin/clubs?_mock_user=admin')
+    expect(getPermissions(resolveMockUser('/api/admin/clubs'), '').includes('platform:delete:execute')).toBe(true)
+  })
+
+  it('普通成员/社团负责人无平台管理权限位（admin 端点应返回 403）', () => {
+    resolveMockUser('/api/admin/clubs?_mock_user=member')
+    expect(getPermissions(resolveMockUser('/api/admin/clubs'), '').includes('platform:delete:execute')).toBe(false)
+    resolveMockUser('/api/admin/clubs?_mock_user=leader')
+    expect(getPermissions(resolveMockUser('/api/admin/clubs'), '').includes('platform:delete:execute')).toBe(false)
   })
 })

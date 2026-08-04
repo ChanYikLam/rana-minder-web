@@ -35,9 +35,7 @@ async function handleSave() {
   if (!apiScope) { saving.value = false; return }
   const result = await post(`${apiScope.prefix}/config`, { ...config.value })
   saving.value = false
-  if (result.kind === 'completed') {
-    toast.success('配置已保存')
-  } else {
+  if (result.kind !== 'completed') {
     toast.error('保存失败，请重试')
   }
 }

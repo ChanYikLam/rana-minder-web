@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
 import { Calendar, Clock, ChevronRight, ClipboardList, Hourglass, History, XCircle } from '@lucide/vue'
 
@@ -90,6 +91,10 @@ function formatTime(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function isOverdue(deadline: string): boolean {
+  return new Date(deadline).getTime() < Date.now()
+}
+
 onMounted(loadData)
 </script>
 
@@ -131,13 +136,15 @@ onMounted(loadData)
           description="当有新的邀请、面试确认等待办时会显示在这里"
         />
         <div v-else class="space-y-3">
-          <Card v-for="item in todos" :key="item.id" class="cursor-pointer" @click="router.push(item.link)">
+          <Card v-for="item in todos" :key="item.id" class="cursor-pointer" @click="navigateByLink(item.link)">
             <div class="flex items-center justify-between">
               <div>
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
-                <p class="text-xs text-warning mt-1 flex items-center gap-1">
-                  <Clock :size="12" /> 截止：{{ formatTime(item.deadline) }}
+                <p v-if="item.deadline" class="text-xs mt-1 flex items-center gap-1" :class="isOverdue(item.deadline) ? 'text-danger' : 'text-warning'">
+                  <Clock :size="12" />
+                  <template v-if="isOverdue(item.deadline)">已逾期（截止 {{ formatTime(item.deadline) }}）</template>
+                  <template v-else>截止：{{ formatTime(item.deadline) }}</template>
                 </p>
               </div>
               <ChevronRight :size="18" class="text-muted-foreground" />
@@ -157,7 +164,7 @@ onMounted(loadData)
         <div v-else class="space-y-3">
           <Card v-for="item in ongoing" :key="item.id">
             <div class="flex items-start justify-between">
-              <div class="cursor-pointer" @click="router.push(item.link)">
+              <div class="cursor-pointer" @click="navigateByLink(item.link)">
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
                 <p class="text-xs text-muted-foreground mt-1">提交于 {{ formatTime(item.submittedAt) }}</p>
