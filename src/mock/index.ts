@@ -484,7 +484,7 @@ interface CatalogActivity {
  *  且当前有效截止必须严格晚于查询时刻；不新增“正在报名”活动状态，也不代表个人报名资格 */
 function enrollingAt(now: number, a: { status: string; channelStatus: string; deadline: string }): boolean {
   if (a.channelStatus !== 'open') return false
-  const terminal = new Set(['paused', 'suspended', 'force_suspended', 'cancelled', 'force_closed', 'closed', 'completed'])
+  const terminal = new Set(['paused', 'suspended', 'force_suspended', 'cancelled', 'force_closed', 'closed', 'completed', 'force_completed', 'archived'])
   if (terminal.has(a.status)) return false
   return new Date(a.deadline).getTime() > now
 }
@@ -612,9 +612,9 @@ const publicHandlers: MockMethod[] = [
       const fromMs = query.deadlineFrom ? new Date(query.deadlineFrom).getTime() : null
       const toMs = query.deadlineTo ? new Date(query.deadlineTo).getTime() : null
 
-      // 已发布普通招新：当前（进行中/暂停）与历史（已完成/已取消）
+      // 已发布普通招新：当前（进行中/暂停）与历史（完成/强制完成/归档/取消）
       const recCurrent = rdb.recruitmentActivities.filter((a) => a.status === 'in_progress' || a.status === 'paused')
-      const recHistory = rdb.recruitmentActivities.filter((a) => a.status === 'completed' || a.status === 'cancelled')
+      const recHistory = rdb.recruitmentActivities.filter((a) => ['completed', 'cancelled', 'force_completed', 'archived'].includes(a.status))
       // 已首次公布的联合活动（JNT-004/JNT-029）：当前与终态分区
       const jointPublished = rdb.jointActivities.filter((j) => j.publishedAt)
       const jointTerminal = new Set(['closed', 'completed', 'cancelled', 'force_closed'])

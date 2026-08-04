@@ -44,7 +44,6 @@ const fuzzyClubs = computed(() => clubs.value.filter((c) => c.layer === 'fuzzy')
 function buildActivityParams(withClubs: boolean): string {
   const params = new URLSearchParams()
   if (searchKeyword.value.trim()) params.set('q', searchKeyword.value.trim())
-  if (withClubs && !params.has('q')) params.set('q', searchKeyword.value.trim())
   if (!withClubs) {
     if (typeFilter.value !== 'all') params.set('type', typeFilter.value)
     if (statusFilter.value !== 'all') params.set('status', statusFilter.value)

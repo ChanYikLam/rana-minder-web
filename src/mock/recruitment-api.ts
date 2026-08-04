@@ -153,6 +153,29 @@ function canInterview(url: string, clubId: string): boolean {
   return rdb.interviewerTasks.some((t) => t.clubId === clubId && t.userId === user.id && t.status === 'active')
 }
 
+/** 默认面试职能（不含临时任务折算；用于区分全量职能与任务域） */
+function defaultInterviewerOf(url: string, clubId: string): boolean {
+  const perms = getPermissions(resolveMockUser(url), clubId)
+  return perms.some((p) => ['club:interview:view', 'club:interview:evaluate', 'club:recruitment:manage'].includes(p))
+}
+
+/** 操作者在指定社团内拥有有效招新临时任务的活动的集合（ORG-037：活动域收敛用） */
+function interviewerTaskActivityIds(url: string, clubId: string): Set<string> {
+  const ids = new Set<string>()
+  for (const t of rdb.interviewerTasks) {
+    if (t.clubId === clubId && t.userId === resolveMockUser(url).id && t.status === 'active' && t.kind === 'recruitment') ids.add(t.activityId)
+  }
+  return ids
+}
+
+/** 联合活动评价权限（JNT-031）：默认面试职能 或 该联合活动的有效临时任务（仅 joint kind，且必须落在本活动） */
+function canInterviewJoint(url: string, clubId: string, jointId: string): boolean {
+  if (defaultInterviewerOf(url, clubId)) return true
+  return rdb.interviewerTasks.some(
+    (t) => t.clubId === clubId && t.userId === resolveMockUser(url).id && t.status === 'active' && t.kind === 'joint' && t.activityId === jointId,
+  )
+}
+
 /** 平台强制操作权限 */
 function isPlatformAdmin(url: string): boolean {
   return getPermissions(resolveMockUser(url), '').includes('platform:delete:execute')
@@ -316,16 +339,21 @@ const recHandlers: MockMethod[] = [
       })
     },
   },
-  // 活动列表（管理视角；面试职能角色可读，创建/编辑仍限负责人与人事）
+  // 活动列表（管理视角；面试职能角色可读，创建/编辑仍限负责人与人事；临时面试官仅见其任务活动 ORG-037）
   {
     url: '/api/org/:clubId/recruitment',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
-      const items = rdb.listActivities(query.clubId).map((a) => ({
-        id: a.id, clubId: a.clubId, title: a.title, status: a.status, channelStatus: a.channelStatus,
-        deadline: a.deadline, applicantCount: a.applicantIds.length, createdAt: a.createdAt,
-      }))
+      const isManager = canManageRec(url, query.clubId)
+      const isDefault = defaultInterviewerOf(url, query.clubId)
+      const taskIds = isManager || isDefault ? null : interviewerTaskActivityIds(url, query.clubId)
+      const items = rdb.listActivities(query.clubId)
+        .filter((a) => isManager || isDefault || taskIds!.has(a.id))
+        .map((a) => ({
+          id: a.id, clubId: a.clubId, title: a.title, status: a.status, channelStatus: a.channelStatus,
+          deadline: a.deadline, applicantCount: a.applicantIds.length, createdAt: a.createdAt,
+        }))
       return ok({ items, nextCursor: null })
     },
   },
@@ -342,7 +370,7 @@ const recHandlers: MockMethod[] = [
       return result(r)
     },
   },
-  // 活动详情（管理视角；面试职能角色可读，更新仍限负责人与人事）
+  // 活动详情（管理视角；面试职能角色可读，更新仍限负责人与人事；临时面试官仅见其任务活动 ORG-037）
   {
     url: '/api/org/:clubId/recruitment/:activityId',
     method: 'get',
@@ -350,6 +378,7 @@ const recHandlers: MockMethod[] = [
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const a = rdb.findActivity(query.clubId, query.activityId)
       if (!a) return notFound('活动不存在')
+      if (!canManageRec(url, query.clubId) && !defaultInterviewerOf(url, query.clubId) && !interviewerTaskActivityIds(url, query.clubId).has(a.id)) return forbidden()
       return ok({
         id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, description: a.description,
         status: a.status, channelStatus: a.channelStatus, deadline: a.deadline, deadlineVersion: a.deadlineVersion,
@@ -1284,6 +1313,9 @@ const recHandlers: MockMethod[] = [
 
 // ================= 联合活动 =================
 
+/** 联合活动终态（评价/结论锁定用；与 SM-JNT-001 终态一致） */
+const JOINT_TERMINAL = new Set(['closed', 'completed', 'cancelled', 'force_closed'])
+
 /** 联合活动行（管理视角） */
 function jointRow(ja: rdb.JointActivity, clubId?: string) {
   return {
@@ -1855,11 +1887,13 @@ const jointHandlers: MockMethod[] = [
     url: '/api/org/:clubId/joint/:jointId/conclusions/:conclusionId/evaluate',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      if (!canManageJoint(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
+      if (!canManageJoint(url, query.clubId) && !canInterviewJoint(url, query.clubId, query.jointId)) return forbidden()
       const input = unwrap(body) as { rating?: number; comment?: string }
       const actingClub = query._mock_club || query.clubId
       const con = rdb.jointConclusions.find((c) => c.id === query.conclusionId)
       if (!con) return notFound('联合结论不存在')
+      if (con.jointId !== query.jointId) return notFound('联合结论不属于该活动')
+      if (JOINT_TERMINAL.has(rdb.findJoint(query.jointId)?.status || '')) return businessError('活动已结束，结论评价已锁定；如需修改请走复核或事实纠错')
       if (con.clubId !== actingClub) return businessError('只能提交或修改本社团对应的联合结论评价')
       if (con.status === 'accepted_locked' || con.status === 'archived') return businessError('结论已锁定，不可再评价')
       const me = actorInfo(url)

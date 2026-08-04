@@ -1965,6 +1965,7 @@ export function cancelJointActivity(jointId: string, clubId: string, actorName: 
         it.status = 'cancelled_archived'
       }
     }
+    expireActivityTasks(jointId)
   }
   ja.version += 1
   return ok()
