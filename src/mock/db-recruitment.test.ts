@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
 import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, recruitmentActivities, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks } from './db-recruitment'
@@ -194,6 +194,49 @@ describe('状态机事件名对齐（SM-REC-003/SM-REC-005）', () => {
     const resubmit = submitApplication('act-001', 'u-001', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: true })
     expect(resubmit.ok, resubmit.error || '').toBe(true)
     expect(resubmit.data?.status).toBe('submitted')
+  })
+})
+
+describe('临时面试官任务指派（ORG-037 scope 覆盖规则）', () => {
+  const created: string[] = []
+
+  function cleanupTasks() {
+    for (const id of created) {
+      const idx = interviewerTasks.findIndex((t) => t.id === id)
+      if (idx >= 0) interviewerTasks.splice(idx, 1)
+    }
+    created.length = 0
+  }
+
+  afterEach(cleanupTasks)
+
+  it('已有活动级任务时，轮次级指派被拒', () => {
+    const first = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(first.ok, first.error || '').toBe(true)
+    created.push(first.data!.id)
+    const dup = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(dup.ok).toBe(false)
+    expect(dup.error).toContain('活动级')
+  })
+
+  it('已有轮次级任务时，活动级升级指派允许（覆盖全部轮次）', () => {
+    const first = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(first.ok, first.error || '').toBe(true)
+    created.push(first.data!.id)
+    const upgrade = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(upgrade.ok, upgrade.error || '').toBe(true)
+    created.push(upgrade.data!.id)
+  })
+
+  it('同轮次重复轮次级被拒，不同轮次允许并存', () => {
+    const first = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(first.ok, first.error || '').toBe(true)
+    created.push(first.data!.id)
+    const sameRound = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(sameRound.ok).toBe(false)
+    const otherRound = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'round', roundId: 'rd-002', userId: 'user-member-002', userName: '陈雨桐' })
+    expect(otherRound.ok, otherRound.error || '').toBe(true)
+    created.push(otherRound.data!.id)
   })
 })
 

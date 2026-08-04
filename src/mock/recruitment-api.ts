@@ -830,6 +830,10 @@ const recHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
+      const task = rdb.interviewerTasks.find((t) => t.id === query.taskId)
+      if (!task || task.clubId !== query.clubId || task.activityId !== query.activityId) {
+        return businessError('任务不存在或不属于该社团')
+      }
       const me = actorInfo(url)
       return result(rdb.revokeInterviewerTask(query.taskId, me.name))
     },

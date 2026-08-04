@@ -2112,10 +2112,15 @@ export function assignInterviewerTask(input: {
       if (!roundOk) return err('指定轮次不存在')
     }
   }
-  const duplicate = interviewerTasks.find(
+  const activeTasks = interviewerTasks.filter(
     (t) => t.clubId === input.clubId && t.activityId === input.activityId && t.userId === input.userId && t.status === 'active',
   )
-  if (duplicate) return err('该成员已存在有效面试任务，请先撤销')
+  if (activeTasks.some((t) => t.scope === 'activity')) {
+    return err('该成员已存在活动级面试任务（覆盖全部轮次），无需重复指派')
+  }
+  if (input.scope === 'round' && activeTasks.some((t) => t.roundId === input.roundId)) {
+    return err('该轮次已存在有效面试任务，请先撤销')
+  }
   const task: InterviewerTask = {
     id: `itask-${interviewerTaskSeq++}`,
     clubId: input.clubId, activityId: input.activityId, kind: input.kind,

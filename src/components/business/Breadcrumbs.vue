@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight } from '@lucide/vue'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 
@@ -10,6 +10,7 @@ interface Crumb {
 }
 
 const route = useRoute()
+const router = useRouter()
 const workspace = useWorkspaceContextStore()
 
 /** 各域（路由首段）下的段中文名：同一段在不同域语义不同，按域隔离 */
@@ -85,28 +86,11 @@ const SEGMENT_LABELS: Record<string, Record<string, string>> = {
   },
 }
 
-/** 已知存在独立路由的累积路径（白名单）：仅这些段渲染为可点击链接，其余为纯文本，避免点击 404 */
-const LINKABLE_PATHS = new Set([
-  '/me', '/me/todo', '/me/ongoing', '/me/history', '/me/schedule',
-  '/me/profile', '/me/notifications', '/me/corrections',
-  '/admin/clubs', '/admin/clubs/wizard', '/admin/joint', '/admin/recruitment', '/admin/forms',
-  '/admin/notifications/email-config',
-  '/admin/audit/corrections', '/admin/audit/logs', '/admin/delete', '/admin/retention',
-  '/admin/stats', '/admin/exports', '/admin/config', '/admin/config/permission-templates', '/admin/ops-status',
-  '/org/:clubId/dashboard', '/org/:clubId/batch',
-  '/org/:clubId/recruitment', '/org/:clubId/recruitment/create',
-  '/org/:clubId/joint', '/org/:clubId/joint/create',
-  '/org/:clubId/members', '/org/:clubId/members/department-apply', '/org/:clubId/members/invite',
-  '/org/:clubId/members/appointments', '/org/:clubId/members/exit', '/org/:clubId/members/transition',
-  '/org/:clubId/forms',
-  '/org/:clubId/stats', '/org/:clubId/exports', '/org/:clubId/notifications/email-config',
-  '/org/:clubId/audit/corrections', '/org/:clubId/audit/logs', '/org/:clubId/config',
-  '/explore', '/explore/activities', '/explore/clubs', '/login',
-])
-
-/** 将累积路径归一化为白名单形式（动态 clubId → 占位符） */
-function normalizeAcc(acc: string): string {
-  return acc.replace(/^\/org\/[^/]+/, '/org/:clubId')
+/** 累积路径是否命中真实路由：与路由表同源校验，避免白名单漂移造成点击 404 或漏链（catch-all 除外） */
+function isKnownPath(path: string): boolean {
+  const resolved = router.resolve(path)
+  const last = resolved.matched[resolved.matched.length - 1]
+  return !!last && last.name !== 'P-GEN-01' && last.name !== 'P-GEN-00-root'
 }
 
 const crumbs = computed<Crumb[]>(() => {
@@ -124,7 +108,7 @@ const crumbs = computed<Crumb[]>(() => {
   }
 
   const homePath = `/${prefix}`
-  const result: Crumb[] = [{ label: homeLabel[prefix] || '首页', path: LINKABLE_PATHS.has(homePath) ? homePath : null }]
+  const result: Crumb[] = [{ label: homeLabel[prefix] || '首页', path: isKnownPath(homePath) ? homePath : null }]
   let acc = `/${prefix}`
 
   for (let i = 1; i < segments.length; i++) {
@@ -135,8 +119,7 @@ const crumbs = computed<Crumb[]>(() => {
     }
     acc += `/${seg}`
     const label = SEGMENT_LABELS[prefix]?.[seg] || seg
-    const linkable = LINKABLE_PATHS.has(normalizeAcc(acc))
-    result.push({ label, path: linkable ? acc : null })
+    result.push({ label, path: isKnownPath(acc) ? acc : null })
   }
 
   return result

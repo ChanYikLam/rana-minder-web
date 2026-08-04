@@ -1,5 +1,5 @@
 import type { MockMethod } from './types'
-import { getActiveMockUser, resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, mockUsers, type MockUser } from './auth'
+import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, mockUsers, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead } from './notifications'
@@ -32,11 +32,10 @@ function issueReauthProof(userId: string): { proof: string; expiresAt: string } 
   return { proof, expiresAt: new Date(expiresAt).toISOString() }
 }
 
-function consumeReauthProof(proof: unknown): boolean {
+function consumeReauthProof(proof: unknown, operatorId: string | undefined | null): boolean {
   if (typeof proof !== 'string') return false
-  const user = getActiveMockUser()
   const record = reauthProofs.get(proof)
-  if (!user || !record || record.userId !== user.id || record.expiresAt <= Date.now()) return false
+  if (!operatorId || !record || record.userId !== operatorId || record.expiresAt <= Date.now()) return false
   reauthProofs.delete(proof)
   return true
 }
@@ -1804,6 +1803,9 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
       const fileId = query.fileId || query.id || ''
+      if (!fileId.startsWith('file-')) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+      }
       return {
         code: 0,
         data: {
@@ -2047,7 +2049,7 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, body }: { url: string; body: { input: { targetIds: string[]; reason?: string; reauthProof?: string; previewVersion?: number } } }) => {
       if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof)) {
+      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
       if (body.input?.previewVersion !== 4) {
@@ -2325,7 +2327,7 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
       if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof)) {
+      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
       const club = mockClubs.find((c) => c.id === query.clubId)
@@ -2356,7 +2358,7 @@ const platformHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
       if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof)) {
+      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
       const club = mockClubs.find((c) => c.id === query.clubId)
@@ -2747,11 +2749,13 @@ const listHandlers: MockMethod[] = [
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
-  // 联合活动列表
+  // 联合活动列表（JNT：仅在该社团有角色的用户可访问，与 /org/:clubId 工作台同一权限口径）
   {
     url: '/api/org/:clubId/joint/list',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!user || !user.roles.some((r) => r.clubId === query.clubId)) return forbidden()
       const items = rdb.jointActivities
         .filter((j) => j.clubs.some((c) => c.clubId === query.clubId))
         .map((j) => ({
@@ -2850,14 +2854,20 @@ const mockFileHandlers: MockMethod[] = [
   {
     url: '/api/mock-files/:fileId',
     method: 'get',
-    response: () => ({
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': 'attachment; filename="members-export.csv"',
-      },
-      body: '\uFEFF姓名,学号,部门,状态\n陈雨桐,20240002,技术部,成员\n刘子豪,20240001,技术部,候选人\n林婉婷,20240006,设计部,候选人\n',
-    }),
+    response: ({ query }: { query: Record<string, string> }) => {
+      const fileId = query.fileId || ''
+      if (!/^(file-|exp-)[\w.-]+\.csv$/.test(fileId)) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+      }
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${fileId}"`,
+        },
+        body: '\uFEFF姓名,学号,部门,状态\n陈雨桐,20240002,技术部,成员\n刘子豪,20240001,技术部,候选人\n林婉婷,20240006,设计部,候选人\n',
+      }
+    },
   },
 ]
 

@@ -20,13 +20,13 @@ const creating = ref(false)
 const actingId = ref<string | null>(null)
 const formError = ref('')
 const actError = ref('')
-const justSubmitted = ref(false)
+const justSubmitted = ref('')
 const submittedTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
-function flashSubmitted() {
-  justSubmitted.value = true
+function flashSubmitted(message: string) {
+  justSubmitted.value = message
   if (submittedTimer.value) clearTimeout(submittedTimer.value)
-  submittedTimer.value = setTimeout(() => { justSubmitted.value = false }, 4000)
+  submittedTimer.value = setTimeout(() => { justSubmitted.value = '' }, 4000)
 }
 
 onUnmounted(() => {
@@ -63,7 +63,7 @@ async function handleCreate() {
   if (result.kind === 'completed') {
     showForm.value = false
     form.value = { targetType: '', targetId: '', reason: '', evidence: '' }
-    flashSubmitted()
+    flashSubmitted('纠错申请已提交，等待审核')
     await loadData()
   } else {
     formError.value = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
@@ -78,7 +78,7 @@ async function handleDecide(item: Correction, decision: 'approve' | 'reject') {
   const result = await post(`${prefix}/${item.id}/decide`, { decision })
   actingId.value = null
   if (result.kind === 'completed') {
-    flashSubmitted()
+    flashSubmitted(decision === 'approve' ? '纠错申请已批准' : '纠错申请已拒绝')
     await loadData()
   } else {
     actError.value = '操作失败，请重试'
@@ -93,7 +93,7 @@ async function handleWithdraw(item: Correction) {
   const result = await post(`${prefix}/${item.id}/withdraw`, {})
   actingId.value = null
   if (result.kind === 'completed') {
-    flashSubmitted()
+    flashSubmitted('纠错申请已撤回')
     await loadData()
   } else {
     actError.value = '撤回失败，请重试'
@@ -153,7 +153,7 @@ onMounted(loadData)
       </Card>
 
       <div v-if="justSubmitted" class="mb-4 rounded-md bg-success-subtle border border-success px-4 py-3 text-sm text-success" role="status">
-        纠错申请已提交，等待审核
+        {{ justSubmitted }}
       </div>
       <p v-if="actError" class="text-sm text-danger mb-4" role="alert">{{ actError }}</p>
 
