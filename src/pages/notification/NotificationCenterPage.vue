@@ -4,6 +4,7 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { NotificationBadge } from '@/components/feedback'
 import { NotificationDetail, type NotificationDetailData } from '@/components/feedback'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
+import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
 import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
 
@@ -35,7 +36,7 @@ function openDetail(id: string) {
 
 function onDetailAction(key: string) {
   if (key === 'navigate' && selected.value?.link) {
-    window.location.href = selected.value.link
+    navigateByLink(selected.value.link)
   }
 }
 
