@@ -107,13 +107,15 @@ function tieredExploreSearch<T extends ExploreSearchable>(items: T[], q: string)
     (i) => !exact.includes(i) && (i.title.toLowerCase().includes(ql) || i.clubName.toLowerCase().includes(ql) || i.description.toLowerCase().includes(ql)),
   )
   const fuzzy =
-    q.length >= 3
-      ? items.filter(
-          (i) =>
+    orgdb.effectiveChars(q) >= 3
+      ? items.filter((i) => {
+          const threshold = ql.length <= 4 ? 1 : 2
+          return (
             !exact.includes(i) &&
             !substring.includes(i) &&
-            (editDistance(i.title.toLowerCase(), ql) <= 2 || editDistance(i.clubName.toLowerCase(), ql) <= 1),
-        )
+            (editDistance(i.title.toLowerCase(), ql) <= threshold || editDistance(i.clubName.toLowerCase(), ql) <= threshold)
+          )
+        })
       : []
   return [...exact, ...substring, ...fuzzy]
 }
@@ -1620,7 +1622,7 @@ const platformHandlers: MockMethod[] = [
       if (!(BATCH_ACTIONS as readonly string[]).includes(action)) return businessError('不支持的批量操作类型')
       const memberIds = input.memberIds || []
       if (memberIds.length === 0) return businessError('未选择任何操作对象')
-      const applications = (rdb.recruitmentApplications as { id: string; clubId: string; activityId: string; status: string }[]).filter((a) => a.clubId === clubId)
+      const applications = (rdb.recruitmentApplications as { id: string; clubId: string; activityId: string; applicantId: string; applicantName: string; status: string }[]).filter((a) => a.clubId === clubId)
       const activities = (rdb.recruitmentActivities as { id: string; status: string }[]).filter((a) => ['in_progress', 'paused'].includes(a.status))
       const activeActivityIds = new Set(activities.map((a) => a.id))
       const interviews = rdb.recruitmentInterviews
@@ -1631,7 +1633,7 @@ const platformHandlers: MockMethod[] = [
         if (!activeActivityIds.has(app.activityId)) return { memberId, success: false, message: '关联活动未在进行中，无法执行' }
         if (action === 'assign_interviewer') {
           const existing = (interviews as { id: string; applicantId: string; status: string }[]).find(
-            (iv) => iv.applicantId === app.id && ['pending_selection', 'scheduled'].includes(iv.status),
+            (iv) => iv.applicantId === app.applicantId && ['pending_selection', 'scheduled'].includes(iv.status),
           )
           if (existing) {
             const it = rdb.recruitmentInterviews.find((x) => x.id === existing.id)
@@ -1646,8 +1648,8 @@ const platformHandlers: MockMethod[] = [
           if (!round) return { memberId, success: false, message: '该申请人无可开放的面试轮次' }
           rdb.recruitmentInterviews.push({
             id: `int-batch-${Date.now()}-${memberId.slice(-4)}`,
-            activityId: app.activityId, clubId, applicantId: app.id,
-            applicantName: (app as { applicantName?: string }).applicantName || memberId,
+            activityId: app.activityId, clubId, applicantId: app.applicantId,
+            applicantName: app.applicantName,
             roundId: round.id, status: 'pending_selection',
             slotId: null, startAt: null, endAt: null, actualStartAt: null, actualEndAt: null,
             attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
@@ -1656,14 +1658,14 @@ const platformHandlers: MockMethod[] = [
           return { memberId, success: true, message: '已创建面试任务并分配面试官' }
         }
         if (action === 'schedule_interview') {
-          const scheduled = (interviews as { applicantId: string; status: string }[]).some((iv) => iv.applicantId === app.id && iv.status === 'scheduled')
+          const scheduled = (interviews as { applicantId: string; status: string }[]).some((iv) => iv.applicantId === app.applicantId && iv.status === 'scheduled')
           return { memberId, success: !scheduled, message: scheduled ? '该申请人已安排面试' : '已安排面试时段' }
         }
         if (action === 'publish_result') {
-          const published = app.status === 'accepted' || (invitations as { applicantId: string }[]).some((i) => i.applicantId === app.id)
+          const published = app.status === 'accepted' || (invitations as { applicantId: string }[]).some((i) => i.applicantId === app.applicantId)
           return { memberId, success: !published, message: published ? '结论或邀请已发布' : '结论已发布' }
         }
-        const invited = (invitations as { applicantId: string }[]).some((i) => i.applicantId === app.id)
+        const invited = (invitations as { applicantId: string }[]).some((i) => i.applicantId === app.applicantId)
         return { memberId, success: !invited, message: invited ? '重复邀请被拒绝' : '邀请已发送' }
       })
       return {

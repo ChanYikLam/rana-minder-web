@@ -692,7 +692,7 @@ const recHandlers: MockMethod[] = [
     response: ({ url }: { url: string }) => {
       const me = resolveMockUser(url)
       const items = rdb.recruitmentInterviews
-        .filter((it) => (it.interviewerIds || []).includes(me.id))
+        .filter((it) => (it.interviewerIds || []).includes(me.id) && canInterview(url, it.clubId))
         .map((it) => {
           const a = rdb.findAnyActivity(it.activityId)
           const round = a?.rounds.find((r) => r.id === it.roundId)

@@ -17,7 +17,7 @@ interface GroupSeed extends Omit<GroupNode, 'memberCount'> {
 
 export interface ClubSyncEvent {
   id: string
-  kind: 'group_lost' | 'repair' | 'rebind' | 'disconnect' | 'reaccess'
+  kind: 'group_lost' | 'repair' | 'rebind' | 'disconnect' | 'reaccess' | 'suspend' | 'recover'
   at: string
   note: string
 }
@@ -359,7 +359,7 @@ export function suspendClub(clubId: string, mode: 'normal' | 'force', reason: st
   club.status = 'suspended'
   club.readonly = true
   club.freezeIntervals.push({ id: 'fri-' + Date.now(), reason: reason.trim(), suspendedAt: nowIso(), recoveredAt: null })
-  pushSyncEvent(club, 'rebind', `${mode === 'force' ? '紧急' : '普通'}停用：${reason.trim()}`)
+  pushSyncEvent(club, 'suspend', `${mode === 'force' ? '紧急' : '普通'}停用：${reason.trim()}`)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -374,7 +374,7 @@ export function recoverClub(clubId: string): { ok: boolean; error?: string; data
   }
   club.status = 'enabled'
   club.readonly = false
-  pushSyncEvent(club, 'reaccess', '恢复启用，冻结期限已按停用时长顺延')
+  pushSyncEvent(club, 'recover', '恢复启用，冻结期限已按停用时长顺延')
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -384,7 +384,17 @@ export function disconnectClub(clubId: string): { ok: boolean; error?: string; d
   if (!club) return { ok: false, error: '未找到该社团' }
   const check = validateTransition(club, 'pending_rebind', 'disconnect')
   if (!check.ok) return { ok: false, error: check.error }
-  const prevGroup = groupName(club.groupId) || '未绑定'
+  const prevGroupId = club.groupId
+  const prevLeaderGroupId = club.leaderGroupId
+  const prevGroupName = groupName(prevGroupId) || '未绑定'
+  if (prevGroupId) {
+    const g = findGroup(prevGroupId)
+    if (g) g.boundClubId = null
+  }
+  if (prevLeaderGroupId && prevLeaderGroupId !== prevGroupId) {
+    const lg = findGroup(prevLeaderGroupId)
+    if (lg) lg.boundClubId = null
+  }
   club.status = 'pending_rebind'
   club.groupId = null
   club.readonly = true
@@ -392,7 +402,7 @@ export function disconnectClub(clubId: string): { ok: boolean; error?: string; d
   club.leaderName = null
   club.wizardStep = 0
   club.wizard = { selectedGroupId: null, leaderGroupId: null }
-  pushSyncEvent(club, 'disconnect', `解除接入（原 Group：${prevGroup}），等待重新接入`)
+  pushSyncEvent(club, 'disconnect', `解除接入（原 Group：${prevGroupName}），等待重新接入`)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
