@@ -1635,12 +1635,29 @@ export function publishJointActivity(jointId: string): { ok: boolean; error?: st
   return ok()
 }
 
-/** 过滤部门意向为已选意向社团的合法部门（先选协会才能选部门），保留优先级顺序；未选社团时默认全部参与社团 */
+/**
+ * 过滤部门意向（先选协会才能选部门）：
+ * - volunteerClubIds 未传（undefined）时默认全部参与社团；空数组表示用户已清空全部意向社团，不取任何部门
+ * - 部门名称以服务端权威数据为准（反查 ja.clubs 的 departments），不信任客户端；按 departmentId 去重，保留优先级顺序
+ */
 function filterJointPreferences(ja: JointActivity, prefs?: { departmentId: string; departmentName: string }[], volunteerClubIds?: string[]): { departmentId: string; departmentName: string }[] {
   if (!prefs) return []
-  const clubIds = volunteerClubIds && volunteerClubIds.length > 0 ? volunteerClubIds : ja.clubs.map((c) => c.clubId)
-  const valid = new Set(ja.clubs.filter((c) => clubIds.includes(c.clubId)).flatMap((c) => c.departments.map((d) => d.id)))
-  return prefs.filter((p) => valid.has(p.departmentId)).map((p) => ({ departmentId: p.departmentId, departmentName: p.departmentName }))
+  const authoritative = new Map<string, string>()
+  for (const c of ja.clubs) {
+    if (volunteerClubIds !== undefined && !volunteerClubIds.includes(c.clubId)) continue
+    for (const d of c.departments) {
+      if (!authoritative.has(d.id)) authoritative.set(d.id, d.name)
+    }
+  }
+  const seen = new Set<string>()
+  const out: { departmentId: string; departmentName: string }[] = []
+  for (const p of prefs) {
+    const name = authoritative.get(p.departmentId)
+    if (name === undefined || seen.has(p.departmentId)) continue
+    seen.add(p.departmentId)
+    out.push({ departmentId: p.departmentId, departmentName: name })
+  }
+  return out
 }
 
 export function saveJointApplicationDraft(
@@ -1668,8 +1685,10 @@ export function saveJointApplicationDraft(
   if (input?.volunteerClubIds) {
     app.volunteerClubIds = input.volunteerClubIds.filter((id) => ja.clubs.some((c) => c.clubId === id))
   }
-  if (input?.preferences) app.preferences = filterJointPreferences(ja, input.preferences, app.volunteerClubIds)
-  if (input?.answers) app.answers = { ...input.answers }
+  if (input?.preferences) {
+    app.preferences = filterJointPreferences(ja, input.preferences, input.volunteerClubIds !== undefined ? app.volunteerClubIds : undefined)
+  }
+  if (input?.answers) app.answers = { ...app.answers, ...input.answers }
   app.formVersion = ja.formVersion
   app.version += 1
   return ok(app)
