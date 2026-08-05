@@ -130,8 +130,8 @@ function isExpired(inv: Invite): boolean {
 }
 
 // 候选搜索（姓名连续子串/学号精确）——300ms 防抖；清空关键字立即重置并作废在途请求
-const { searching: candidateSearching, schedule: scheduleSearch } = useDebouncedSearch({
-  onSearch: async (kw, isStale) => {
+const { searching: candidateSearching, schedule: scheduleSearch, seq } = useDebouncedSearch({
+  onSearch: async (kw) => {
     if (!kw) {
       candidates.value = []
       searchFailed.value = false
@@ -139,8 +139,9 @@ const { searching: candidateSearching, schedule: scheduleSearch } = useDebounced
     }
     searchFailed.value = false
     const clubId = route.params.clubId as string
+    const mySeq = seq.value
     const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: kw })
-    if (isStale()) return
+    if (mySeq !== seq.value) return
     if (r.kind === 'completed') {
       candidates.value = r.data.items
       searchFailed.value = false
@@ -356,7 +357,7 @@ onMounted(loadData)
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
+              <p v-if="candidateKeyword.trim() && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
               <p v-else-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
