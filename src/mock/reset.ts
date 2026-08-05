@@ -1,7 +1,7 @@
 import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots } from './db-recruitment'
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
-import { correctionsDb } from './index'
+import { correctionsDb } from './db-corrections'
 
 const seed = {
   recruitmentActivities: structuredClone(recruitmentActivities),

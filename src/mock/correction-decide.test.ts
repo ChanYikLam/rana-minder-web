@@ -53,6 +53,7 @@ describe('管理员事实纠错处置（decide 真实落库）', () => {
     resetRecruitmentDB()
     resetNotifications()
     resetCorrections()
+    resolveMockUser('/api/auth/session?_mock_user=admin')
   })
 
   it('批准后列表状态变为 approved，按钮消失依据（status 变化）', async () => {
@@ -88,25 +89,55 @@ describe('管理员事实纠错处置（decide 真实落库）', () => {
     expect(out.statusCode).toBe(404)
   })
 
-  it('撤回真实落库', async () => {
-    const list = await invokeHandler(listPattern, 'get', listUrl)
-    const items = (list.body.data as { items: CorrectionItem[] }).items
-    const target = items.find((i) => i.status === 'submitted')!
+  it('撤回真实落库（提交者本人可撤回，他人 403）', async () => {
+    const created = await invokeHandler(listPattern, 'post', listUrl, {
+      input: { targetType: '社团信息', targetId: 'club-001', reason: '撤回测试', evidence: '' },
+    })
+    expect(created.statusCode, JSON.stringify(created.body)).toBe(200)
+    const { id } = created.body.data as { id: string }
 
-    const out = await invokeHandler(withdrawPattern, 'post', `${listUrl}/${target.id}/withdraw`)
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const denied = await invokeHandler(withdrawPattern, 'post', `${listUrl}/${id}/withdraw`)
+    expect(denied.statusCode).toBe(403)
+
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const out = await invokeHandler(withdrawPattern, 'post', `${listUrl}/${id}/withdraw`)
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     const after = await invokeHandler(listPattern, 'get', listUrl)
-    const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === target.id)
+    const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === id)
     expect(updated?.status).toBe('withdrawn')
   })
 
   it('admin 列表与社团版共享 correctionsDb（org 侧新提交 admin 可见）', async () => {
-    resolveMockUser('/api/auth/session?_mock_user=org_admin')
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    expect(resolveMockUser('/api/auth/session').id).toBe('user-leader-001')
     const create = await invokeHandler('/api/org/:clubId/audit/corrections', 'post', '/api/org/club-001/audit/corrections', { input: { targetType: '成员信息', targetId: 'mem-003', reason: '测试共享内存库', evidence: '' } })
     expect(create.statusCode, JSON.stringify(create.body)).toBe(200)
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    expect(resolveMockUser('/api/auth/session').id).toBe('user-admin-001')
     const adminList = await invokeHandler(listPattern, 'get', listUrl)
     const items = (adminList.body.data as { items: CorrectionItem[] }).items
     expect(items.some((i) => i.reason === '测试共享内存库')).toBe(true)
+  })
+
+  it('admin 端点在无平台审计权限时拒绝（403）', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=member')
+    expect(resolveMockUser('/api/auth/session').id).toBe('user-member-001')
+    const list = await invokeHandler(listPattern, 'get', listUrl)
+    expect(list.statusCode).toBe(403)
+    const out = await invokeHandler(decidePattern, 'post', `${listUrl}/cor-001/decide`, { input: { decision: 'approve' } })
+    expect(out.statusCode).toBe(403)
+  })
+
+  it('admin 发起纠错 submitterName 取登录用户，不接受前端伪造', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const out = await invokeHandler('/api/admin/audit/corrections', 'post', listUrl, {
+      input: { targetType: '社团信息', targetId: 'club-001', reason: '伪造提交人校验', evidence: '', submitterName: '伪造者' },
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const created = out.body.data as { id: string; submitterName: string }
+    expect(created.submitterName).toBe('平台管理员')
+    expect(created.submitterName).not.toBe('伪造者')
   })
 })
 

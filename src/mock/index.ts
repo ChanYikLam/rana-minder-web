@@ -5,26 +5,13 @@ import * as db from './db'
 import * as orgdb from './db-organization'
 import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
+import { correctionsDb, type CorrectionRecord } from './db-corrections'
 
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
 const REAUTH_TTL_MS = 10 * 60 * 1000
 const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
 
-/** 事实纠错共享内存库（社团/个人中心共用，发起/处理/撤回真实落库） */
-interface CorrectionRecord {
-  id: string
-  targetType: string
-  targetId: string
-  reason: string
-  evidence: string
-  status: string
-  submittedAt: string
-  submitterName: string
-}
-export const correctionsDb: CorrectionRecord[] = [
-  { id: 'cor-001', targetType: '申请记录', targetId: 'app-003', reason: '评分有误，应为 5 分', evidence: '截图', status: 'submitted', submittedAt: '2025-07-30T10:00:00+08:00', submitterName: '王浩然' },
-  { id: 'cor-002', targetType: '成员信息', targetId: 'mem-002', reason: '部门信息未更新', evidence: '审批截图', status: 'approved', submittedAt: '2025-07-25T10:00:00+08:00', submitterName: '李思颖' },
-]
+/** 事实纠错共享内存库见 db-corrections.ts（社团/个人中心/管理员共用） */
 
 function issueReauthProof(userId: string): { proof: string; expiresAt: string } {
   const proof = `reauth-${userId}-${Date.now()}`
@@ -2848,7 +2835,9 @@ policies: retentionPolicies,
   {
     url: '/api/admin/audit/corrections',
     method: 'get',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
       return {
         code: 0,
         data: {
@@ -2861,7 +2850,9 @@ policies: retentionPolicies,
   {
     url: '/api/admin/audit/corrections',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
       const record: CorrectionRecord = {
         id: 'cor-' + Date.now(),
         targetType: String(body.input?.targetType || ''),
@@ -2870,7 +2861,7 @@ policies: retentionPolicies,
         evidence: String(body.input?.evidence || ''),
         status: 'submitted',
         submittedAt: new Date().toISOString(),
-        submitterName: String(body.input?.submitterName || ''),
+        submitterName: user.name,
       }
       correctionsDb.unshift(record)
       return { code: 0, data: record }
@@ -2879,7 +2870,9 @@ policies: retentionPolicies,
   {
     url: '/api/admin/audit/corrections/:correctionId/decide',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { decision: string } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
       const record = correctionsDb.find((c) => c.id === query.correctionId)
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
@@ -2891,11 +2884,14 @@ policies: retentionPolicies,
   {
     url: '/api/admin/audit/corrections/:correctionId/withdraw',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
       const record = correctionsDb.find((c) => c.id === query.correctionId)
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      if (record.submitterName !== user.name) return forbidden()
       record.status = 'withdrawn'
       return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
     },
