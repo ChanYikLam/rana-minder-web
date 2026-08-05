@@ -1,7 +1,7 @@
 import { ref, type Ref } from 'vue'
 import type { ApiResult } from '@/types/contracts'
 import type { PageState } from '@/types/machine'
-import { errorToPageState, type ErrorCode } from '@/services/error-map'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 
 interface UseRequestOptions<T> {
   immediate?: boolean
@@ -57,6 +57,12 @@ export function useRequest<T>(
         const code = result.error.code as ErrorCode
         state.value = errorToPageState(code)
         error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
+      }
+    } catch (e) {
+      state.value = 'error'
+      error.value = {
+        code: 'IFC-ERR-016',
+        message: e instanceof Error ? e.message : ERROR_MESSAGES['IFC-ERR-016'],
       }
     } finally {
       submitting = false
