@@ -36,6 +36,7 @@ const wizardClub = computed<ClubItem | undefined>(() => items.value.find((c) => 
 
 const groupKeyword = ref('')
 const groupSearching = ref(false)
+const groupSearchFailed = ref(false)
 const groupResults = ref<SearchResult[]>([])
 const rawResults = ref<GroupSearchResult[]>([])
 const selectedGroup = ref<GroupSearchResult | null>(null)
@@ -55,12 +56,14 @@ async function searchGroup() {
     // 空关键字：立即作废在途请求并复位 loading，避免旧响应写回结果
     searchSeq++
     groupSearching.value = false
+    groupSearchFailed.value = false
     groupResults.value = []
     rawResults.value = []
     return
   }
   const seq = ++searchSeq
   groupSearching.value = true
+  groupSearchFailed.value = false
   const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: keyword })
   if (seq !== searchSeq) return
   groupSearching.value = false
@@ -68,8 +71,10 @@ async function searchGroup() {
     rawResults.value = res.data.items
     groupResults.value = res.data.items.map(toSearchResult)
   } else {
+    // 搜索失败（非 completed）：清空旧结果并提示，与其余两处保持一致
     rawResults.value = []
     groupResults.value = []
+    groupSearchFailed.value = true
   }
 }
 
@@ -79,11 +84,12 @@ function onGroupInput(value: string) {
   if (!value.trim()) {
     searchSeq++
     groupSearching.value = false
+    groupSearchFailed.value = false
     groupResults.value = []
     rawResults.value = []
     return
   }
-  searchTimer = setTimeout(searchGroup, 350)
+  searchTimer = setTimeout(searchGroup, 300)
 }
 
 async function onGroupSelect(result: SearchResult) {
@@ -323,6 +329,7 @@ onUnmounted(() => {
               @update:model-value="onGroupInput"
               @select="onGroupSelect"
             />
+            <p v-if="groupSearchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
             <p v-if="selectedGroup" class="mt-2 flex items-center gap-1.5 text-xs" :class="wizardBindingWarning.ok ? 'text-success' : 'text-danger'">
               <CheckCircle2 v-if="wizardBindingWarning.ok" :size="14" />
               <Info v-else :size="14" />

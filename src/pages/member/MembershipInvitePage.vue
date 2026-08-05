@@ -131,6 +131,7 @@ function isExpired(inv: Invite): boolean {
 // 候选搜索（姓名连续子串/学号精确）——300ms 防抖
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestSeq = 0
+const candidateSearching = ref(false)
 
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
@@ -139,9 +140,11 @@ function scheduleSearch() {
     requestSeq++
     candidates.value = []
     searchFailed.value = false
+    candidateSearching.value = false
     return
   }
   searchFailed.value = false
+  candidateSearching.value = true
   searchTimer = setTimeout(() => { void searchCandidates() }, 300)
 }
 
@@ -150,6 +153,7 @@ async function searchCandidates() {
   const clubId = route.params.clubId as string
   const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: candidateKeyword.value })
   if (seq !== requestSeq) return
+  candidateSearching.value = false
   if (r.kind === 'completed') {
     candidates.value = r.data.items
     searchFailed.value = false
@@ -364,13 +368,13 @@ onMounted(loadData)
               <NameSearch
                 v-model="candidateKeyword"
                 :results="searchResults"
-                :loading="false"
+                :loading="candidateSearching"
                 placeholder="姓名或学号..."
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
               <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
-              <p v-else-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
+              <p v-else-if="candidateKeyword && !candidateSearching && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
