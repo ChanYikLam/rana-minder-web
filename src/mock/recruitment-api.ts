@@ -959,6 +959,28 @@ const recHandlers: MockMethod[] = [
       return result(r)
     },
   },
+  // 申请人请假（本人）
+  {
+    url: '/api/me/interviews/recruitment/:interviewId/leave',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId)
+      if (!it) return notFound('面试不存在')
+      if (it.applicantId !== applicantId) return forbidden()
+      const r = rdb.markAttendance(query.interviewId, 'leave', false)
+      if (r.ok) {
+        pushNotifications([applicantId], {
+          type: 'interview',
+          title: '请假申请已登记',
+          body: '已登记请假，可重新选择面试时段；管理员也可为您重新安排。',
+          link: null,
+        })
+      }
+      return result(r)
+    },
+  },
   // 出席登记（迟到/请假/缺席）
   {
     url: '/api/org/:clubId/recruitment/:activityId/interviews/:interviewId/attendance',
@@ -1091,7 +1113,7 @@ const recHandlers: MockMethod[] = [
         const meUser = resolveMockUser(url)
         const assigned = rdb.recruitmentInterviews.some(
           (i) => i.activityId === query.activityId && i.applicantId === applicantId && i.status !== 'cancelled'
-            && (i.interviewerIds.includes(me.memberId || '') || i.interviewerIds.includes(meUser.id)),
+            && i.interviewerIds.includes(meUser.id),
         )
         if (!assigned) return forbidden()
       }
@@ -1835,6 +1857,18 @@ const jointHandlers: MockMethod[] = [
       const input = unwrap(body) as { slotId?: string }
       if (!input.slotId) return businessError('必须选择面试时段')
       return result(rdb.bookJointInterview(query.jointId, applicantId, input.slotId, false))
+    },
+  },
+  // 申请人请假（本人，联合面试）
+  {
+    url: '/api/me/interviews/joint/:jointId/leave',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const it = rdb.jointInterviews.find((i) => i.jointId === query.jointId && i.applicantId === applicantId)
+      if (!it) return notFound('联合面试不存在')
+      return result(rdb.markJointAttendance(query.jointId, applicantId, 'leave'))
     },
   },
   // 联合结论列表

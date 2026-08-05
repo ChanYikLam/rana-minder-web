@@ -264,6 +264,14 @@ const inputErrorClass = 'border-danger'
           @update:model-value="(v: FileMeta[]) => updateField(field, v)"
         />
 
+        <AttachmentUpload
+          v-else-if="field.type === 'image'"
+          :model-value="(fieldValue(field) as FileMeta[] | undefined) || []"
+          accept="image/*"
+          hint="支持 JPG/PNG/WebP 等图片格式"
+          @update:model-value="(v: FileMeta[]) => updateField(field, v)"
+        />
+
         <input
           v-else
           :id="`dyn-${field.id}`"

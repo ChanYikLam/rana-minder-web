@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
@@ -21,14 +21,36 @@ const publishSucceeded = ref(false)
 const publishError = ref('')
 const draft = ref({ name: '', permissions: '' })
 
+// P-CFG-02 差异预览基线：模板 id → 当前已发布版本的权限清单
+const publishedBaseline = ref<Record<string, string[]>>({})
+
 async function loadData() {
   state.value = 'loading'
   const result = await get<{ items: Template[] }>('/admin/config/permission-templates')
   if (result.kind === 'completed') {
     items.value = result.data.items
+    for (const t of items.value) {
+      if (t.status === 'published') publishedBaseline.value[t.id] = [...t.permissions]
+    }
     state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
+
+const diffRows = computed<{ id: string; label: string; detail: string }[]>(() => {
+  if (!selected.value) return []
+  const base = publishedBaseline.value[selected.value.id] || []
+  if (base.length === 0) {
+    return selected.value.permissions.map((p) => ({ id: 'add-' + p, label: p, detail: '新增' }))
+  }
+  const added = selected.value.permissions.filter((p) => !base.includes(p))
+  const removed = base.filter((p) => !selected.value!.permissions.includes(p))
+  const kept = selected.value.permissions.filter((p) => base.includes(p))
+  return [
+    ...added.map((p) => ({ id: 'add-' + p, label: p, detail: '新增' })),
+    ...removed.map((p) => ({ id: 'rem-' + p, label: p, detail: '移除' })),
+    ...kept.map((p) => ({ id: 'keep-' + p, label: p, detail: '保持' })),
+  ]
+})
 
 const saving = ref(false)
 
@@ -87,6 +109,7 @@ async function handlePublish() {
   if (result.kind === 'completed') {
     publishSucceeded.value = true
     selected.value.status = 'published'
+    publishedBaseline.value[selected.value.id] = [...selected.value.permissions]
     const idx = items.value.findIndex((t) => t.id === selected.value!.id)
     if (idx >= 0) items.value[idx] = { ...selected.value }
     toast.success('模板已发布')
@@ -176,8 +199,8 @@ onMounted(loadData)
       v-model:open="publishOpen"
       title="发布权限模板"
       description="发布后立即作用于全部关联成员并原子切换权限，此操作不可撤销。"
-      :targets="selected ? [{ id: selected.id, label: selected.name, detail: `${selected.permissions.length} 项权限 · v${selected.version}` }] : []"
-      impact-summary="发布失败时全部成员继续使用旧版本；权限缓存将按新版本刷新。"
+      :targets="diffRows"
+      impact-summary="与当前已发布版本的差异（新增/移除/保持）。发布失败时全部成员继续使用旧版本。"
       confirm-label="确认发布"
       reauth-required
       :executing="publishing"
