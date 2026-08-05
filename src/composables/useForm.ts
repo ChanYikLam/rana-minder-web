@@ -53,35 +53,38 @@ export function useForm<T extends Record<string, unknown>>(
     }
 
     submitting.value = true
-    const result = await options.onSubmit(parseResult.data)
-    submitting.value = false
+    try {
+      const result = await options.onSubmit(parseResult.data)
 
-    if (result.kind === 'completed') {
-      return
-    }
-
-    if (result.kind === 'accepted') {
-      submitError.value = '操作正在处理中'
-      return
-    }
-
-    if (result.kind === 'concurrency_conflict') {
-      versionConflict.value = true
-      submitError.value = result.error.message
-      return
-    }
-
-    if (result.kind === 'rejected' && result.error.fieldErrors) {
-      const fieldErrs: Record<string, string> = {}
-      for (const [field, messages] of Object.entries(result.error.fieldErrors)) {
-        fieldErrs[field] = messages[0]
+      if (result.kind === 'completed') {
+        return
       }
-      fieldErrors.value = result.error.fieldErrors
-      errors.value = fieldErrs
-      return
-    }
 
-    submitError.value = result.error?.message || '提交失败，请稍后重试'
+      if (result.kind === 'accepted') {
+        submitError.value = '操作正在处理中'
+        return
+      }
+
+      if (result.kind === 'concurrency_conflict') {
+        versionConflict.value = true
+        submitError.value = result.error.message
+        return
+      }
+
+      if (result.kind === 'rejected' && result.error.fieldErrors) {
+        const fieldErrs: Record<string, string> = {}
+        for (const [field, messages] of Object.entries(result.error.fieldErrors)) {
+          fieldErrs[field] = messages[0]
+        }
+        fieldErrors.value = result.error.fieldErrors
+        errors.value = fieldErrs
+        return
+      }
+
+      submitError.value = result.error?.message || '提交失败，请稍后重试'
+    } finally {
+      submitting.value = false
+    }
   }
 
   function setFieldError(field: string, message: string) {

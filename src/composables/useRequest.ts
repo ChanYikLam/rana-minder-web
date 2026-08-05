@@ -1,7 +1,7 @@
 import { ref, type Ref } from 'vue'
 import type { ApiResult } from '@/types/contracts'
 import type { PageState } from '@/types/machine'
-import { errorToPageState, type ErrorCode } from '@/services/error-map'
+import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 
 interface UseRequestOptions<T> {
   immediate?: boolean
@@ -32,33 +32,41 @@ export function useRequest<T>(
     state.value = 'loading'
     error.value = null
 
-    const result = await fn()
+    try {
+      const result = await fn()
 
-    if (result.kind === 'completed') {
-      data.value = result.data as T
-      if (result.data && typeof result.data === 'object' && 'items' in result.data) {
-        const items = (result.data as { items: unknown[] }).items
-        state.value = items.length === 0 ? 'empty' : 'normal'
+      if (result.kind === 'completed') {
+        data.value = result.data as T
+        if (result.data && typeof result.data === 'object' && 'items' in result.data) {
+          const items = (result.data as { items: unknown[] }).items
+          state.value = items.length === 0 ? 'empty' : 'normal'
+        } else {
+          state.value = 'normal'
+        }
+      } else if (result.kind === 'accepted') {
+        state.value = 'loading'
+      } else if (result.kind === 'external_uncertain') {
+        state.value = 'loading'
+      } else if (result.kind === 'concurrency_conflict') {
+        state.value = 'error'
+        error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
+      } else if (result.kind === 'dependency_unavailable') {
+        state.value = 'error'
+        error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
       } else {
-        state.value = 'normal'
+        const code = result.error.code as ErrorCode
+        state.value = errorToPageState(code)
+        error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
       }
-    } else if (result.kind === 'accepted') {
-      state.value = 'loading'
-    } else if (result.kind === 'external_uncertain') {
-      state.value = 'loading'
-    } else if (result.kind === 'concurrency_conflict') {
+    } catch (e) {
       state.value = 'error'
-      error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
-    } else if (result.kind === 'dependency_unavailable') {
-      state.value = 'error'
-      error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
-    } else {
-      const code = result.error.code as ErrorCode
-      state.value = errorToPageState(code)
-      error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
+      error.value = {
+        code: 'IFC-ERR-016',
+        message: e instanceof Error ? e.message : ERROR_MESSAGES['IFC-ERR-016'],
+      }
+    } finally {
+      submitting = false
     }
-
-    submitting = false
   }
 
   async function refresh() {

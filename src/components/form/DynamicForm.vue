@@ -62,6 +62,25 @@ function toggleCheckbox(field: FormField, opt: string, checked: boolean) {
   updateField(field, next)
 }
 
+/** select 取值契约：单选取 string（空 = ''），multi_select 取 string[]（空 = []） */
+function selectChangeValue(field: FormField, el: HTMLSelectElement): string | string[] {
+  if (field.type !== 'multi_select') return el.value
+  return Array.from(el.selectedOptions).map((o) => o.value)
+}
+
+/** multi_select 回显规范化：始终返回 string[]（空 = []），兼容历史 string 存储，避免回显与提交类型漂移 */
+function multiSelectValue(field: FormField): string[] {
+  const v = fieldValue(field)
+  if (Array.isArray(v)) return v as string[]
+  return typeof v === 'string' && v !== '' ? [v] : []
+}
+
+/** option 选中态：multi_select 用数组 includes 匹配，单选用相等 */
+function isOptionSelected(field: FormField, opt: string): boolean {
+  const v = fieldValue(field)
+  return field.type === 'multi_select' ? multiSelectValue(field).includes(opt) : v === opt
+}
+
 function arrayItems(field: FormField): Array<{ id: string; index: number }> {
   const val = fieldValue(field)
   if (Array.isArray(val)) {
@@ -206,10 +225,10 @@ const inputErrorClass = 'border-danger'
           :multiple="field.type === 'multi_select'"
           :disabled="isReadOnly(field)"
           :required="field.required"
-          @change="updateField(field, ($event.target as HTMLSelectElement).value)"
+          @change="updateField(field, selectChangeValue(field, $event.target as HTMLSelectElement))"
         >
           <option value="" disabled>请选择</option>
-          <option v-for="opt in field.options || []" :key="opt" :value="opt" :selected="fieldValue(field) === opt">
+          <option v-for="opt in field.options || []" :key="opt" :value="opt" :selected="isOptionSelected(field, opt)">
             {{ opt }}
           </option>
         </select>
@@ -261,6 +280,14 @@ const inputErrorClass = 'border-danger'
         <AttachmentUpload
           v-else-if="field.type === 'file'"
           :model-value="(fieldValue(field) as FileMeta[] | undefined) || []"
+          @update:model-value="(v: FileMeta[]) => updateField(field, v)"
+        />
+
+        <AttachmentUpload
+          v-else-if="field.type === 'image'"
+          :model-value="(fieldValue(field) as FileMeta[] | undefined) || []"
+          accept="image/*"
+          hint="支持 JPG/PNG/WebP 等图片格式"
           @update:model-value="(v: FileMeta[]) => updateField(field, v)"
         />
 

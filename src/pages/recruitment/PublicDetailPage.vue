@@ -28,8 +28,6 @@ async function loadDetail() {
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'
-  } else if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-004') {
-    state.value = 'error'
   } else {
     state.value = 'error'
   }

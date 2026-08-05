@@ -40,6 +40,7 @@ function mockUserKeyOf(userId: string): string {
 
 const INTERVIEWER_KEY = mockUserKeyOf('user-interviewer-001')
 const INTERVIEWER_MEMBER_ID = USER_MEMBER_MAP['user-interviewer-001']
+if (!INTERVIEWER_MEMBER_ID) throw new Error('USER_MEMBER_MAP 缺少面试官成员映射: user-interviewer-001')
 const MEMBER_KEY = mockUserKeyOf('user-member-001')
 
 // 依赖种子（db-recruitment.ts）：rev-001 是 act-001 下申请人 u-002 的已有评价（authorId=mem-004，leader 撰写，见 recruitmentReviews/reviewIds 种子）
@@ -98,11 +99,25 @@ describe('面试官提交评价（conclude）权限链路', () => {
   it('无效 key user-interviewer-001 会回落 leader（authorId 为 mem-004）——证明 key 必须用 interviewer，否则测试走管理放行形同虚设', () => {
     const user = resolveMockUser('/api/auth/session?_mock_user=user-interviewer-001')
     expect(user.id).toBe('user-leader-001')
+    expect(USER_MEMBER_MAP[user.id]).toBe('mem-004')
   })
 
   it('无面试权限的普通成员提交评价仍被 403（权限边界未放松）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     const out = await invokeHandler(concludeUrl, plainUrl)
     expect(out.statusCode).toBe(403)
+  })
+
+  it('面试官对未分配面试的申请人（u-003）提交评价仍被 403（assigned 分支负路径）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
+    // u-003 无面试记录，需先种一条评价记录，conclude 才能定位到申请人（否则会先 404 而非 403）
+    const seeded = rdb.submitReview(SEED_ACTIVITY_ID, 'u-003', {
+      comment: '', rating: 0, authorId: 'mem-004', authorName: '张明远', authorRole: 'club_leader',
+    })
+    if (!seeded.data) throw new Error('种子评价未写入')
+    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${seeded.data.id}/conclude`)
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(403)
+    // 关键守卫：403 时评价不得以面试官本人 memberId 落库
+    expect(rdb.recruitmentReviews.some((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === 'u-003' && r.authorId === INTERVIEWER_MEMBER_ID)).toBe(false)
   })
 })

@@ -1070,6 +1070,9 @@ export function markAttendance(interviewId: string, event: 'leave' | 'late' | 'a
   const a = findAnyActivity(it.activityId)
   const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
   if (slot) slot.taken = Math.max(0, slot.taken - 1)
+  it.slotId = null
+  it.startAt = null
+  it.endAt = null
   it.version += 1
   return ok(it)
 }
@@ -1674,12 +1677,14 @@ export function bookJointInterview(jointId: string, applicantId: string, slotId:
   const it = jointInterviews.find((i) => i.jointId === jointId && i.applicantId === applicantId)
   if (!it) return err('联合申请记录不存在')
   const fromStatus = it.status === 'pending_selection' ? 'pending_selection' : it.status
-  const event = it.status === 'scheduled' ? 'reschedule' : it.status === 'invalidated' ? 'rearrange' : 'select'
+  const event = it.status === 'scheduled' ? 'reschedule'
+    : ['invalidated', 'leave', 'late', 'absent'].includes(it.status) ? 'rearrange'
+    : 'select'
   const t = assertTransition('SM-JNT-004', fromStatus, 'scheduled', event)
   if (!t.ok) return err(t.reason || '当前面试记录不可预约')
   const conflict = applicantTimeConflict(applicantId, slot.startAt, slot.endAt, it.id)
   if (conflict.conflict) return err(conflict.detail || '该时段与既有安排冲突')
-  if (it.status === 'invalidated' && it.slotId && it.slotId !== slot.id) {
+  if (it.slotId && it.slotId !== slot.id) {
     const oldSlot = jointSlots.find((s) => s.id === it.slotId && s.jointId === jointId)
     if (oldSlot) oldSlot.taken = Math.max(0, oldSlot.taken - 1)
   }
@@ -1700,6 +1705,11 @@ export function markJointAttendance(jointId: string, applicantId: string, event:
   if (!t.ok) return err(t.reason || '当前状态不可标记出勤')
   it.status = event
   it.attendance = event
+  const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === jointId)
+  if (slot) slot.taken = Math.max(0, slot.taken - 1)
+  it.slotId = null
+  it.startAt = null
+  it.endAt = null
   it.version += 1
   return ok()
 }

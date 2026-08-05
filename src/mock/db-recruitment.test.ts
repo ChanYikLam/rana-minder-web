@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, afterEach } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews } from './db-recruitment'
 import { resetRecruitmentDB } from './reset'
 
 beforeEach(() => {
@@ -193,9 +193,27 @@ describe('状态机事件名对齐（SM-REC-003/SM-REC-005）', () => {
     expect(first.ok).toBe(true)
     const marked = markAttendance(first.data!.id, 'leave', true)
     expect(marked.ok).toBe(true)
+    expect(marked.data?.slotId).toBeNull()
+    expect(marked.data?.startAt).toBeNull()
+    expect(marked.data?.endAt).toBeNull()
     const rearranged = bookInterview('act-001', 'u-008', 'rd-001', 'slot-002', '', true, [])
     expect(rearranged.ok, rearranged.error || '').toBe(true)
     expect(rearranged.data?.status).toBe('scheduled')
+  })
+
+  it('联合请假清空旧时段引用，重排后容量不重复占用', () => {
+    const slot = jointSlots.find((s) => s.id === 'jslot-001')!
+    const it = jointInterviews.find((i) => i.id === 'jint-001')!
+    const before = slot.taken
+    const leave = markJointAttendance('jnt-001', it.applicantId, 'leave')
+    expect(leave.ok).toBe(true)
+    expect(it.slotId).toBeNull()
+    expect(it.startAt).toBeNull()
+    expect(it.endAt).toBeNull()
+    expect(jointSlots.find((s) => s.id === 'jslot-001')!.taken).toBe(Math.max(0, before - 1))
+    const rebook = bookJointInterview('jnt-001', it.applicantId, 'jslot-001', true)
+    expect(rebook.ok, rebook.error || '').toBe(true)
+    expect(jointSlots.find((s) => s.id === 'jslot-001')!.taken).toBe(Math.max(0, before))
   })
 
   it('补充材料请求后重提走 submit_in_window 事件（而非 submit）', () => {

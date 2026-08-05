@@ -1,99 +1,52 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Button } from '@/components/ui/button'
+import { ChevronLeft, ChevronRight } from '@lucide/vue'
 
 const props = withDefaults(defineProps<{
-  current: number
-  total: number
+  page: number
   pageSize?: number
-  maxVisible?: number
+  total: number
 }>(), {
   pageSize: 20,
-  maxVisible: 7,
 })
 
 const emit = defineEmits<{
-  'update:current': [page: number]
+  'update:page': [value: number]
 }>()
 
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
+/** 越界 page 钳制到 [1, totalPages]，避免「第 81-21 条」倒挂文案 */
+const pageClamped = computed(() => Math.min(Math.max(1, props.page), totalPages.value))
+const from = computed(() => (props.total === 0 ? 0 : (pageClamped.value - 1) * props.pageSize + 1))
+const to = computed(() => Math.min(props.total, pageClamped.value * props.pageSize))
 
-const pages = computed(() => {
-  const result: Array<number | 'left-ellipsis' | 'right-ellipsis'> = []
-  const tp = totalPages.value
-  const cur = props.current
-  const mv = props.maxVisible
-
-  if (tp <= mv) {
-    for (let i = 1; i <= tp; i++) result.push(i)
-    return result
-  }
-
-  const half = Math.floor(mv / 2)
-  let start = Math.max(1, cur - half)
-  let end = Math.min(tp, start + mv - 1)
-
-  if (end - start + 1 < mv) {
-    start = Math.max(1, end - mv + 1)
-  }
-
-  if (start > 1) {
-    result.push(1)
-    if (start > 2) result.push('left-ellipsis')
-  }
-
-  for (let i = start; i <= end; i++) {
-    result.push(i)
-  }
-
-  if (end < tp) {
-    if (end < tp - 1) result.push('right-ellipsis')
-    result.push(tp)
-  }
-
-  return result
-})
-
-function goTo(page: number) {
-  if (page < 1 || page > totalPages.value || page === props.current) return
-  emit('update:current', page)
+function go(p: number) {
+  if (p < 1 || p > totalPages.value || p === props.page) return
+  emit('update:page', p)
 }
 </script>
 
 <template>
-  <nav v-if="totalPages > 1" aria-label="分页导航" class="flex items-center justify-center gap-1">
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      :disabled="current <= 1"
-      aria-label="上一页"
-      @click="goTo(current - 1)"
-    >
-      <span aria-hidden="true">&laquo;</span>
-    </Button>
-
-    <template v-for="(page, i) in pages" :key="i">
-      <span v-if="typeof page === 'string'" class="px-2 text-text-secondary">&hellip;</span>
-      <Button
-        v-else
-        :variant="page === current ? 'default' : 'ghost'"
-        size="icon-sm"
-        :aria-label="`第 ${page} 页`"
-        :aria-current="page === current ? 'page' : undefined"
-        @click="goTo(page)"
+  <div class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-sm">
+    <p class="text-xs text-text-secondary">
+      共 {{ total }} 条 · 第 {{ from }}-{{ to }} 条
+    </p>
+    <div class="flex items-center gap-2">
+      <button
+        class="flex items-center gap-1 px-2.5 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle disabled:opacity-40 disabled:cursor-not-allowed"
+        :disabled="page <= 1"
+        @click="go(page - 1)"
       >
-        {{ page }}
-      </Button>
-    </template>
-
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      :disabled="current >= totalPages"
-      aria-label="下一页"
-      @click="goTo(current + 1)"
-    >
-      <span aria-hidden="true">&raquo;</span>
-    </Button>
-  </nav>
+        <ChevronLeft :size="14" /> 上一页
+      </button>
+      <span class="text-xs text-text-secondary">{{ page }} / {{ totalPages }}</span>
+      <button
+        class="flex items-center gap-1 px-2.5 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle disabled:opacity-40 disabled:cursor-not-allowed"
+        :disabled="page >= totalPages"
+        @click="go(page + 1)"
+      >
+        下一页 <ChevronRight :size="14" />
+      </button>
+    </div>
+  </div>
 </template>
