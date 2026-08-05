@@ -6,7 +6,7 @@ import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import {
   Search, Bell, User, Settings, LogOut, ChevronDown, Menu, X, Sun, Moon,
-  Building2, BarChart3, Users, FileText, Mail, ShieldAlert, ClipboardList, Flag,
+  Building2, Users, ShieldAlert,
 } from '@lucide/vue'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -16,7 +16,7 @@ import {
   Drawer, DrawerContent, DrawerTitle, DrawerDescription,
 } from '@/components/ui/drawer'
 import WorkspaceNav from './components/WorkspaceNav.vue'
-import { buildClubGroups, type SideNavGroup } from './components/sideNav'
+import { buildClubGroups, ADMIN_NAV } from './components/sideNav'
 import ClubSwitcher from '@/components/business/ClubSwitcher.vue'
 import Breadcrumbs from '@/components/business/Breadcrumbs.vue'
 import RoleBadge from '@/components/business/RoleBadge.vue'
@@ -45,67 +45,7 @@ const navGroups = computed(() => (clubIdFromRoute.value ? buildClubGroups(clubId
 const canAccessWorkspace = computed(() => navGroups.value.length > 0)
 const canAccessDashboard = computed(() => !!clubIdFromRoute.value && canAccess('club:dashboard:view'))
 
-const adminNavGroups: SideNavGroup[] = [
-  {
-    label: '社团管理', icon: Building2, prefix: '/admin/clubs',
-    items: [
-      { label: '社团接入', path: '/admin/clubs' },
-    ],
-  },
-  {
-    label: '联合活动', icon: Users, prefix: '/admin/joint',
-    items: [
-      { label: '活动列表', path: '/admin/joint' },
-    ],
-  },
-  {
-    label: '招新活动', icon: Flag, prefix: '/admin/recruitment',
-    items: [
-      { label: '活动列表', path: '/admin/recruitment' },
-    ],
-  },
-  {
-    label: '表单管理', icon: FileText, prefix: '/admin/forms',
-    items: [
-      { label: '平台表单', path: '/admin/forms' },
-    ],
-  },
-  {
-    label: '审计管理', icon: ShieldAlert, prefix: '/admin/audit',
-    items: [
-      { label: '纠错处置', path: '/admin/audit/corrections' },
-      { label: '审计日志', path: '/admin/audit/logs' },
-      { label: '正式删除', path: '/admin/delete' },
-      { label: '数据保留', path: '/admin/retention' },
-    ],
-  },
-  {
-    label: '统计导出', icon: BarChart3, prefix: '/admin/stats',
-    items: [
-      { label: '全局统计', path: '/admin/stats' },
-      { label: '全平台导出', path: '/admin/exports' },
-    ],
-  },
-  {
-    label: '通知配置', icon: Mail, prefix: '/admin/notifications',
-    items: [
-      { label: '平台发信', path: '/admin/notifications/email-config' },
-    ],
-  },
-  {
-    label: '平台配置', icon: Settings, prefix: '/admin/config',
-    items: [
-      { label: '平台配置', path: '/admin/config' },
-      { label: '权限模板', path: '/admin/config/permission-templates' },
-    ],
-  },
-  {
-    label: '运维状态', icon: ClipboardList, prefix: '/admin/ops-status',
-    items: [
-      { label: '运维监控', path: '/admin/ops-status' },
-    ],
-  },
-]
+const adminNavGroups = ADMIN_NAV
 
 const isAdmin = computed(() => {
   return session.hasPermission('platform:club:manage') ||
