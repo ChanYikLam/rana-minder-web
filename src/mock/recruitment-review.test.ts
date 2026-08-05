@@ -1,8 +1,21 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { recruitmentApiHandlers, rdb } from './recruitment-api'
-import { mockUsers, resolveMockUser, clearMockSession } from './auth'
+import { mockUsers, resolveMockUser, clearMockSession, USER_MEMBER_MAP, USER_APPLICANT_MAP } from './auth'
 
-/** 复用真实分发路径（withStatus.rawResponse）：url + 假 req/res */
+/** 最小 ServerResponse 替身：仅实现分发层（withStatus）当前调用的 setHeader/statusCode/end；mock 层扩展新方法时此处显式报缺，便于定位 */
+class MockServerResponse {
+  statusCode = 200
+  private captured = ''
+  setHeader(): void {}
+  end(body: string): void {
+    this.captured = body
+  }
+  get body(): string {
+    return this.captured
+  }
+}
+
+/** 复用真实分发路径（withStatus.rawResponse）：url + 最小 req/res 替身 */
 function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode: number; body: Record<string, unknown> }> {
   const handler = recruitmentApiHandlers.find((h) => h.url === urlPattern && h.method === 'post')
   if (!handler?.rawResponse) throw new Error(`handler 未找到: ${urlPattern}`)
@@ -11,17 +24,10 @@ function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode
     headers: {},
     [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true, value: undefined }) }),
   }
-  let captured = ''
-  const res = {
-    statusCode: 200,
-    setHeader: () => undefined,
-    end: (body: string) => {
-      captured = body
-    },
-  }
+  const res = new MockServerResponse()
   return (handler.rawResponse(req, res) as Promise<unknown>).then(() => ({
     statusCode: res.statusCode,
-    body: captured ? (JSON.parse(captured) as Record<string, unknown>) : {},
+    body: res.body ? (JSON.parse(res.body) as Record<string, unknown>) : {},
   }))
 }
 
@@ -33,19 +39,24 @@ function mockUserKeyOf(userId: string): string {
 }
 
 const INTERVIEWER_KEY = mockUserKeyOf('user-interviewer-001')
-const INTERVIEWER_MEMBER_ID = 'mem-002' // USER_MEMBER_MAP['user-interviewer-001']
+const INTERVIEWER_MEMBER_ID = USER_MEMBER_MAP['user-interviewer-001']
 const MEMBER_KEY = mockUserKeyOf('user-member-001')
 
-const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude'
-const plainUrl = '/api/org/club-001/recruitment/act-001/reviews/rev-001/conclude'
+// 依赖种子（db-recruitment.ts）：rev-001 是 act-001 下申请人 u-002 的已有评价（authorId=mem-004，leader 撰写，见 recruitmentReviews/reviewIds 种子）
+const SEED_ACTIVITY_ID = 'act-001'
+const SEED_REVIEW_ID = 'rev-001'
+const SEED_APPLICANT_ID = USER_APPLICANT_MAP['user-applicant-002']
 
-/** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 快照，afterEach 还原，避免用例间共享状态污染 */
-let reviewsSnapshot: unknown[]
+const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude'
+const plainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${SEED_REVIEW_ID}/conclude`
+
+/** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 深拷贝快照，afterEach 还原，避免用例间共享状态污染 */
+let reviewsSnapshot: typeof rdb.recruitmentReviews
 let reviewIdsByActivity: Record<string, string[]>
 function snapshotDb() {
-  reviewsSnapshot = rdb.recruitmentReviews.map((r) => ({ ...r }))
+  reviewsSnapshot = structuredClone(rdb.recruitmentReviews)
   reviewIdsByActivity = {}
-  for (const a of rdb.recruitmentActivities) reviewIdsByActivity[a.id] = [...a.reviewIds]
+  for (const a of rdb.recruitmentActivities) reviewIdsByActivity[a.id] = structuredClone(a.reviewIds)
 }
 function restoreDb() {
   rdb.recruitmentReviews.splice(0, rdb.recruitmentReviews.length, ...(reviewsSnapshot as typeof rdb.recruitmentReviews))
@@ -72,7 +83,7 @@ describe('面试官提交评价（conclude）权限链路', () => {
     expect(out.body.code).toBe(0)
     expect((out.body.data as Record<string, unknown>)?.status).toBe('concluded')
     // 关键守卫：authorId 必须是面试官本人 memberId（mem-002）。若回落成 leader（mem-004）则说明走了 canManageRec 放行、未真正覆盖修复点
-    const written = rdb.recruitmentReviews.find((r) => r.activityId === 'act-001' && r.applicantId === 'u-002' && r.authorId === INTERVIEWER_MEMBER_ID)
+    const written = rdb.recruitmentReviews.find((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === SEED_APPLICANT_ID && r.authorId === INTERVIEWER_MEMBER_ID)
     expect(written, '评价未按面试官本人 memberId 落库').toBeTruthy()
   })
 
@@ -80,7 +91,7 @@ describe('面试官提交评价（conclude）权限链路', () => {
     const out = await invokeHandler(concludeUrl, `${plainUrl}?_mock_user=${INTERVIEWER_KEY}`)
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     expect(out.body.code).toBe(0)
-    const written = rdb.recruitmentReviews.find((r) => r.activityId === 'act-001' && r.applicantId === 'u-002' && r.authorId === INTERVIEWER_MEMBER_ID)
+    const written = rdb.recruitmentReviews.find((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === SEED_APPLICANT_ID && r.authorId === INTERVIEWER_MEMBER_ID)
     expect(written, '评价未按面试官本人 memberId 落库').toBeTruthy()
   })
 
