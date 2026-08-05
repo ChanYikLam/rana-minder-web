@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning } from '@lucide/vue'
+import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning, CheckCircle2 } from '@lucide/vue'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -26,6 +26,18 @@ const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
 const savingDraft = ref(false)
+
+const myApplication = ref<MyApplication | null>(null)
+
+/** 仅当申请状态为 submitted 才算"已提交"，草稿（draft）用户仍可继续填写/提交 */
+const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
+const hasArchived = computed(() => myApplication.value?.status === 'archived')
+const showApplyForm = computed(() => !hasSubmitted.value && !hasArchived.value)
+
+function statusLabel(status: string): string {
+  const labels: Record<string, string> = { draft: '草稿', submitted: '已提交', archived: '已归档' }
+  return labels[status] || status
+}
 
 async function uploadFile(fieldId: string, file: File): Promise<void> {
   formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: true, error: false }
@@ -101,12 +113,15 @@ interface MyApplication {
   preferences?: { departmentId: string; departmentName: string }[]
 }
 
-/** 已有草稿时回填表单内容，支持继续修改（尽力而为，失败不阻塞页面） */
+/** 加载已有申请记录，恢复草稿或展示已提交/已归档状态 */
 async function loadMyApplication() {
   try {
     const result = await get<MyApplication>(`/activity/recruitment/${route.params.activityId}/apply`)
-    if (result.kind === 'completed' && result.data.status === 'draft') {
-      restoreDraft(result.data)
+    if (result.kind === 'completed') {
+      myApplication.value = result.data
+      if (result.data.status === 'draft') {
+        restoreDraft(result.data)
+      }
     }
   } catch {
     // 忽略：草稿恢复失败不影响表单填写
@@ -217,6 +232,32 @@ onMounted(loadData)
 
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ activity.title }}</h1>
       <p class="text-sm text-text-secondary mb-6">{{ activity.clubName }} · 报名申请</p>
+
+      <!-- 已提交态 -->
+      <Card v-if="hasSubmitted" class="mb-4">
+        <div class="flex items-center gap-2 text-success">
+          <CheckCircle2 :size="18" />
+          <p class="text-sm font-medium text-text-primary">您已提交报名申请</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+      </Card>
+
+      <!-- 已归档态 -->
+      <Card v-else-if="hasArchived" class="mb-4">
+        <div class="flex items-center gap-2 text-text-secondary">
+          <CheckCircle2 :size="18" />
+          <p class="text-sm font-medium text-text-primary">您的报名申请已归档</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+      </Card>
+
+      <!-- 草稿提示 -->
+      <div v-else-if="myApplication" class="rounded-lg bg-warning-subtle p-3 mb-4">
+        <p class="text-sm text-warning font-medium">您有已保存的草稿（状态：草稿），可继续修改后提交</p>
+        <p class="text-xs text-text-secondary mt-1">暂存草稿会覆盖此前保存的内容</p>
+      </div>
+
+      <template v-if="showApplyForm">
 
       <!-- 意向方向排序 -->
       <Card class="mb-4">
@@ -362,6 +403,7 @@ onMounted(loadData)
           <Send :size="16" /> {{ submitting ? '提交中...' : '提交报名' }}
         </Button>
       </ResponsiveActionRegion>
+      </template>
     </div>
   </PageStateBoundary>
 </template>

@@ -556,7 +556,7 @@ function formatDeadline(iso?: string): string {
       <button
         v-if="showApplyForm"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
-        :disabled="!consented || volunteerClubIds.length === 0 || submitting"
+        :disabled="!consented || submitting"
         @click="handleSubmit"
       >
         <Send :size="16" /> {{ submitting ? '提交中...' : '提交联合报名' }}
