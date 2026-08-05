@@ -1,11 +1,39 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
+import { useTheme } from '@/composables/useTheme'
 import DegradedBanner from '@/components/business/DegradedBanner.vue'
-import { Search, Bell, User, Building2 } from '@lucide/vue'
+import { Search, Bell, User, Building2, ChevronDown, Settings, LogOut, Sun, Moon } from '@lucide/vue'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuItem, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
+import RoleBadge from '@/components/business/RoleBadge.vue'
 
+const router = useRouter()
 const session = useSessionViewStore()
 const notifications = useNotificationViewStore()
+const workspace = useWorkspaceContextStore()
+const { theme, toggleTheme } = useTheme()
+
+const isAdmin = computed(() => {
+  return session.hasPermission('platform:club:manage') ||
+    session.hasPermission('platform:form:design') ||
+    session.hasPermission('platform:config:manage') ||
+    session.hasPermission('platform:audit:view') ||
+    session.hasPermission('platform:export:execute') ||
+    session.hasPermission('platform:delete:execute') ||
+    session.hasPermission('platform:ops:view')
+})
+
+async function handleLogout() {
+  await session.logout()
+  workspace.clearWorkspace()
+  await router.push('/login')
+}
 </script>
 
 <template>
@@ -21,34 +49,48 @@ const notifications = useNotificationViewStore()
       class="sticky top-0 z-50 flex items-center justify-between h-14 px-4 border-b bg-elevated shadow-sm"
       role="banner"
     >
-      <router-link to="/explore" class="flex items-center gap-2 font-bold text-primary text-lg" aria-label="RanaMinder 首页">
-        <Building2 :size="24" />
-        <span>RanaMinder</span>
-      </router-link>
+      <div class="flex items-center gap-4">
+        <router-link to="/explore" class="flex items-center gap-2 font-bold text-primary text-lg" aria-label="RanaMinder 首页">
+          <Building2 :size="24" />
+          <span class="hidden sm:inline">RanaMinder</span>
+        </router-link>
 
-      <nav class="flex items-center gap-1" role="navigation" aria-label="主导航">
-        <router-link
-          to="/explore"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
+        <nav class="flex items-center gap-1" role="navigation" aria-label="主导航">
+          <router-link
+            to="/explore"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
+          >
+            <Search :size="16" />
+            <span class="hidden sm:inline">找社团/活动</span>
+          </router-link>
+          <router-link
+            v-if="session.isAuthenticated"
+            to="/me"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
+          >
+            <User :size="16" />
+            <span class="hidden sm:inline">个人中心</span>
+          </router-link>
+          <router-link
+            v-else
+            to="/login"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-on-primary bg-primary hover:bg-primary-hover transition-colors"
+          >
+            登录
+          </router-link>
+        </nav>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          class="flex items-center justify-center w-9 h-9 rounded-md text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
+          :aria-label="theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
+          @click="toggleTheme"
         >
-          <Search :size="16" />
-          <span class="hidden sm:inline">找社团/活动</span>
-        </router-link>
-        <router-link
-          v-if="session.isAuthenticated"
-          to="/me"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
-        >
-          <User :size="16" />
-          <span class="hidden sm:inline">个人中心</span>
-        </router-link>
-        <router-link
-          v-else
-          to="/login"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-on-primary bg-primary hover:bg-primary-hover transition-colors"
-        >
-          登录
-        </router-link>
+          <Sun v-if="theme === 'dark'" :size="18" />
+          <Moon v-else :size="18" />
+        </button>
+
         <router-link
           v-if="session.isAuthenticated"
           to="/me/notifications"
@@ -63,7 +105,38 @@ const notifications = useNotificationViewStore()
             {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
           </span>
         </router-link>
-      </nav>
+
+        <DropdownMenu v-if="session.isAuthenticated">
+          <DropdownMenuTrigger as-child>
+            <button class="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-sm hover:bg-primary-subtle transition-colors" aria-label="用户菜单">
+              <div class="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-text-on-primary text-xs font-medium">
+                {{ session.user?.name?.charAt(0) || '?' }}
+              </div>
+              <span class="hidden sm:inline text-text-secondary">{{ session.user?.name || '未登录' }}</span>
+              <ChevronDown :size="14" class="text-text-secondary" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-48">
+            <div class="px-2 py-1.5 border-b">
+              <p class="text-sm font-medium">{{ session.user?.name }}</p>
+              <p class="text-xs text-text-secondary">{{ session.user?.email }}</p>
+              <div v-if="workspace.currentClubId" class="mt-1.5">
+                <RoleBadge />
+              </div>
+            </div>
+            <DropdownMenuItem @click="router.push('/me/profile')" class="cursor-pointer">
+              <User :size="16" class="mr-2" /> 个人资料
+            </DropdownMenuItem>
+            <DropdownMenuItem v-if="isAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
+              <Settings :size="16" class="mr-2" /> 平台管理
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem @click="handleLogout" class="cursor-pointer text-danger">
+              <LogOut :size="16" class="mr-2" /> 退出登录
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </header>
 
     <!-- Body: Sidebar + Content -->
