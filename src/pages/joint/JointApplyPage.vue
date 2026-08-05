@@ -202,7 +202,7 @@ function restoreDraft(app: MyApplication) {
       }
     }
   }
-  if (app.volunteerClubIds && app.volunteerClubIds.length > 0) {
+  if (Array.isArray(app.volunteerClubIds)) {
     volunteerClubIds.value = app.volunteerClubIds
   }
   if (app.preferences) {
@@ -210,6 +210,23 @@ function restoreDraft(app: MyApplication) {
   }
   consented.value = app.consented ?? false
   allowJointAdjustment.value = app.allowJointAdjustment ?? false
+}
+
+function departmentsOfClub(clubId: string): { id: string; name: string }[] {
+  return detail.value?.clubs?.find((c) => c.id === clubId)?.departments || []
+}
+
+function toggleVolunteer(clubId: string) {
+  const selected = volunteerClubIds.value.includes(clubId)
+  if (!selected) {
+    volunteerClubIds.value.push(clubId)
+  } else {
+    volunteerClubIds.value = volunteerClubIds.value.filter((id) => id !== clubId)
+    const keptDeptIds = new Set(
+      volunteerClubIds.value.flatMap((cid) => departmentsOfClub(cid).map((d) => d.id)),
+    )
+    preferences.value = preferences.value.filter((p) => keptDeptIds.has(p.departmentId))
+  }
 }
 
 function togglePreference(dept: { id: string; name: string }) {
@@ -224,11 +241,6 @@ function movePreference(index: number, direction: 'up' | 'down') {
   const temp = preferences.value[index]
   preferences.value[index] = preferences.value[target]
   preferences.value[target] = temp
-}
-
-function toggleVolunteer(clubId: string) {
-  if (!volunteerClubIds.value.includes(clubId)) volunteerClubIds.value.push(clubId)
-  else volunteerClubIds.value = volunteerClubIds.value.filter((id) => id !== clubId)
 }
 
 async function handleSubmit() {
