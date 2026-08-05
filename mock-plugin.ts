@@ -44,6 +44,7 @@ export function readMultipartBody(request: IncomingMessage, rawBody: Buffer): Re
   const fields: Record<string, string> = {}
   let fileName = ''
   let fileSize = 0
+  let hasFile = false
   for (const part of parts) {
     const endIndex = part.indexOf('\r\n\r\n')
     if (endIndex < 0) continue
@@ -53,16 +54,17 @@ export function readMultipartBody(request: IncomingMessage, rawBody: Buffer): Re
     if (!nameMatch) continue
     const fieldName = nameMatch[1]
     const filenameMatch = head.match(/filename="([^"]*)"/)
-    if (filenameMatch && filenameMatch[1]) {
-      fileName = filenameMatch[1]
+    if (filenameMatch) {
+      hasFile = true
+      fileName = filenameMatch[1] || ''
       fileSize = Buffer.from(body.replace(/\r\n$/, ''), 'latin1').length
     } else {
-      fields[fieldName] = body.replace(/\r\n$/, '')
+      fields[fieldName] = Buffer.from(body.replace(/\r\n$/, ''), 'latin1').toString('utf8')
     }
   }
   const input: Record<string, unknown> = {}
-  if (fileName) input.name = fileName
-  if (fileSize > 0) input.size = fileSize
+  if (hasFile) input.name = fileName
+  if (hasFile) input.size = fileSize
   if (fields.purpose) input.purpose = fields.purpose
   return Object.keys(input).length > 0 ? { input } : { ...fields }
 }

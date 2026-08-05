@@ -50,4 +50,22 @@ describe('mock-plugin multipart/form-data 解析', () => {
     const out = readMultipartBody(requestWith('multipart/form-data; boundary=b1'), raw)
     expect(out).toEqual({ title: 'hello' })
   })
+
+  it('普通字段中文值应正确解码（含文件字段并存时归入 input.purpose）', () => {
+    const raw = buildMultipart('b', [
+      { name: 'purpose', value: '申请材料' },
+      { name: 'file', value: 'x', filename: '简历.pdf' },
+    ])
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary=b'), raw)
+    expect(out).toEqual({ input: { name: '简历.pdf', size: 1, purpose: '申请材料' } })
+  })
+
+  it('空文件（size=0）仍保留文件名与大小', () => {
+    const raw = buildMultipart('b2', [
+      { name: 'purpose', value: 'application' },
+      { name: 'file', value: '', filename: 'empty.txt' },
+    ])
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary=b2'), raw)
+    expect(out).toEqual({ input: { name: 'empty.txt', size: 0, purpose: 'application' } })
+  })
 })
