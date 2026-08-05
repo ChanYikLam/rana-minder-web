@@ -217,10 +217,12 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     expect(data.consented).toBe(true)
   })
 
-  it('共享报名表端点返回字段（无意向部门下拉，避免与部门意向卡片重合）', async () => {
+  it('共享报名表端点返回字段（无意向部门下拉，type=joint 且 clubId 为空）', async () => {
     const out = await invokeHandler('/api/explore/joint/:id/form', '/api/explore/joint/jnt-001/form', undefined, 'get')
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
-    const data = out.body.data as { versions: { fields: { id: string; type: string; required: boolean; options: string[] | null }[] }[] }
+    const data = out.body.data as { type: string; clubId: string | null; versions: { fields: { id: string; type: string; required: boolean; options: string[] | null }[] }[] }
+    expect(data.type).toBe('joint')
+    expect(data.clubId).toBeNull()
     const fields = data.versions[0].fields
     expect(fields.map((f) => f.id)).toEqual(['f1', 'f3', 'f4'])
     expect(fields.some((f) => f.type === 'select'), '意向部门下拉应移除').toBe(false)
@@ -267,6 +269,74 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     const detail = out.body.data as { clubs: { id: string; name: string; departments: { id: string; name: string }[] }[] }
     expect(detail.clubs[0]).toMatchObject({ id: 'club-001', departments: [{ id: 'dept-001', name: '技术部' }, { id: 'dept-002', name: '运营部' }, { id: 'dept-003', name: '设计部' }] })
     expect(detail.clubs[1]).toMatchObject({ id: 'club-002', departments: [{ id: 'dept-101', name: '嵌入式组' }, { id: 'dept-102', name: '硬件组' }] })
+  })
+
+  it('显式提交空意向社团时清空部门意向（区分 undefined 与空数组）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: ['club-001'],
+      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+    })
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.preferences).toEqual([{ departmentId: 'dept-001', departmentName: '技术部' }])
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: [],
+      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+    })
+    expect(app!.volunteerClubIds, '空数组应清空意向社团而非回退全部').toEqual([])
+    expect(app!.preferences, '空意向社团时部门意向应被清空').toEqual([])
+  })
+
+  it('草稿清空意向社团后提交仍保持为空（submit 层与 draft 层同语义）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: ['club-001'],
+      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+    })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: [],
+      preferences: [],
+    })
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: false,
+      volunteerClubIds: [],
+      answers: { f1: '清空意向后的提交' },
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.status).toBe('submitted')
+    expect(app!.volunteerClubIds, '提交时空数组不应回退为全部参与社团').toEqual([])
+    expect(app!.preferences).toEqual([])
+  })
+
+  it('部门名称以服务端权威数据为准并按 departmentId 去重', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: ['club-001'],
+      preferences: [
+        { departmentId: 'dept-001', departmentName: '伪造部门名' },
+        { departmentId: 'dept-001', departmentName: '再次伪造' },
+        { departmentId: 'dept-002', departmentName: '运营部' },
+      ],
+    })
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.preferences, '伪造名称应归一化为权威名称且去重').toEqual([
+      { departmentId: 'dept-001', departmentName: '技术部' },
+      { departmentId: 'dept-002', departmentName: '运营部' },
+    ])
+  })
+
+  it('草稿 answers 部分提交时合并而非覆盖已有字段', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      answers: { f1: '自我介绍', f3: '相关经历' },
+    })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      answers: { f4: '附件-1' },
+    })
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.answers, '部分提交不应覆盖其他字段').toEqual({ f1: '自我介绍', f3: '相关经历', f4: '附件-1' })
   })
 })
 

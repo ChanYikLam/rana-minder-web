@@ -360,7 +360,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!j) return notFound('活动不存在')
       if (j.status !== 'published') return notFound('活动不存在或未开放')
       return ok({
-        id: j.formId, clubId: j.clubs[0]?.clubId || null, title: '联合招新报名表', status: 'published',
+        id: j.formId, clubId: null, type: 'joint', title: '联合招新报名表', status: 'published',
         versions: [
           {
             version: j.formVersion, status: 'published', publishedAt: j.publishedAt || new Date().toISOString(),
