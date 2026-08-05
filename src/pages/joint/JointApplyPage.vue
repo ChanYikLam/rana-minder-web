@@ -17,17 +17,11 @@ interface JointDetail {
   deadline?: string
 }
 
-/** 联合申请状态 → 用户可读文案（未知状态回退原始值） */
+/** 联合申请状态 → 用户可读文案（未知状态回退原始值；联合申请状态集仅 draft/submitted/archived） */
 const APPLICATION_STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
   submitted: '等待审核',
-  adjustment_overdue: '调整逾期',
-  identity_anomaly: '身份异常',
-  approved: '已录取',
-  rejected: '未录取',
-  accepted: '已接受邀请',
-  withdrawn: '已撤回',
-  exited: '已退出',
+  archived: '已归档',
 }
 
 function statusLabel(status: string): string {
@@ -60,12 +54,16 @@ async function loadData() {
 async function loadMyApplication() {
   const jointId = route.params.jointId
   if (typeof jointId !== 'string') return
-  const result = await get<{ status: string }>(`/activity/joint/${jointId}/apply`)
-  if (result.kind === 'completed') {
-    myApplication.value = result.data
-  } else if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
-    myApplication.value = null
-  } else {
+  try {
+    const result = await get<{ status: string }>(`/activity/joint/${jointId}/apply`)
+    if (result.kind === 'completed') {
+      myApplication.value = result.data
+    } else if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
+      myApplication.value = null
+    } else {
+      state.value = errorToPageState(errorCodeOf(result))
+    }
+  } catch {
     state.value = 'error'
   }
 }
