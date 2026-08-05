@@ -323,7 +323,7 @@ onMounted(loadData)
                   <Upload v-else-if="!formFiles[field.id]!.error" :size="16" class="text-success" />
                   <FileWarning v-else :size="16" class="text-danger" />
                   <span class="text-xs text-text-primary">{{ formFiles[field.id]!.name }}</span>
-                  <span class="text-xs text-text-secondary">({{ (formFiles[field.id]!.size / 1024).toFixed(1) }} KB)</span>
+                  <span v-if="formFiles[field.id]!.size > 0" class="text-xs text-text-secondary">({{ (formFiles[field.id]!.size / 1024).toFixed(1) }} KB)</span>
                   <span v-if="formFiles[field.id]!.checking" class="text-xs text-warning">检查中...</span>
                   <span v-else-if="formFiles[field.id]!.error" class="text-xs text-danger">上传失败</span>
                   <span v-else class="text-xs text-success">已上传</span>

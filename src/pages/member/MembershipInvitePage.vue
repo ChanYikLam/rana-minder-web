@@ -357,7 +357,7 @@ onMounted(loadData)
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
+              <p v-if="candidateKeyword.trim() && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
               <p v-else-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
