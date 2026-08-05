@@ -1,34 +1,21 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { recruitmentApiHandlers, rdb } from './recruitment-api'
-import { mockUsers, resolveMockUser, clearMockSession, USER_MEMBER_MAP } from './auth'
+import { mockUsers, resolveMockUser, clearMockSession, USER_MEMBER_MAP, USER_APPLICANT_MAP } from './auth'
 
-/** 最小 ServerResponse 替身：覆盖 mock 层实际调用面（setHeader/statusCode/end），并为常见写接口兜底；mock 层扩展新接口时在此补齐，避免测试静默失联难排查 */
-function createFakeRes() {
-  const headers = new Map<string, string>()
-  const chunks: string[] = []
-  let statusCode = 200
-  let ended = false
-  return {
-    get statusCode() { return statusCode },
-    set statusCode(v: number) { statusCode = v },
-    get statusMessage() { return undefined as string | undefined },
-    headers,
-    chunks,
-    setHeader(name: string, value: string) { headers.set(name, value) },
-    getHeader(name: string) { return headers.get(name) },
-    removeHeader(name: string) { headers.delete(name) },
-    writeHead(code: number) { statusCode = code },
-    write(chunk: string) { chunks.push(chunk) },
-    flushHeaders() {},
-    end(body?: string) {
-      if (body !== undefined) chunks.push(body)
-      ended = true
-    },
-    get ended() { return ended },
+/** 最小 ServerResponse 替身：仅实现分发层（withStatus）当前调用的 setHeader/statusCode/end；mock 层扩展新方法时此处显式报缺，便于定位 */
+class MockServerResponse {
+  statusCode = 200
+  private captured = ''
+  setHeader(): void {}
+  end(body: string): void {
+    this.captured = body
+  }
+  get body(): string {
+    return this.captured
   }
 }
 
-/** 复用真实分发路径（withStatus.rawResponse）：url + 假 req/res */
+/** 复用真实分发路径（withStatus.rawResponse）：url + 最小 req/res 替身 */
 function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode: number; body: Record<string, unknown> }> {
   const handler = recruitmentApiHandlers.find((h) => h.url === urlPattern && h.method === 'post')
   if (!handler?.rawResponse) throw new Error(`handler 未找到: ${urlPattern}`)
@@ -37,10 +24,10 @@ function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode
     headers: {},
     [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true, value: undefined }) }),
   }
-  const res = createFakeRes()
+  const res = new MockServerResponse()
   return (handler.rawResponse(req, res) as Promise<unknown>).then(() => ({
     statusCode: res.statusCode,
-    body: res.chunks.length ? (JSON.parse(res.chunks.join('')) as Record<string, unknown>) : {},
+    body: res.body ? (JSON.parse(res.body) as Record<string, unknown>) : {},
   }))
 }
 
@@ -56,17 +43,21 @@ const INTERVIEWER_MEMBER_ID = USER_MEMBER_MAP['user-interviewer-001']
 if (!INTERVIEWER_MEMBER_ID) throw new Error('USER_MEMBER_MAP 缺少面试官成员映射: user-interviewer-001')
 const MEMBER_KEY = mockUserKeyOf('user-member-001')
 
-const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude'
-/** plainUrl 依赖种子（见 db-recruitment.ts）：recruitmentReviews rev-001（applicantId u-002）←→ recruitmentInterviews int-002（interviewerIds [user-interviewer-001]） */
-const plainUrl = '/api/org/club-001/recruitment/act-001/reviews/rev-001/conclude'
+// 依赖种子（db-recruitment.ts）：rev-001 是 act-001 下申请人 u-002 的已有评价（authorId=mem-004，leader 撰写，见 recruitmentReviews/reviewIds 种子）
+const SEED_ACTIVITY_ID = 'act-001'
+const SEED_REVIEW_ID = 'rev-001'
+const SEED_APPLICANT_ID = USER_APPLICANT_MAP['user-applicant-002']
 
-/** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 深拷贝快照（history 数组不共享引用），afterEach 还原，避免用例间共享状态污染 */
-let reviewsSnapshot: unknown[]
+const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude'
+const plainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${SEED_REVIEW_ID}/conclude`
+
+/** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 深拷贝快照，afterEach 还原，避免用例间共享状态污染 */
+let reviewsSnapshot: typeof rdb.recruitmentReviews
 let reviewIdsByActivity: Record<string, string[]>
 function snapshotDb() {
-  reviewsSnapshot = rdb.recruitmentReviews.map((r) => structuredClone(r))
+  reviewsSnapshot = structuredClone(rdb.recruitmentReviews)
   reviewIdsByActivity = {}
-  for (const a of rdb.recruitmentActivities) reviewIdsByActivity[a.id] = [...a.reviewIds]
+  for (const a of rdb.recruitmentActivities) reviewIdsByActivity[a.id] = structuredClone(a.reviewIds)
 }
 function restoreDb() {
   rdb.recruitmentReviews.splice(0, rdb.recruitmentReviews.length, ...(reviewsSnapshot as typeof rdb.recruitmentReviews))
@@ -93,7 +84,7 @@ describe('面试官提交评价（conclude）权限链路', () => {
     expect(out.body.code).toBe(0)
     expect((out.body.data as Record<string, unknown>)?.status).toBe('concluded')
     // 关键守卫：authorId 必须是面试官本人 memberId（mem-002）。若回落成 leader（mem-004）则说明走了 canManageRec 放行、未真正覆盖修复点
-    const written = rdb.recruitmentReviews.find((r) => r.activityId === 'act-001' && r.applicantId === 'u-002' && r.authorId === INTERVIEWER_MEMBER_ID)
+    const written = rdb.recruitmentReviews.find((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === SEED_APPLICANT_ID && r.authorId === INTERVIEWER_MEMBER_ID)
     expect(written, '评价未按面试官本人 memberId 落库').toBeTruthy()
   })
 
@@ -101,7 +92,7 @@ describe('面试官提交评价（conclude）权限链路', () => {
     const out = await invokeHandler(concludeUrl, `${plainUrl}?_mock_user=${INTERVIEWER_KEY}`)
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     expect(out.body.code).toBe(0)
-    const written = rdb.recruitmentReviews.find((r) => r.activityId === 'act-001' && r.applicantId === 'u-002' && r.authorId === INTERVIEWER_MEMBER_ID)
+    const written = rdb.recruitmentReviews.find((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === SEED_APPLICANT_ID && r.authorId === INTERVIEWER_MEMBER_ID)
     expect(written, '评价未按面试官本人 memberId 落库').toBeTruthy()
   })
 
@@ -120,13 +111,13 @@ describe('面试官提交评价（conclude）权限链路', () => {
   it('面试官对未分配面试的申请人（u-003）提交评价仍被 403（assigned 分支负路径）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
     // u-003 无面试记录，需先种一条评价记录，conclude 才能定位到申请人（否则会先 404 而非 403）
-    const seeded = rdb.submitReview('act-001', 'u-003', {
+    const seeded = rdb.submitReview(SEED_ACTIVITY_ID, 'u-003', {
       comment: '', rating: 0, authorId: 'mem-004', authorName: '张明远', authorRole: 'club_leader',
     })
     if (!seeded.data) throw new Error('种子评价未写入')
-    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/act-001/reviews/${seeded.data.id}/conclude`)
+    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${seeded.data.id}/conclude`)
     expect(out.statusCode, JSON.stringify(out.body)).toBe(403)
     // 关键守卫：403 时评价不得以面试官本人 memberId 落库
-    expect(rdb.recruitmentReviews.some((r) => r.activityId === 'act-001' && r.applicantId === 'u-003' && r.authorId === INTERVIEWER_MEMBER_ID)).toBe(false)
+    expect(rdb.recruitmentReviews.some((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === 'u-003' && r.authorId === INTERVIEWER_MEMBER_ID)).toBe(false)
   })
 })
