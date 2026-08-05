@@ -348,6 +348,7 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
     submitted: {
       activity_final: 'archived',
       club_suspend: 'submitted',
+      withdraw: 'draft',
     },
   },
 

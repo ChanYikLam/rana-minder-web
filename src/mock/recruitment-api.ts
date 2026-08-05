@@ -1717,6 +1717,17 @@ const jointHandlers: MockMethod[] = [
       return ok(app)
     },
   },
+  // 撤销联合报名提交（回到草稿，通道开放且未安排面试/审核时可用）
+  {
+    url: '/api/activity/joint/:jointId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const r = rdb.withdrawJointApplication(query.jointId, applicantId)
+      return result(r)
+    },
+  },
   // 联合面试官任务（JNT-031：参与社团负责人/人事可为本社团当前成员指派；活动级覆盖全部联合面试者）
   {
     url: '/api/org/:clubId/joint/:jointId/interviewers',

@@ -1721,6 +1721,31 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
   return ok(app)
 }
 
+export function withdrawJointApplication(jointId: string, applicantId: string): { ok: boolean; error?: string; data?: JointApplication } {
+  const ja = findJoint(jointId)
+  if (!ja) return err('联合活动不存在')
+  if (ja.channelStatus !== 'open') return err('联合报名通道已关闭，无法撤销提交')
+  if (new Date(ja.deadline).getTime() < Date.now()) return err('联合报名已截止，无法撤销提交')
+  const app = findJointApplication(jointId, applicantId)
+  if (!app) return err('联合申请不存在')
+  const t = assertTransition('SM-JNT-003', app.status, 'draft', 'withdraw')
+  if (!t.ok) return err(t.reason || '仅已提交的联合申请可撤销')
+  const interview = jointInterviews.find((i) => i.jointId === jointId && i.applicantId === applicantId)
+  if (interview && interview.status !== 'pending_selection') return err('已安排面试，无法撤销提交')
+  const activeConclusion = jointConclusions.find((c) => c.jointId === jointId && c.applicantId === applicantId && c.status !== 'pending')
+  if (activeConclusion) return err('已有审核结论，无法撤销提交')
+  const idx = jointInterviews.findIndex((i) => i.jointId === jointId && i.applicantId === applicantId)
+  if (idx >= 0) jointInterviews.splice(idx, 1)
+  for (let i = jointConclusions.length - 1; i >= 0; i--) {
+    const con = jointConclusions[i]
+    if (con.jointId === jointId && con.applicantId === applicantId && con.status === 'pending') jointConclusions.splice(i, 1)
+  }
+  app.status = 'draft'
+  app.submittedAt = null
+  app.version += 1
+  return ok(app)
+}
+
 export function bookJointInterview(jointId: string, applicantId: string, slotId: string, actorIsAdmin: boolean): { ok: boolean; error?: string; data?: JointInterview } {
   void actorIsAdmin
   const ja = findJoint(jointId)

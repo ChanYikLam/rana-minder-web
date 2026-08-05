@@ -269,3 +269,98 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     expect(detail.clubs[1]).toMatchObject({ id: 'club-002', departments: [{ id: 'dept-101', name: '嵌入式组' }, { id: 'dept-102', name: '硬件组' }] })
   })
 })
+
+/** 联合报名撤销提交：submitted → draft（通道开放、未安排面试/无审核结论时） */
+describe('联合报名撤销提交', () => {
+  beforeEach(() => {
+    clearMockSession()
+    resetRecruitmentDB()
+    resetNotifications()
+  })
+
+  const withdrawUrl = '/api/activity/joint/:jointId/withdraw'
+  const memberStudentId = '20210005'
+
+  /** member 的 applicantId 由 ensureApplicantProfile 动态分配（非 user-member-001） */
+  function memberJointApp() {
+    return rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === memberStudentId)!
+  }
+
+  it('撤销成功：回到草稿、清空提交时间、清理未排期面试与待审结论，可修改后重新提交', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: ['club-001'],
+      answers: { f1: '初版自我介绍', f3: '初版经历' },
+    })
+    const memberId = memberJointApp().applicantId
+    const submit = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-001'],
+      answers: { f1: '初版自我介绍', f3: '初版经历' },
+      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+    })
+    expect(submit.statusCode, JSON.stringify(submit.body)).toBe(200)
+    expect(rdb.jointInterviews.some((i) => i.jointId === 'jnt-001' && i.applicantId === memberId)).toBe(true)
+    expect(rdb.jointConclusions.some((c) => c.jointId === 'jnt-001' && c.applicantId === memberId)).toBe(true)
+
+    const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = memberJointApp()
+    expect(app.status, '撤销后回到草稿').toBe('draft')
+    expect(app.submittedAt, '撤销后清空提交时间').toBeNull()
+    expect(app.answers, '填写内容保留为草稿').toMatchObject({ f1: '初版自我介绍', f3: '初版经历' })
+    expect(rdb.jointInterviews.some((i) => i.jointId === 'jnt-001' && i.applicantId === memberId), '未排期面试记录应被清理').toBe(false)
+    expect(rdb.jointConclusions.some((c) => c.jointId === 'jnt-001' && c.applicantId === memberId), '待审结论应被清理').toBe(false)
+
+    const resubmit = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: false,
+      volunteerClubIds: ['club-002'],
+      answers: { f1: '修改后自我介绍', f3: '修改后经历' },
+      preferences: [{ departmentId: 'dept-102', departmentName: '硬件组' }],
+    })
+    expect(resubmit.statusCode, JSON.stringify(resubmit.body)).toBe(200)
+    expect(app.status).toBe('submitted')
+    expect(app.answers).toMatchObject({ f1: '修改后自我介绍' })
+  })
+
+  it('草稿态不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+  })
+
+  it('报名通道关闭时不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-001'],
+      answers: { f1: '自我介绍' },
+    })
+    const ja = rdb.jointActivities.find((a) => a.id === 'jnt-001')!
+    ja.channelStatus = 'closed'
+    const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(memberJointApp().status, '通道关闭时保持已提交').toBe('submitted')
+  })
+
+  it('已安排面试时不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-001'],
+      answers: { f1: '自我介绍' },
+    })
+    const interview = rdb.jointInterviews.find((i) => i.jointId === 'jnt-001' && i.applicantId === memberJointApp().applicantId)!
+    interview.status = 'scheduled'
+    const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(memberJointApp().status, '已排期面试时保持已提交').toBe('submitted')
+  })
+})
