@@ -1070,6 +1070,9 @@ export function markAttendance(interviewId: string, event: 'leave' | 'late' | 'a
   const a = findAnyActivity(it.activityId)
   const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
   if (slot) slot.taken = Math.max(0, slot.taken - 1)
+  it.slotId = null
+  it.startAt = null
+  it.endAt = null
   it.version += 1
   return ok(it)
 }
@@ -1704,6 +1707,9 @@ export function markJointAttendance(jointId: string, applicantId: string, event:
   it.attendance = event
   const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === jointId)
   if (slot) slot.taken = Math.max(0, slot.taken - 1)
+  it.slotId = null
+  it.startAt = null
+  it.endAt = null
   it.version += 1
   return ok()
 }

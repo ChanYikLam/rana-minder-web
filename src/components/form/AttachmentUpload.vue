@@ -12,12 +12,20 @@ const emit = defineEmits<{
   'update:modelValue': [files: FileMeta[]]
 }>()
 
-const ACCEPTED_TYPES = ['image/png', 'image/webp', 'image/jpeg', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const DOC_TYPES = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+const DEFAULT_ACCEPT = [...IMAGE_TYPES, ...DOC_TYPES]
 const MAX_SIZE_BYTES = 10 * 1024 * 1024
 
-const allowedTypes = computed(() =>
-  props.accept ? props.accept.split(',').map((s) => s.trim()).filter(Boolean) : ACCEPTED_TYPES,
-)
+/** 将 accept 中的通配符（image/*）展开为具体 MIME，选择器与校验共用同一份白名单 */
+const allowedTypes = computed(() => {
+  if (!props.accept) return DEFAULT_ACCEPT
+  return props.accept
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .flatMap((t) => (t === 'image/*' ? IMAGE_TYPES : [t]))
+})
 
 const files = computed(() => props.modelValue ?? [])
 
@@ -63,7 +71,7 @@ function onSelect(event: Event) {
 <template>
   <div class="space-y-2">
     <div class="flex items-center gap-1.5 text-xs text-text-secondary">
-      <span>{{ hint || '支持：图片（PNG/WebP）、PDF、Word；单个不超过 10MB' }}</span>
+      <span>{{ hint || '支持：图片（PNG/JPG/GIF/WebP）、PDF、Word；单个不超过 10MB' }}</span>
     </div>
 
     <div class="space-y-2">
