@@ -1,4 +1,10 @@
-/** 面包屑段名映射与解析（纯逻辑，便于单测） */
+/**
+ * 面包屑段名映射与解析（纯逻辑，便于单测）。
+ *
+ * 约定（调用方须知）：segments 应为「剔除 org 域 clubId（路由首段后的第一个动态参数段）」之后的段序列——
+ * SEGMENT_LABELS/CONTEXT_LABELS/DETAIL_LABELS 的键与静态链均基于不含 clubId 的序列设计，
+ * 组件层（Breadcrumbs.vue）负责剔除，此处不做兼容；直接调用本函数时请先按该约定裁剪。
+ */
 
 /** 各域（路由首段）下的段中文名：同一段在不同域语义不同，按域隔离 */
 const SEGMENT_LABELS: Record<string, Record<string, string>> = {

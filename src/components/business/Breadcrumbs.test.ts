@@ -85,6 +85,7 @@ describe('面包屑组件链接', () => {
     { path: '/org/:clubId/recruitment', name: 'mock-org-recruitment', component: { template: '<div />' } },
     { path: '/org/:clubId/recruitment/:activityId', name: 'mock-org-recruitment-detail', component: { template: '<div />' } },
     { path: '/org/:clubId/recruitment/:activityId/applications', name: 'mock-org-applications', component: { template: '<div />' } },
+    { path: '/:pathMatch(.*)*', name: 'P-GEN-01', component: { template: '<div />' } },
   ]
 
   async function mountAt(path: string) {
