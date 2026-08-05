@@ -52,6 +52,9 @@ function toSearchResult(g: GroupSearchResult): SearchResult {
 async function searchGroup() {
   const keyword = groupKeyword.value.trim()
   if (!keyword) {
+    // 空关键字：立即作废在途请求并复位 loading，避免旧响应写回结果
+    searchSeq++
+    groupSearching.value = false
     groupResults.value = []
     rawResults.value = []
     return
@@ -73,6 +76,13 @@ async function searchGroup() {
 function onGroupInput(value: string) {
   groupKeyword.value = value
   if (searchTimer) clearTimeout(searchTimer)
+  if (!value.trim()) {
+    searchSeq++
+    groupSearching.value = false
+    groupResults.value = []
+    rawResults.value = []
+    return
+  }
   searchTimer = setTimeout(searchGroup, 350)
 }
 
