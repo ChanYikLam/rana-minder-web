@@ -137,4 +137,73 @@ describe('ApplicationPage 状态渲染', () => {
     expect(wrapper.text()).toContain('保存草稿')
     expect(wrapper.text()).toContain('提交报名')
   })
+
+  it('需修订态：展示修订提示，表单与操作按钮可见', async () => {
+    setupGetMocks('revision_requested')
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 修订提示可见
+    expect(wrapper.text()).toContain('需修订')
+    expect(wrapper.text()).toContain('请修改后重新提交')
+
+    // 表单区域可见
+    expect(wrapper.text()).toContain('意向方向')
+    expect(wrapper.text()).toContain('报名表单')
+
+    // 操作按钮可见
+    expect(wrapper.text()).toContain('保存草稿')
+    expect(wrapper.text()).toContain('提交报名')
+  })
+
+  it('已退出态：展示终态卡片，隐藏表单', async () => {
+    setupGetMocks('exited')
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 终态卡片可见
+    expect(wrapper.text()).toContain('已退出')
+    expect(wrapper.text()).toContain('该状态下不可编辑或提交报名')
+
+    // 表单区域不可见
+    expect(wrapper.text()).not.toContain('意向方向')
+    expect(wrapper.text()).not.toContain('报名表单')
+    expect(wrapper.text()).not.toContain('保存草稿')
+  })
+
+  it('调整超期态：展示终态卡片，隐藏表单', async () => {
+    setupGetMocks('adjustment_overdue')
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 终态卡片可见
+    expect(wrapper.text()).toContain('调整超期')
+    expect(wrapper.text()).toContain('该状态下不可编辑或提交报名')
+
+    // 表单区域不可见
+    expect(wrapper.text()).not.toContain('意向方向')
+    expect(wrapper.text()).not.toContain('报名表单')
+  })
+
+  it('身份异常态：展示终态卡片，隐藏表单', async () => {
+    setupGetMocks('identity_anomaly')
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 终态卡片可见
+    expect(wrapper.text()).toContain('身份异常')
+    expect(wrapper.text()).toContain('该状态下不可编辑或提交报名')
+
+    // 表单区域不可见
+    expect(wrapper.text()).not.toContain('意向方向')
+    expect(wrapper.text()).not.toContain('报名表单')
+  })
 })

@@ -5,7 +5,8 @@ import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/compo
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning, CheckCircle2 } from '@lucide/vue'
+import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning, CheckCircle2, AlertTriangle } from '@lucide/vue'
+import { resolveStatusLabel } from '@/components/business/stateLabels'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -32,11 +33,17 @@ const myApplication = ref<MyApplication | null>(null)
 /** 仅当申请状态为 submitted 才算"已提交"，草稿（draft）用户仍可继续填写/提交 */
 const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
 const hasArchived = computed(() => myApplication.value?.status === 'archived')
-const showApplyForm = computed(() => !hasSubmitted.value && !hasArchived.value)
+
+/** 非可编辑终态：submitted/archived/exited/adjustment_overdue/identity_anomaly/not_qualified/accepted 隐藏表单 */
+const EDITABLE_STATUSES = new Set(['draft', 'revision_requested'])
+const isTerminal = computed(() => {
+  if (!myApplication.value) return false
+  return !EDITABLE_STATUSES.has(myApplication.value.status)
+})
+const showApplyForm = computed(() => !isTerminal.value)
 
 function statusLabel(status: string): string {
-  const labels: Record<string, string> = { draft: '草稿', submitted: '已提交', archived: '已归档' }
-  return labels[status] || status
+  return resolveStatusLabel(status)?.label || status
 }
 
 async function uploadFile(fieldId: string, file: File): Promise<void> {
@@ -253,8 +260,23 @@ onMounted(loadData)
         <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
       </Card>
 
+      <!-- 其他终态（exited / adjustment_overdue / identity_anomaly / not_qualified / accepted） -->
+      <Card v-else-if="isTerminal" class="mb-4">
+        <div class="flex items-center gap-2 text-text-secondary">
+          <AlertTriangle :size="18" />
+          <p class="text-sm font-medium text-text-primary">当前申请状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">该状态下不可编辑或提交报名</p>
+      </Card>
+
+      <!-- 需修订态：展示提示卡片，保留表单可编辑 -->
+      <div v-else-if="myApplication?.status === 'revision_requested'" class="rounded-lg bg-warning-subtle p-3 mb-4">
+        <p class="text-sm text-warning font-medium">您的报名需补充或修订材料（状态：{{ statusLabel(myApplication.status) }}），请修改后重新提交</p>
+        <p class="text-xs text-text-secondary mt-1">补充材料后请重新提交，超时可能导致报名失效</p>
+      </div>
+
       <!-- 草稿提示 -->
-      <div v-else-if="myApplication" class="rounded-lg bg-warning-subtle p-3 mb-4">
+      <div v-else-if="myApplication?.status === 'draft'" class="rounded-lg bg-warning-subtle p-3 mb-4">
         <p class="text-sm text-warning font-medium">您有已保存的草稿（状态：草稿），可继续修改后提交</p>
         <p class="text-xs text-text-secondary mt-1">暂存草稿会覆盖此前保存的内容</p>
       </div>

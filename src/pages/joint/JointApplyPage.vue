@@ -272,11 +272,15 @@ async function handleSubmit() {
         return
       }
     }
+    // 空意向社团时同步清空部门意向，避免"意向社团=[]、部门意向残留"的数据不一致
+    const clubIds = volunteerClubIds.value ?? []
+    const prefs = clubIds.length === 0 ? [] : preferences.value
+
     const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
       consented: consented.value,
       allowJointAdjustment: allowJointAdjustment.value,
-      volunteerClubIds: volunteerClubIds.value ?? [],
-      preferences: preferences.value,
+      volunteerClubIds: clubIds,
+      preferences: prefs,
       answers: { ...formData },
     })
     if (result.kind === 'completed') {

@@ -355,4 +355,30 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
     expect(app!.answers, '部分提交不应覆盖其他字段').toEqual({ f1: '自我介绍', f3: '相关经历', f4: '附件-1' })
   })
+
+  it('先选社团+部门，再清空社团后直接提交：部门意向也被同步清空', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+
+    // 先创建草稿：选社团 jnt-club-a 和部门
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: ['jnt-club-a'],
+      preferences: [{ departmentId: 'dept-1', departmentName: '技术部' }],
+      answers: { f1: 'test' },
+    })
+
+    // 清空社团后直接提交空意向，但残留部门意向
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: [],
+      preferences: [{ departmentId: 'dept-1', departmentName: '技术部' }],
+      answers: { f1: '清空社团后提交' },
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.volunteerClubIds, '空意向社团').toEqual([])
+    // mock 层 filterJointPreferences 会将不属于任何 volunteerClub 的部门过滤掉
+    expect(app!.preferences, '部门意向也应被清空').toEqual([])
+  })
 })
