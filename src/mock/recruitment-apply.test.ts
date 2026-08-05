@@ -517,4 +517,61 @@ describe('普通招新撤销提交', () => {
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     expect(app().allowAdjustment).toBe(true)
   })
+
+  it('需补充材料（revision_requested）可编辑后重新提交', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const r = rdb.requestSupplement('act-002', app().applicantId, '请补充相关经历', new Date(Date.now() + 86400000).toISOString())
+    expect(r.ok).toBe(true)
+    expect(app().status).toBe('revision_requested')
+
+    const out = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍', f3: '补充后的经历' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(app().status).toBe('submitted')
+    expect(app().answers).toMatchObject({ f1: '自我介绍', f3: '补充后的经历' })
+  })
+
+  it('身份异常（identity_anomaly）不可保存草稿、不可重新提交', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const r = rdb.markIdentityAnomaly('act-002', app().applicantId)
+    expect(r.ok).toBe(true)
+    expect(app().status).toBe('identity_anomaly')
+
+    const draft = await invokeHandler(draftUrl, otherClubUrl, {})
+    expect(draft.statusCode, JSON.stringify(draft.body)).toBe(422)
+    const submit = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '伪造内容' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(submit.statusCode, JSON.stringify(submit.body)).toBe(422)
+    expect(app().answers, '身份异常时内容不被覆盖').toMatchObject({ f1: '自我介绍' })
+  })
+})
+
+/** 公开活动详情（explore） */
+describe('公开活动详情', () => {
+  beforeEach(() => {
+    clearMockSession()
+    resetRecruitmentDB()
+  })
+
+  it('公开详情返回 allowAdjustmentDefault（报名页调剂开关默认值来源）', async () => {
+    const out = await invokeHandler('/api/explore/activities/:id', '/api/explore/activities/act-002', undefined, 'get')
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect((out.body.data as Record<string, unknown>)).toMatchObject({ id: 'act-002', allowAdjustmentDefault: true })
+  })
 })

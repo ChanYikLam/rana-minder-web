@@ -316,10 +316,6 @@ onUnmounted(() => {
   if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
 })
 
-onUnmounted(() => {
-  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
-})
-
 function formatDateTime(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)

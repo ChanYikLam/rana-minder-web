@@ -1182,6 +1182,8 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     recruitmentApplications.push(app)
   } else if (app.status === 'submitted') {
     return err('已提交的申请请通过「撤销提交」回到草稿')
+  } else if (app.status === 'identity_anomaly') {
+    return err('账号身份异常，不能保存或修改报名')
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
   app.version += 1

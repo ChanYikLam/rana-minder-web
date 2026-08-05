@@ -110,16 +110,17 @@ const withdrawing = ref(false)
 const confirmWithdraw = ref(false)
 let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
 
-const hasSubmitted = computed(() => ['submitted', 'revision_requested', 'identity_anomaly'].includes(myApplication.value?.status || ''))
+/** 仅已提交（可撤销）进入只读卡片；revision_requested 保留可编辑+重新提交，identity_anomaly 仅只读展示 */
+const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
+const hasReadonlyStatus = computed(() => ['submitted', 'identity_anomaly'].includes(myApplication.value?.status || ''))
 
-const SUBMITTED_STATUS_LABELS: Record<string, string> = {
+const READONLY_STATUS_LABELS: Record<string, string> = {
   submitted: '等待审核',
-  revision_requested: '需补充材料，等待补充后重新提交',
   identity_anomaly: '身份异常，请联系管理员处理',
 }
 
 function statusLabel(status: string): string {
-  return SUBMITTED_STATUS_LABELS[status] || '等待审核'
+  return READONLY_STATUS_LABELS[status] || '等待审核'
 }
 
 /** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
@@ -179,7 +180,7 @@ async function loadMyApplication() {
     const result = await get<MyApplication>(`/activity/recruitment/${route.params.activityId}/apply`)
     if (result.kind === 'completed') {
       myApplication.value = result.data
-      if (result.data.status === 'draft') {
+      if (result.data.status === 'draft' || result.data.status === 'revision_requested') {
         restoreDraft(result.data)
       }
     }
@@ -201,6 +202,9 @@ function restoreDraft(app: MyApplication) {
   }
   if (app.preferences) {
     preferences.value = app.preferences.map((p) => ({ departmentId: p.departmentId, departmentName: p.departmentName }))
+  }
+  if (app.allowAdjustment !== undefined) {
+    allowAdjustment.value = app.allowAdjustment
   }
 }
 
@@ -298,8 +302,8 @@ onUnmounted(() => {
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ activity.title }}</h1>
       <p class="text-sm text-text-secondary mb-6">{{ activity.clubName }} · 报名申请</p>
 
-      <!-- 已提交（含补充材料/身份异常）：只读回显本人填写内容，仅 submitted 可撤销（与联合报名一致） -->
-      <Card v-if="hasSubmitted" class="mb-4">
+      <!-- 已提交/身份异常：只读回显本人填写内容，仅 submitted 可撤销（与联合报名一致） -->
+      <Card v-if="hasReadonlyStatus" class="mb-4">
         <div class="flex items-center gap-2 text-success">
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交报名</p>
@@ -329,7 +333,7 @@ onUnmounted(() => {
         </div>
 
         <Button
-          v-if="myApplication?.status === 'submitted'"
+          v-if="hasSubmitted"
           variant="outline"
           class="mt-4 w-full"
           :class="confirmWithdraw ? '!text-danger !border-danger' : ''"
@@ -338,11 +342,17 @@ onUnmounted(() => {
         >
           <Save :size="14" /> {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
         </Button>
-        <p v-if="myApplication?.status === 'submitted'" class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
+        <p v-if="hasSubmitted" class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
       </Card>
 
-      <!-- 意向方向排序（已提交后隐藏，展示只读卡片） -->
-      <Card v-if="!hasSubmitted" class="mb-4">
+      <!-- 需补充材料：可编辑并重新提交 -->
+      <div v-else-if="myApplication?.status === 'revision_requested'" class="rounded-lg bg-warning-subtle p-3 mb-4">
+        <p class="text-sm text-warning font-medium">您的报名需补充材料</p>
+        <p class="text-xs text-text-secondary mt-1">请完善下方报名内容后重新提交，已填内容已为您保留。</p>
+      </div>
+
+      <!-- 意向方向排序（已提交/身份异常后隐藏，展示只读卡片） -->
+      <Card v-if="!hasReadonlyStatus" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-2">意向方向</h2>
         <p class="text-xs text-text-secondary mb-3">点击添加意向部门，可拖拽或用按钮调整优先级顺序</p>
 
@@ -387,8 +397,8 @@ onUnmounted(() => {
         </label>
       </Card>
 
-      <!-- 动态表单（已提交后隐藏，展示只读卡片） -->
-      <Card v-if="!hasSubmitted" class="mb-4">
+      <!-- 动态表单（已提交/身份异常后隐藏，展示只读卡片） -->
+      <Card v-if="!hasReadonlyStatus" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-4">报名表单</h2>
         <div class="space-y-4">
           <div v-for="field in formFields" :key="field.id">
@@ -479,16 +489,16 @@ onUnmounted(() => {
       </Card>
 
       <!-- 错误提示 -->
-      <p v-if="submitError && !hasSubmitted" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
-      <p v-if="savedDraft && !hasSubmitted" class="text-sm text-success mb-4" role="status">草稿已保存</p>
+      <p v-if="submitError && !hasReadonlyStatus" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
+      <p v-if="savedDraft && !hasReadonlyStatus" class="text-sm text-success mb-4" role="status">草稿已保存</p>
 
-      <!-- 操作区（已提交后隐藏） -->
-      <ResponsiveActionRegion v-if="!hasSubmitted" page-family="form">
+      <!-- 操作区（已提交/身份异常后隐藏） -->
+      <ResponsiveActionRegion v-if="!hasReadonlyStatus" page-family="form">
         <Button variant="outline" :loading="savingDraft" @click="handleSaveDraft">
           <Save :size="16" /> {{ savingDraft ? '保存中...' : '保存草稿' }}
         </Button>
         <Button class="flex-1 md:flex-none" :loading="submitting" @click="handleSubmit">
-          <Send :size="16" /> {{ submitting ? '提交中...' : '提交报名' }}
+          <Send :size="16" /> {{ submitting ? '提交中...' : myApplication?.status === 'revision_requested' ? '重新提交' : '提交报名' }}
         </Button>
       </ResponsiveActionRegion>
     </div>

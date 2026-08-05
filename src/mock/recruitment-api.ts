@@ -303,7 +303,7 @@ const recHandlers: MockMethod[] = [
         id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, type: 'recruitment',
         status: a.status, channelStatus: a.channelStatus, historical,
         deadline: a.deadline, description: a.description, departments: a.departments, formId: a.formId,
-        eligibility: a.eligibility, volunteerRules: a.volunteerRules,
+        eligibility: a.eligibility, volunteerRules: a.volunteerRules, allowAdjustmentDefault: a.allowAdjustmentDefault,
       })
     },
   },
