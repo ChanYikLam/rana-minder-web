@@ -50,6 +50,14 @@ function statusLabel(status: string): string {
   return APPLICATION_STATUS_LABELS[status] || status
 }
 
+/** 报名通道四态（not_open/open/paused/closed）文案与配色 */
+function channelStatusInfo(status?: string): { text: string; cls: string } {
+  if (status === 'open') return { text: '报名通道开放中', cls: 'bg-success-subtle text-success' }
+  if (status === 'paused') return { text: '报名通道已暂停', cls: 'bg-warning-subtle text-warning' }
+  if (status === 'closed') return { text: '报名通道已关闭', cls: 'bg-danger-subtle text-danger' }
+  return { text: '报名通道未开放', cls: 'bg-subtle text-text-secondary' }
+}
+
 const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
@@ -174,7 +182,7 @@ function restoreDraft(app: MyApplication) {
       }
     }
   }
-  if (app.volunteerClubIds && app.volunteerClubIds.length > 0) {
+  if (Array.isArray(app.volunteerClubIds)) {
     volunteerClubIds.value = app.volunteerClubIds
   }
   if (app.preferences) {
@@ -182,6 +190,21 @@ function restoreDraft(app: MyApplication) {
   }
   consented.value = app.consented ?? false
   allowJointAdjustment.value = app.allowJointAdjustment ?? false
+}
+
+function departmentsOfClub(clubId: string): { id: string; name: string }[] {
+  return detail.value?.clubs?.find((c) => c.id === clubId)?.departments || []
+}
+
+function toggleVolunteer(clubId: string) {
+  const selected = volunteerClubIds.value.includes(clubId)
+  if (!selected) {
+    volunteerClubIds.value.push(clubId)
+  } else {
+    volunteerClubIds.value = volunteerClubIds.value.filter((id) => id !== clubId)
+    const deptIds = new Set(departmentsOfClub(clubId).map((d) => d.id))
+    preferences.value = preferences.value.filter((p) => !deptIds.has(p.departmentId))
+  }
 }
 
 function togglePreference(dept: { id: string; name: string }) {
@@ -196,11 +219,6 @@ function movePreference(index: number, direction: 'up' | 'down') {
   const temp = preferences.value[index]
   preferences.value[index] = preferences.value[target]
   preferences.value[target] = temp
-}
-
-function toggleVolunteer(clubId: string) {
-  if (!volunteerClubIds.value.includes(clubId)) volunteerClubIds.value.push(clubId)
-  else volunteerClubIds.value = volunteerClubIds.value.filter((id) => id !== clubId)
 }
 
 async function handleSubmit() {
@@ -291,9 +309,9 @@ function formatDeadline(iso: string): string {
         <div class="flex flex-wrap gap-2 mb-4">
           <span
             class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium"
-            :class="detail.channelStatus === 'open' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'"
+            :class="channelStatusInfo(detail.channelStatus).cls"
           >
-            {{ detail.channelStatus === 'open' ? '报名通道开放中' : '报名通道已关闭' }}
+            {{ channelStatusInfo(detail.channelStatus).text }}
           </span>
           <span v-if="detail.deadline" class="inline-flex items-center px-2.5 py-1 rounded-md bg-subtle text-xs text-text-secondary">
             报名截止：{{ formatDeadline(detail.deadline) }}
