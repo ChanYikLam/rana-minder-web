@@ -5,7 +5,7 @@ import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Type, AlignLeft, List, FileUp, Calendar, CheckSquare, Plus, X, GripVertical, Save, Eye } from '@lucide/vue'
+import { Type, AlignLeft, Hash, Calendar, CircleDot, ListChecks, Image, FileUp, Plus, X, GripVertical, Save, Eye } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
 interface Field { id: string; type: string; label: string; required: boolean; readonly: boolean; permission: string; options: string[] | null; description: string | null }
@@ -25,14 +25,28 @@ const selectedField = computed(() => {
   return fields.value.find((f) => f.id === selectedFieldId.value) || null
 })
 
+// P-FORM-01：字段类型按规格对齐为 8 种（短文本/长文本/数字/日期/单选/多选/图片/文件）
 const fieldTypes = [
-  { type: 'text', label: '单行文本', icon: Type },
-  { type: 'textarea', label: '多行文本', icon: AlignLeft },
-  { type: 'select', label: '下拉选择', icon: List },
+  { type: 'text', label: '短文本', icon: Type },
+  { type: 'textarea', label: '长文本', icon: AlignLeft },
+  { type: 'number', label: '数字', icon: Hash },
   { type: 'date', label: '日期', icon: Calendar },
-  { type: 'checkbox', label: '勾选', icon: CheckSquare },
-  { type: 'file', label: '文件上传', icon: FileUp },
+  { type: 'radio', label: '单选', icon: CircleDot },
+  { type: 'multi_select', label: '多选', icon: ListChecks },
+  { type: 'image', label: '图片', icon: Image },
+  { type: 'file', label: '文件', icon: FileUp },
 ]
+
+// 历史类型标签兜底（select/checkbox/datetime 等旧数据仍可渲染）
+const legacyTypeLabels: Record<string, string> = {
+  select: '下拉选择', checkbox: '勾选', datetime: '日期时间', array: '子表单',
+}
+
+function labelOf(type: string): string {
+  return fieldTypes.find((ft) => ft.type === type)?.label || legacyTypeLabels[type] || type
+}
+
+const optionableTypes = ['radio', 'multi_select', 'select']
 
 async function loadData() {
   state.value = 'loading'
@@ -151,7 +165,7 @@ onMounted(loadData)
               <span class="text-xs text-text-secondary w-6">{{ index + 1 }}</span>
               <div class="flex-1">
                 <p class="text-sm text-text-primary">{{ field.label }}</p>
-                <p class="text-xs text-text-secondary">{{ fieldTypes.find((ft) => ft.type === field.type)?.label || field.type }}{{ field.required ? ' · 必填' : '' }}</p>
+                <p class="text-xs text-text-secondary">{{ labelOf(field.type) }}{{ field.required ? ' · 必填' : '' }}</p>
               </div>
               <button class="p-1 rounded hover:bg-subtle text-danger" @click.stop="removeField(field.id)"><X :size="14" /></button>
             </div>
@@ -178,6 +192,15 @@ onMounted(loadData)
                 class="w-full h-8 px-2 rounded border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
                 placeholder="可选"
                 @input="updateSelectedField({ description: ($event.target as HTMLInputElement).value || null })"
+              />
+            </div>
+            <div v-if="optionableTypes.includes(selectedField.type)">
+              <label class="block text-xs text-text-secondary mb-1">选项列表（每行一条）</label>
+              <textarea
+                rows="3"
+                class="w-full px-2 py-1.5 rounded border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
+                :value="(selectedField.options || []).join('\n')"
+                @input="updateSelectedField({ options: ($event.target as HTMLTextAreaElement).value.split('\n').map((s) => s.trim()).filter(Boolean) || null })"
               />
             </div>
             <div>
@@ -220,8 +243,8 @@ onMounted(loadData)
               </label>
               <p v-if="field.description" class="text-xs text-text-secondary mb-1">{{ field.description }}</p>
               <input
-                v-if="['text', 'date'].includes(field.type)"
-                :type="field.type === 'date' ? 'date' : 'text'"
+                v-if="['text', 'date', 'number'].includes(field.type)"
+                :type="field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'"
                 :placeholder="field.type === 'text' ? '请输入' : ''"
                 disabled
                 class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70"
@@ -233,12 +256,17 @@ onMounted(loadData)
                 placeholder="请输入"
                 class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70"
               />
-              <select v-else-if="field.type === 'select'" disabled class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70">
+              <select v-else-if="field.type === 'select' || field.type === 'multi_select'" disabled class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70">
                 <option v-for="opt in field.options || ['请选择']" :key="opt">{{ opt }}</option>
               </select>
-              <label v-else-if="field.type === 'checkbox'" class="flex items-center gap-2 text-sm text-text-primary">
-                <input type="checkbox" disabled class="rounded border-border" /> 勾选
-              </label>
+              <div v-else-if="field.type === 'radio' || field.type === 'checkbox'" class="flex flex-wrap gap-4 pt-1">
+                <label v-for="opt in field.options || []" :key="opt" class="flex items-center gap-1.5 text-sm text-text-primary opacity-70">
+                  <input :type="field.type === 'radio' ? 'radio' : 'checkbox'" disabled class="rounded border-border" /> {{ opt }}
+                </label>
+              </div>
+              <div v-else-if="field.type === 'image'" class="w-full h-9 px-3 rounded-md border border-dashed border-border flex items-center justify-center text-xs text-text-secondary">
+                图片上传区域（预览）
+              </div>
               <div v-else-if="field.type === 'file'" class="w-full h-9 px-3 rounded-md border border-dashed border-border flex items-center justify-center text-xs text-text-secondary">
                 文件上传区域（预览）
               </div>

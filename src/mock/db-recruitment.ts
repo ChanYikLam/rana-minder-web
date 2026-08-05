@@ -1674,7 +1674,9 @@ export function bookJointInterview(jointId: string, applicantId: string, slotId:
   const it = jointInterviews.find((i) => i.jointId === jointId && i.applicantId === applicantId)
   if (!it) return err('联合申请记录不存在')
   const fromStatus = it.status === 'pending_selection' ? 'pending_selection' : it.status
-  const event = it.status === 'scheduled' ? 'reschedule' : it.status === 'invalidated' ? 'rearrange' : 'select'
+  const event = it.status === 'scheduled' ? 'reschedule'
+    : ['invalidated', 'leave', 'late', 'absent'].includes(it.status) ? 'rearrange'
+    : 'select'
   const t = assertTransition('SM-JNT-004', fromStatus, 'scheduled', event)
   if (!t.ok) return err(t.reason || '当前面试记录不可预约')
   const conflict = applicantTimeConflict(applicantId, slot.startAt, slot.endAt, it.id)
