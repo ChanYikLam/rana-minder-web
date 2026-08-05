@@ -105,16 +105,29 @@ function toSearchResult(g: CasdoorGroupRow): SearchResult {
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let searchSeq = 0
+// 当前持有 loading 状态的请求序号：作废请求仅在自己仍持有 loading 时复位，避免误清新请求
+let loadingSeq = 0
 
 function refreshSearch(kw: string) {
   if (!kw) {
+    loadingSeq = 0
+    searching.value = false
     searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
     return
   }
   const seq = ++searchSeq
   searching.value = true
+  loadingSeq = seq
   get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw }).then((result) => {
-    if (seq !== searchSeq) return
+    if (seq !== searchSeq) {
+      // 作废请求：仅当本请求仍持有 loading 时复位，避免极端时序下 loading 残留
+      if (loadingSeq === seq) {
+        loadingSeq = 0
+        searching.value = false
+      }
+      return
+    }
+    loadingSeq = 0
     searching.value = false
     if (result.kind === 'completed') {
       const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
@@ -128,6 +141,7 @@ watch(keyword, (kw) => {
   if (searchTimer) clearTimeout(searchTimer)
   if (!kw) {
     searchSeq++
+    loadingSeq = 0
     searching.value = false
     searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
     return
@@ -138,6 +152,8 @@ watch(keyword, (kw) => {
 onUnmounted(() => {
   if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
   searchSeq++
+  loadingSeq = 0
+  searching.value = false
 })
 
 async function onSelectGroup(r: SearchResult) {

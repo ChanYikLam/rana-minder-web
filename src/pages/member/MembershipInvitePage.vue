@@ -47,6 +47,7 @@ const actingId = ref<string | null>(null)
 const showSend = ref(false)
 const candidateKeyword = ref('')
 const candidates = ref<Candidate[]>([])
+const searchFailed = ref(false)
 const selectedCandidate = ref<Candidate | null>(null)
 const targetDept = ref('')
 const sendError = ref('')
@@ -133,6 +134,7 @@ let requestSeq = 0
 
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
+  searchFailed.value = false
   searchTimer = setTimeout(() => { void searchCandidates() }, 300)
 }
 
@@ -143,6 +145,11 @@ async function searchCandidates() {
   if (seq !== requestSeq) return
   if (r.kind === 'completed') {
     candidates.value = r.data.items
+    searchFailed.value = false
+  } else {
+    // 搜索失败（非 completed）：清空旧候选结果，避免残留误导
+    candidates.value = []
+    searchFailed.value = true
   }
 }
 
@@ -170,6 +177,7 @@ function onSelectCandidate(r: SearchResult) {
 function openSend() {
   candidateKeyword.value = ''
   candidates.value = []
+  searchFailed.value = false
   selectedCandidate.value = null
   targetDept.value = departments.value[0]?.id ?? ''
   sendError.value = ''
@@ -354,7 +362,8 @@ onMounted(loadData)
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
+              <p v-else-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
