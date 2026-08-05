@@ -374,6 +374,7 @@ describe('普通招新撤销提交', () => {
   })
 
   const draftUrl = '/api/activity/recruitment/:activityId/draft'
+  const withdrawUrl = '/api/activity/recruitment/:activityId/withdraw'
   const applyUrl = '/api/activity/recruitment/:activityId/apply'
   const memberStudentId = '20210005'
 
@@ -381,7 +382,7 @@ describe('普通招新撤销提交', () => {
     return rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === memberStudentId)!
   }
 
-  it('已提交后保存空草稿即撤销回到草稿，内容保留可修改后重新提交', async () => {
+  it('已提交后调用撤销接口回到草稿，内容保留可修改后重新提交', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     const submit = await invokeHandler(applyUrl, otherClubUrl, {
       formData: { f1: '初版自我介绍', f3: '初版经历' },
@@ -391,7 +392,7 @@ describe('普通招新撤销提交', () => {
     expect(submit.statusCode, JSON.stringify(submit.body)).toBe(200)
     expect(app().status).toBe('submitted')
 
-    const out = await invokeHandler(draftUrl, otherClubUrl, {})
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     expect(app().status, '提交后撤销回到草稿').toBe('draft')
     expect(app().answers, '撤销后填写内容保留为草稿').toMatchObject({ f1: '初版自我介绍', f3: '初版经历' })
@@ -406,6 +407,18 @@ describe('普通招新撤销提交', () => {
     expect(app().answers).toMatchObject({ f1: '修改后自我介绍' })
   })
 
+  it('已提交的申请保存草稿接口返回拒绝（撤销须走独立端点）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const out = await invokeHandler(draftUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(app().status, '草稿接口不再兼任撤销').toBe('submitted')
+  })
+
   it('活动不在报名期时已提交申请不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(applyUrl, otherClubUrl, {
@@ -415,8 +428,93 @@ describe('普通招新撤销提交', () => {
     })
     const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
     act.status = 'completed'
-    const out = await invokeHandler(draftUrl, otherClubUrl, {})
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
     expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
     expect(app().status, '活动结束后保持已提交').toBe('submitted')
+  })
+
+  it('报名通道关闭或已过截止时不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
+    act.channelStatus = 'closed'
+    const closed = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(closed.statusCode, JSON.stringify(closed.body)).toBe(422)
+    expect(app().status, '通道关闭时保持已提交').toBe('submitted')
+
+    act.channelStatus = 'open'
+    act.deadline = new Date(Date.now() - 1000).toISOString()
+    const expired = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(expired.statusCode, JSON.stringify(expired.body)).toBe(422)
+    expect(app().status, '已过截止时保持已提交').toBe('submitted')
+  })
+
+  it('已排期面试时不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
+    rdb.recruitmentInterviews.push({
+      id: 'int-' + Date.now(), activityId: 'act-002', clubId: act.clubId,
+      applicantId: app().applicantId, applicantName: app().applicantName, roundId: 'rd-201',
+      status: 'scheduled', slotId: 'slot-201', startAt: new Date(Date.now() + 86400000).toISOString(), endAt: new Date(Date.now() + 90000000).toISOString(),
+      actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+      interviewerIds: [], version: 1,
+    })
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(app().status, '已排期面试时保持已提交').toBe('submitted')
+  })
+
+  it('已有审核结论时不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    app().paths['dept-101'].status = 'decided'
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(app().status, '已有审核结论时保持已提交').toBe('submitted')
+  })
+
+  it('撤销时清理未排期面试记录与待评估部门路径', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
+    rdb.recruitmentInterviews.push({
+      id: 'int-' + Date.now(), activityId: 'act-002', clubId: act.clubId,
+      applicantId: app().applicantId, applicantName: app().applicantName, roundId: 'rd-201',
+      status: 'pending_selection', slotId: null, startAt: null, endAt: null,
+      actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+      interviewerIds: [], version: 1,
+    })
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(app().status).toBe('draft')
+    expect(app().paths, '撤销后清空部门路径').toEqual({})
+    expect(rdb.recruitmentInterviews.some((i) => i.applicantId === app().applicantId && i.activityId === 'act-002'), '撤销后清理未排期面试记录').toBe(false)
+  })
+
+  it('提交未传 allowAdjustment 时回退活动默认值', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    const out = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(app().allowAdjustment).toBe(true)
   })
 })

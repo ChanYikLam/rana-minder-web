@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -7,7 +7,7 @@ import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning, CheckCircle2 } from '@lucide/vue'
 
-interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
+interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string; allowAdjustmentDefault?: boolean }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
 
 const route = useRoute()
@@ -22,6 +22,7 @@ interface FormFile { fileId: string; name: string; size: number; checking: boole
 const formFiles = reactive<Record<string, FormFile | null>>({})
 const formErrors = ref<Record<string, string>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
+const allowAdjustment = ref(true)
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
@@ -86,6 +87,7 @@ async function loadData() {
   ])
   if (actRes.kind === 'completed' && formRes.kind === 'completed') {
     activity.value = actRes.data
+    allowAdjustment.value = actRes.data.allowAdjustmentDefault !== false
     const versions = (formRes as { kind: 'completed'; data: { versions: { fields: FormField[] }[] } }).data.versions
     formFields.value = versions[0]?.fields || []
     await loadMyApplication()
@@ -108,7 +110,17 @@ const withdrawing = ref(false)
 const confirmWithdraw = ref(false)
 let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
 
-const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
+const hasSubmitted = computed(() => ['submitted', 'revision_requested', 'identity_anomaly'].includes(myApplication.value?.status || ''))
+
+const SUBMITTED_STATUS_LABELS: Record<string, string> = {
+  submitted: '等待审核',
+  revision_requested: '需补充材料，等待补充后重新提交',
+  identity_anomaly: '身份异常，请联系管理员处理',
+}
+
+function statusLabel(status: string): string {
+  return SUBMITTED_STATUS_LABELS[status] || '等待审核'
+}
 
 /** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
 function answersOf(fieldId: string): string {
@@ -119,7 +131,7 @@ function answersOf(fieldId: string): string {
   return String(v)
 }
 
-function formatTime(iso?: string | null): string {
+function formatDateTime(iso?: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -147,7 +159,7 @@ async function handleWithdraw() {
   if (withdrawing.value) return
   withdrawing.value = true
   try {
-    const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {})
+    const result = await post(`/activity/recruitment/${route.params.activityId}/withdraw`, {})
     if (result.kind === 'completed') {
       toast.success('已撤销提交，可修改后重新提交')
       await loadData()
@@ -256,6 +268,7 @@ async function handleSubmit() {
   const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
     formData,
     preferences: preferences.value,
+    allowAdjustment: allowAdjustment.value,
   })
   submitting.value = false
 
@@ -269,6 +282,10 @@ async function handleSubmit() {
 }
 
 onMounted(loadData)
+
+onUnmounted(() => {
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+})
 </script>
 
 <template>
@@ -281,13 +298,13 @@ onMounted(loadData)
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ activity.title }}</h1>
       <p class="text-sm text-text-secondary mb-6">{{ activity.clubName }} · 报名申请</p>
 
-      <!-- 已提交：只读回显本人填写内容 + 撤销提交（与联合报名一致） -->
+      <!-- 已提交（含补充材料/身份异常）：只读回显本人填写内容，仅 submitted 可撤销（与联合报名一致） -->
       <Card v-if="hasSubmitted" class="mb-4">
         <div class="flex items-center gap-2 text-success">
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交报名</p>
         </div>
-        <p class="text-xs text-text-secondary mt-1">当前状态：等待审核</p>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status || '') }}</p>
 
         <div class="mt-4 border-t border-border pt-3 space-y-2.5">
           <p class="text-sm font-medium text-text-primary">您的报名详情</p>
@@ -307,11 +324,12 @@ onMounted(loadData)
           </div>
           <div v-if="myApplication?.submittedAt">
             <p class="text-xs text-text-secondary">提交时间</p>
-            <p class="text-sm text-text-primary">{{ formatTime(myApplication.submittedAt) }}</p>
+            <p class="text-sm text-text-primary">{{ formatDateTime(myApplication.submittedAt) }}</p>
           </div>
         </div>
 
         <Button
+          v-if="myApplication?.status === 'submitted'"
           variant="outline"
           class="mt-4 w-full"
           :class="confirmWithdraw ? '!text-danger !border-danger' : ''"
@@ -320,7 +338,7 @@ onMounted(loadData)
         >
           <Save :size="14" /> {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
         </Button>
-        <p class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
+        <p v-if="myApplication?.status === 'submitted'" class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
       </Card>
 
       <!-- 意向方向排序（已提交后隐藏，展示只读卡片） -->
@@ -361,6 +379,12 @@ onMounted(loadData)
             <Plus :size="14" /> {{ dept.name }}
           </button>
         </div>
+
+        <label class="flex items-center gap-2 mt-4 cursor-pointer">
+          <input v-model="allowAdjustment" type="checkbox" class="w-4 h-4 accent-primary" />
+          <span class="text-sm text-text-primary">服从调剂</span>
+          <span class="text-xs text-text-secondary">未被任一意向方向录取时，接受调剂到其他方向</span>
+        </label>
       </Card>
 
       <!-- 动态表单（已提交后隐藏，展示只读卡片） -->

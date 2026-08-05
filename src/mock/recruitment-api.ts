@@ -679,6 +679,17 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return ok({ activityId: query.activityId, status: 'draft', savedAt: new Date().toISOString(), ...r.data })
     },
   },
+  // 撤销报名提交（普通招新，回到草稿；通道开放且未排期面试/未形成审核结论时可用）
+  {
+    url: '/api/activity/recruitment/:activityId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const r = rdb.withdrawApplicationSubmission(query.activityId, applicantId)
+      return result(r)
+    },
+  },
   // 我的申请（申请人视角）
   {
     url: '/api/activity/recruitment/:activityId/apply',

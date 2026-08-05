@@ -1181,13 +1181,39 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
   } else if (app.status === 'submitted') {
-    if (a.status !== 'in_progress') return err('活动当前不在报名期，无法撤销提交')
-    const t = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
-    if (!t.ok) return err(t.reason || '已提交申请当前不可编辑')
-    app.status = 'draft'
-    app.submittedAt = null
+    return err('已提交的申请请通过「撤销提交」回到草稿')
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
+  app.version += 1
+  return ok(app)
+}
+
+/**
+ * 撤销报名提交（普通招新专用，与联合版 withdrawJointApplication 同规范）：
+ * 仅通道开放且未截止时可撤销；已有排期面试或形成审核结论时拒绝；
+ * 撤销时清理未排期面试记录与未形成结论的部门路径，回到草稿可修改后重新提交。
+ */
+export function withdrawApplicationSubmission(activityId: string, applicantId: string): { ok: boolean; error?: string; data?: RecApplication } {
+  const a = findAnyActivity(activityId)
+  if (!a) return err('活动不存在')
+  if (a.status !== 'in_progress') return err('活动当前不在报名期，无法撤销提交')
+  if (a.channelStatus !== 'open') return err('报名通道已关闭，无法撤销提交')
+  if (new Date(a.deadline).getTime() < Date.now()) return err('报名已截止，无法撤销提交')
+  const app = findApplication(activityId, applicantId)
+  if (!app) return err('申请不存在')
+  const t = assertTransition('SM-REC-003', app.status, 'draft', 'edit_before_deadline')
+  if (!t.ok) return err(t.reason || '仅已提交的申请可撤销')
+  const interview = recruitmentInterviews.find((i) => i.activityId === activityId && i.applicantId === applicantId)
+  if (interview && interview.status !== 'pending_selection') return err('已安排面试，无法撤销提交')
+  const activePath = Object.values(app.paths).find((p) => p.status !== 'evaluating')
+  if (activePath) return err('已有审核结论，无法撤销提交')
+  for (let i = recruitmentInterviews.length - 1; i >= 0; i--) {
+    const it = recruitmentInterviews[i]
+    if (it.activityId === activityId && it.applicantId === applicantId && it.status === 'pending_selection') recruitmentInterviews.splice(i, 1)
+  }
+  app.paths = {}
+  app.status = 'draft'
+  app.submittedAt = null
   app.version += 1
   return ok(app)
 }
@@ -1217,7 +1243,7 @@ export function submitApplication(activityId: string, applicantId: string, input
   if (!app) {
     app = {
       id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
-      status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment, formVersion: a.formVersion,
+      status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment ?? a.allowAdjustmentDefault, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
       recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
     }
@@ -1245,7 +1271,7 @@ export function submitApplication(activityId: string, applicantId: string, input
     const d = a.departments.find((x) => x.id === p.departmentId)!
     return { order: i + 1, departmentId: d.id, departmentName: d.name }
   })
-  app.allowAdjustment = input.allowAdjustment
+  app.allowAdjustment = input.allowAdjustment ?? a.allowAdjustmentDefault
   app.answers = { ...(input.answers || {}) }
   app.formVersion = a.formVersion
   app.submittedAt = now()

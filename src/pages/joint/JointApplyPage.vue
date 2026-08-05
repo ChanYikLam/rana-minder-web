@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -312,7 +312,15 @@ async function handleSaveDraft() {
 
 onMounted(loadData)
 
-function formatDeadline(iso?: string): string {
+onUnmounted(() => {
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+})
+
+onUnmounted(() => {
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+})
+
+function formatDateTime(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -392,7 +400,7 @@ async function handleWithdraw() {
             {{ channelStatusMeta(detail.channelStatus).label }}
           </span>
           <span v-if="detail.deadline" class="inline-flex items-center px-2.5 py-1 rounded-md bg-subtle text-xs text-text-secondary">
-            报名截止：{{ formatDeadline(detail.deadline) }}
+            报名截止：{{ formatDateTime(detail.deadline) }}
           </span>
         </div>
 
@@ -439,7 +447,7 @@ async function handleWithdraw() {
           </div>
           <div v-if="myApplication?.submittedAt">
             <p class="text-xs text-text-secondary">提交时间</p>
-            <p class="text-sm text-text-primary">{{ formatDeadline(myApplication.submittedAt) }}</p>
+            <p class="text-sm text-text-primary">{{ formatDateTime(myApplication.submittedAt) }}</p>
           </div>
         </div>
 
