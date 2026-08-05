@@ -23,6 +23,13 @@ describe('Pagination', () => {
     expect(wrapper.text()).toContain('1 / 1')
   })
 
+  it('clamps out-of-range page in summary (no inverted range)', () => {
+    const wrapper = mount(Pagination, { props: { page: 99, total: 100, pageSize: 20 } })
+    expect(wrapper.text()).toContain('第 81-100 条')
+    const wrapper2 = mount(Pagination, { props: { page: 0, total: 100, pageSize: 20 } })
+    expect(wrapper2.text()).toContain('第 1-20 条')
+  })
+
   it('disables previous button on first page', () => {
     const wrapper = mount(Pagination, { props: { page: 1, total: 100, pageSize: 20 } })
     expect(prevBtn(wrapper)?.attributes('disabled')).toBeDefined()

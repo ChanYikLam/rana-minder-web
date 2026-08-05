@@ -997,6 +997,7 @@ const act = rdb.findAnyActivity(query.activityId)
       const it = rdb.recruitmentInterviews.find((i) => i.id === query.interviewId)
       if (!it) return notFound('面试不存在')
       if (it.applicantId !== applicantId) return forbidden()
+      if (it.status !== 'scheduled') return businessError('仅已安排的面试可登记请假，当前状态不可请假')
       const r = rdb.markAttendance(query.interviewId, 'leave', false)
       if (r.ok) {
         pushNotifications([applicantId], {
@@ -1880,6 +1881,7 @@ const jointHandlers: MockMethod[] = [
       if (!applicantId) return forbidden()
       const it = rdb.jointInterviews.find((i) => i.jointId === query.jointId && i.applicantId === applicantId)
       if (!it) return notFound('联合面试不存在')
+      if (it.status !== 'scheduled') return businessError('仅已安排的面试可登记请假，当前状态不可请假')
       return result(rdb.markJointAttendance(query.jointId, applicantId, 'leave'))
     },
   },

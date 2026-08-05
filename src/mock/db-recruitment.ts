@@ -1681,7 +1681,7 @@ export function bookJointInterview(jointId: string, applicantId: string, slotId:
   if (!t.ok) return err(t.reason || '当前面试记录不可预约')
   const conflict = applicantTimeConflict(applicantId, slot.startAt, slot.endAt, it.id)
   if (conflict.conflict) return err(conflict.detail || '该时段与既有安排冲突')
-  if (it.status === 'invalidated' && it.slotId && it.slotId !== slot.id) {
+  if (it.slotId && it.slotId !== slot.id) {
     const oldSlot = jointSlots.find((s) => s.id === it.slotId && s.jointId === jointId)
     if (oldSlot) oldSlot.taken = Math.max(0, oldSlot.taken - 1)
   }
@@ -1702,6 +1702,8 @@ export function markJointAttendance(jointId: string, applicantId: string, event:
   if (!t.ok) return err(t.reason || '当前状态不可标记出勤')
   it.status = event
   it.attendance = event
+  const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === jointId)
+  if (slot) slot.taken = Math.max(0, slot.taken - 1)
   it.version += 1
   return ok()
 }

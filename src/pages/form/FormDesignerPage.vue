@@ -256,7 +256,7 @@ onMounted(loadData)
                 placeholder="请输入"
                 class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70"
               />
-              <select v-else-if="field.type === 'select' || field.type === 'multi_select'" disabled class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70">
+              <select v-else-if="field.type === 'select' || field.type === 'multi_select'" :multiple="field.type === 'multi_select'" disabled class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70">
                 <option v-for="opt in field.options || ['请选择']" :key="opt">{{ opt }}</option>
               </select>
               <div v-else-if="field.type === 'radio' || field.type === 'checkbox'" class="flex flex-wrap gap-4 pt-1">

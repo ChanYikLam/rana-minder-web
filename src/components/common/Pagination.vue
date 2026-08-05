@@ -15,8 +15,10 @@ const emit = defineEmits<{
 }>()
 
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
-const from = computed(() => (props.total === 0 ? 0 : (props.page - 1) * props.pageSize + 1))
-const to = computed(() => Math.min(props.total, props.page * props.pageSize))
+/** 越界 page 钳制到 [1, totalPages]，避免「第 81-21 条」倒挂文案 */
+const pageClamped = computed(() => Math.min(Math.max(1, props.page), totalPages.value))
+const from = computed(() => (props.total === 0 ? 0 : (pageClamped.value - 1) * props.pageSize + 1))
+const to = computed(() => Math.min(props.total, pageClamped.value * props.pageSize))
 
 function go(p: number) {
   if (p < 1 || p > totalPages.value || p === props.page) return
