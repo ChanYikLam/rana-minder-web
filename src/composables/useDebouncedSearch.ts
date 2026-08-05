@@ -13,17 +13,23 @@ export interface UseDebouncedSearchOptions {
 export interface UseDebouncedSearchReturn {
   /** 搜索中（覆盖防抖窗口 + 请求在途），用于 loading 展示与空态文案抑制 */
   searching: Ref<boolean>
-  /** 请求序号：调用方在异步操作前捕获，操作后比较以判断是否作废 */
+  /**
+   * 当前代次号（只读，调用方不得修改）。
+   * 每次输入变化、清空或卸载时递增。调用方必须在 onSearch 入口处立即捕获 mySeq = seq.value，
+   * 异步操作后比较 mySeq !== seq.value 判断是否被作废。严禁在 onSearch 内自增 seq（如 ++seq.value），
+   * 否则将被 composable 内部的 searching 复位逻辑误判为 stale。
+   */
   seq: Ref<number>
-  /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('') */
-  schedule: (keyword: string) => void
+  /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('')。immediate=true 跳过防抖立即执行 */
+  schedule: (keyword: string, immediate?: boolean) => void
   /** 取消待触发的防抖定时器（不清空 searching，不触发 onSearch） */
   cancel: () => void
 }
 
 /**
- * 防抖搜索控制器：统一 300ms 防抖、在途请求作废（请求序号）、卸载清理与 loading 状态。
+ * 防抖搜索控制器：统一 300ms 防抖、在途请求作废（代次号）、卸载清理与 loading 状态。
  * 页面仅需提供 onSearch 处理业务状态（结果写入/失败提示），无需自行维护 timer/序号。
+ * onSearch 内不得修改 seq（如 ++seq.value），仅允许捕获 mySeq = seq.value 后比较。
  */
 export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebouncedSearchReturn {
   const delay = options.delay ?? 300
@@ -31,7 +37,7 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
   const seq = ref(0)
   let timer: ReturnType<typeof setTimeout> | null = null
 
-  function schedule(keyword: string) {
+  function schedule(keyword: string, immediate = false) {
     if (timer) {
       clearTimeout(timer)
       timer = null
@@ -56,6 +62,20 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
     // 输入变化立即递增序号：防抖窗口内到达的旧响应将被 seq 比较识别为作废
     seq.value++
     searching.value = true
+    if (immediate) {
+      // 立即执行（重试等场景），不经过防抖
+      const mySeq = seq.value
+      void (async () => {
+        try {
+          await options.onSearch(kw)
+        } catch (e) {
+          console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+        } finally {
+          if (mySeq === seq.value) searching.value = false
+        }
+      })()
+      return
+    }
     timer = setTimeout(() => {
       timer = null
       const mySeq = seq.value

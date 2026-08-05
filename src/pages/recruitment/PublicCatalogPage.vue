@@ -78,6 +78,7 @@ const { seq, schedule, cancel } = useDebouncedSearch({
 
 function switchTab(tab: 'activities' | 'clubs') {
   // REC-047：切换模式清空全部筛选与搜索条件
+  cancel()  // 取消待触发的防抖 timer，避免切换后触发带旧关键字的查询
   suppressFilterWatch = true
   typeFilter.value = 'all'
   statusFilter.value = 'all'

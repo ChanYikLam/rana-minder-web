@@ -45,7 +45,7 @@ onMounted(() => schedule(searchKeyword.value))
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="审计查询" @retry="schedule(searchKeyword)">
+  <PageStateBoundary :state="state" title="审计查询" @retry="schedule(searchKeyword, true)">
     <div class="max-w-3xl mx-auto">
       <h1 class="text-2xl font-bold text-text-primary mb-6">审计查询</h1>
 
