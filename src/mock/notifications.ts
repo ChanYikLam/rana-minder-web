@@ -1,4 +1,5 @@
 import { mockUsers, USER_MEMBER_MAP, USER_APPLICANT_MAP } from './auth'
+import { applicantStudentIdOf } from './db-recruitment'
 
 /** 站内信（mock 内存态；业务操作经 push* 动态生成，已读状态真实落库） */
 export interface SysNotification {
@@ -58,10 +59,16 @@ export function pushNotifications(userIds: string[], payload: NotificationPayloa
   }
 }
 
-/** 申请人 id（u-xxx）→ 可接收通知的前端用户 id */
+/** 申请人 id（u-xxx）→ 可接收通知的前端用户 id；
+ * 静态映射未命中时按档案学号反查 mockUsers（动态注册的 u-auto-* 档案对应 member 等登录账号） */
 export function userIdOfApplicant(applicantId: string): string | null {
   for (const [userId, applicant] of Object.entries(USER_APPLICANT_MAP)) {
     if (applicant === applicantId) return userId
+  }
+  const studentId = applicantStudentIdOf(applicantId)
+  if (!studentId) return null
+  for (const user of Object.values(mockUsers)) {
+    if (user.studentId === studentId) return user.id
   }
   return null
 }

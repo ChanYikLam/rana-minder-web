@@ -6,8 +6,9 @@ import { assertTransition } from './state-machines/transitions'
 import { mockUsers } from './auth'
 
 /** 申请人档案（applicantId → 姓名/学号）：申请人 id 为 u-xxx 域内编号，
- * 与 auth.mockUsers 的 user-applicant-xxx 键不同，按申请人域自维护 */
-const APPLICANT_PROFILES: Record<string, { name: string; studentId: string }> = {
+ * 与 auth.mockUsers 的 user-applicant-xxx 键不同，按申请人域自维护；
+ * 动态注册的 u-auto-* 档案由 ensureApplicantProfile 写入，resetRecruitmentDB 会还原种子 */
+export const APPLICANT_PROFILES: Record<string, { name: string; studentId: string }> = {
   'u-001': { name: '刘子豪', studentId: '20240001' },
   'u-002': { name: '陈雨桐', studentId: '20240002' },
   'u-003': { name: '王梓涵', studentId: '20240003' },
@@ -22,6 +23,18 @@ export function applicantNameOf(applicantId: string): string {
 
 export function applicantStudentIdOf(applicantId: string): string {
   return APPLICANT_PROFILES[applicantId]?.studentId || ''
+}
+
+/** 动态申请人档案：按学号反查已有档案（成员与申请人同人复用），未命中注册 u-auto-* 档案 */
+let autoProfileSeq = 0
+
+export function ensureApplicantProfile(studentId: string, name: string): string {
+  const existing = Object.entries(APPLICANT_PROFILES).find(([, p]) => p.studentId === studentId)
+  if (existing) return existing[0]
+  autoProfileSeq += 1
+  const id = `u-auto-${Date.now().toString(36)}-${autoProfileSeq.toString(36)}`
+  APPLICANT_PROFILES[id] = { name, studentId }
+  return id
 }
 
 const now = () => new Date().toISOString()
