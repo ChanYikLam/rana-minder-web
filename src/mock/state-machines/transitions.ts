@@ -194,6 +194,7 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
     draft: { submit: 'submitted', identity_disabled: 'identity_anomaly' },
     submitted: {
       edit_before_deadline: 'draft',
+      withdraw_submission: 'draft',
       request_supplement: 'revision_requested',
       rule_tightening: 'submitted',
       extend_window: 'submitted',

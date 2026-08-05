@@ -34,6 +34,7 @@ interface MyApplication {
   status: string
   answers?: Record<string, unknown>
   volunteerClubIds?: string[]
+  volunteerClubSnapshot?: string[]
   preferences?: { departmentId: string; departmentName: string }[]
   allowJointAdjustment?: boolean
   consented?: boolean
@@ -347,6 +348,7 @@ function answersOf(fieldId: string): string {
 /** 意向社团 id → 名称（详情接口参与社团与部门列表同源，取任一可用的名称） */
 function clubNamesOf(ids?: string[]): string[] {
   if (!ids || ids.length === 0) return []
+  if (myApplication.value?.volunteerClubSnapshot?.length) return myApplication.value.volunteerClubSnapshot
   return ids.map((id) => detail.value?.participants?.find((p) => p.id === id)?.name
     || detail.value?.clubs?.find((c) => c.id === id)?.name
     || id)

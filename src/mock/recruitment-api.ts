@@ -680,8 +680,9 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     },
   },
   // 撤销报名提交（普通招新，回到草稿；通道开放且未排期面试/未形成审核结论时可用）
+  // 注意：不复用 /withdraw（那是「退出招新」端点，语义不同，避免路由遮蔽）
   {
-    url: '/api/activity/recruitment/:activityId/withdraw',
+    url: '/api/activity/recruitment/:activityId/apply/withdraw',
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const applicantId = applicantIdOf(url)
@@ -1663,7 +1664,7 @@ const jointHandlers: MockMethod[] = [
           id: a.id, jointId: a.jointId, applicantId: a.applicantId, applicantName: a.applicantName,
           applicantStudentId: a.studentId, status: a.status, consented: a.consented,
           consentAt: a.consentAt, agreementVersion: a.agreementVersion, allowJointAdjustment: a.allowJointAdjustment,
-          volunteerClubIds: a.volunteerClubIds, agreementClubSnapshot: a.agreementClubSnapshot,
+          volunteerClubIds: a.volunteerClubIds, volunteerClubSnapshot: a.volunteerClubSnapshot, agreementClubSnapshot: a.agreementClubSnapshot,
           submittedAt: a.submittedAt, version: a.version,
         }))
       return ok({ items, nextCursor: null })
@@ -1683,7 +1684,7 @@ const jointHandlers: MockMethod[] = [
         id: app.id, jointId: app.jointId, applicantId: app.applicantId, applicantName: app.applicantName,
         applicantStudentId: app.studentId, status: app.status, consented: app.consented,
         consentAt: app.consentAt, agreementVersion: app.agreementVersion, allowJointAdjustment: app.allowJointAdjustment,
-        volunteerClubIds: app.volunteerClubIds, agreementClubSnapshot: app.agreementClubSnapshot,
+        volunteerClubIds: app.volunteerClubIds, volunteerClubSnapshot: app.volunteerClubSnapshot, agreementClubSnapshot: app.agreementClubSnapshot,
         answers: app.answers, formVersion: app.formVersion, submittedAt: app.submittedAt, version: app.version,
       })
     },

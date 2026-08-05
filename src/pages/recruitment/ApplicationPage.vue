@@ -160,7 +160,7 @@ async function handleWithdraw() {
   if (withdrawing.value) return
   withdrawing.value = true
   try {
-    const result = await post(`/activity/recruitment/${route.params.activityId}/withdraw`, {})
+    const result = await post(`/activity/recruitment/${route.params.activityId}/apply/withdraw`, {})
     if (result.kind === 'completed') {
       toast.success('已撤销提交，可修改后重新提交')
       await loadData()
@@ -304,7 +304,15 @@ onUnmounted(() => {
 
       <!-- 已提交/身份异常：只读回显本人填写内容，仅 submitted 可撤销（与联合报名一致） -->
       <Card v-if="hasReadonlyStatus" class="mb-4">
-        <div class="flex items-center gap-2 text-success">
+        <div
+          v-if="myApplication?.status === 'identity_anomaly'"
+          class="flex items-center gap-2 text-warning"
+          role="alert"
+        >
+          <FileWarning :size="18" />
+          <p class="text-sm font-medium text-text-primary">身份异常，请联系管理员处理</p>
+        </div>
+        <div v-else class="flex items-center gap-2 text-success">
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交报名</p>
         </div>
