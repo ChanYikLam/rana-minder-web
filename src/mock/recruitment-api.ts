@@ -10,7 +10,7 @@ import type { MockMethod } from './types'
 // Node HTTP types via any (mock layer, no @types/node in remote baseline)
 type RawReq = any
 type RawRes = any
-import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, USER_APPLICANT_MAP, mockUsers } from './auth'
+import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
 import { pushNotifications, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
 import * as rdb from './db-recruitment'
 import * as db from './db'
@@ -125,8 +125,16 @@ function notFound(message = '请求的内容不存在或已被移除') {
 
 const ok = (data: unknown) => ({ code: 0, data })
 
-function actorApplicantId(user: { id: string }): string | null {
-  return USER_APPLICANT_MAP[user.id] || null
+/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户仅限非管理角色
+ * （member/applicant）按学号复用/注册申请人档案，使其可报名其他社团招新与联合活动；
+ * 管理角色（super_admin/club_leader/hr/department_leader/interviewer）不自动注册为申请人 */
+function actorApplicantId(user: MockUser): string | null {
+  const mapped = USER_APPLICANT_MAP[user.id]
+  if (mapped) return mapped
+  if (!user.studentId) return null
+  const primaryRole = user.roles[0]?.role
+  if (primaryRole !== 'member' && primaryRole !== 'applicant') return null
+  return rdb.ensureApplicantProfile(user.studentId, user.name || '')
 }
 
 /** 社团招新管理权限 */
@@ -612,9 +620,9 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
-const act = rdb.findAnyActivity(query.activityId)
+      const act = rdb.findAnyActivity(query.activityId)
       if (!act) return notFound('活动不存在')
-      const studentId = mockUsers[applicantId]?.studentId ?? ''
+      const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
       const isExistingMember = db.members.some(
         (m) => m.clubId === act.clubId
           && m.studentId === studentId
@@ -624,7 +632,7 @@ const act = rdb.findAnyActivity(query.activityId)
       const input = unwrap(body) as { preferences: { departmentId: string }[]; allowAdjustment: boolean; answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
       const r = rdb.submitApplication(query.activityId, applicantId, { ...input, answers: input.answers ?? input.formData ?? input.formAnswers })
       if (r.ok) {
-        pushNotifications([applicantId], {
+        pushNotifications([resolveMockUser(url).id], {
           type: 'application',
           title: '报名申请已提交',
           body: `您的报名申请已提交，请等待「${act.title}」的审核。`,
@@ -977,7 +985,7 @@ const act = rdb.findAnyActivity(query.activityId)
       if (!slot) return notFound('面试时段不存在')
       const r = rdb.bookInterview(it.activityId, applicantId, slot.roundId, input.slotId, '', false, findInterviewersForClub(it.clubId))
       if (r.ok) {
-        pushNotifications([applicantId], {
+        pushNotifications([resolveMockUser(url).id], {
           type: 'interview',
           title: '面试时间已确认',
           body: `您「${a?.title || '招新活动'}」的面试时间已确认，请查看日程。`,
@@ -1000,7 +1008,7 @@ const act = rdb.findAnyActivity(query.activityId)
       if (it.status !== 'scheduled') return businessError('仅已安排的面试可登记请假，当前状态不可请假')
       const r = rdb.markAttendance(query.interviewId, 'leave', false)
       if (r.ok) {
-        pushNotifications([applicantId], {
+        pushNotifications([resolveMockUser(url).id], {
           type: 'interview',
           title: '请假申请已登记',
           body: '已登记请假，可重新选择面试时段；管理员也可为您重新安排。',
