@@ -167,6 +167,7 @@ function movePreference(index: number, direction: 'up' | 'down') {
 }
 
 async function handleSaveDraft() {
+  if (!showApplyForm.value) return
   savingDraft.value = true
   const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
     formAnswers: formData,
@@ -182,6 +183,7 @@ async function handleSaveDraft() {
 }
 
 async function handleSubmit() {
+  if (!showApplyForm.value) return
   formErrors.value = {}
   submitError.value = null
 
