@@ -62,6 +62,18 @@ function toggleCheckbox(field: FormField, opt: string, checked: boolean) {
   updateField(field, next)
 }
 
+/** select 取值：multi_select 收集 selectedOptions 数组，单选取单个 value */
+function selectChangeValue(field: FormField, el: HTMLSelectElement): unknown {
+  if (field.type !== 'multi_select') return el.value
+  return Array.from(el.selectedOptions).map((o) => o.value)
+}
+
+/** option 选中态：multi_select 用数组 includes 匹配，单选用相等 */
+function isOptionSelected(field: FormField, opt: string): boolean {
+  const v = fieldValue(field)
+  return field.type === 'multi_select' ? Array.isArray(v) && (v as string[]).includes(opt) : v === opt
+}
+
 function arrayItems(field: FormField): Array<{ id: string; index: number }> {
   const val = fieldValue(field)
   if (Array.isArray(val)) {
@@ -206,10 +218,10 @@ const inputErrorClass = 'border-danger'
           :multiple="field.type === 'multi_select'"
           :disabled="isReadOnly(field)"
           :required="field.required"
-          @change="updateField(field, ($event.target as HTMLSelectElement).value)"
+          @change="updateField(field, selectChangeValue(field, $event.target as HTMLSelectElement))"
         >
           <option value="" disabled>请选择</option>
-          <option v-for="opt in field.options || []" :key="opt" :value="opt" :selected="fieldValue(field) === opt">
+          <option v-for="opt in field.options || []" :key="opt" :value="opt" :selected="isOptionSelected(field, opt)">
             {{ opt }}
           </option>
         </select>
