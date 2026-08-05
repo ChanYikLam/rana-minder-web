@@ -46,16 +46,28 @@ const APPLICATION_STATUS_LABELS: Record<string, string> = {
   archived: '已归档',
 }
 
+/** 联合报名通道状态 → 文案与色调（ChannelStatus: not_open/open/paused/closed） */
+const CHANNEL_STATUS_META: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+  open: { label: '报名通道开放中', tone: 'success' },
+  paused: { label: '报名通道已暂停', tone: 'warning' },
+  not_open: { label: '报名通道未开放', tone: 'neutral' },
+  closed: { label: '报名通道已关闭', tone: 'danger' },
+}
+
+const CHANNEL_STATUS_TONE_CLASS: Record<string, string> = {
+  success: 'bg-success-subtle text-success',
+  warning: 'bg-warning-subtle text-warning',
+  danger: 'bg-danger-subtle text-danger',
+  neutral: 'bg-subtle text-text-secondary',
+}
+
 function statusLabel(status: string): string {
   return APPLICATION_STATUS_LABELS[status] || status
 }
 
-/** 报名通道四态（not_open/open/paused/closed）文案与配色 */
-function channelStatusInfo(status?: string): { text: string; cls: string } {
-  if (status === 'open') return { text: '报名通道开放中', cls: 'bg-success-subtle text-success' }
-  if (status === 'paused') return { text: '报名通道已暂停', cls: 'bg-warning-subtle text-warning' }
-  if (status === 'closed') return { text: '报名通道已关闭', cls: 'bg-danger-subtle text-danger' }
-  return { text: '报名通道未开放', cls: 'bg-subtle text-text-secondary' }
+function channelStatusMeta(status?: string) {
+  const meta = status ? CHANNEL_STATUS_META[status] : undefined
+  return meta || { label: '报名通道状态未知', tone: 'neutral' as const }
 }
 
 const route = useRoute()
@@ -75,8 +87,10 @@ const volunteerClubIds = ref<string[]>([])
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
 
-/** 已提交/已归档为终态；草稿视为可继续编辑 */
-const isSubmitted = computed(() => !!myApplication.value && myApplication.value.status !== 'draft')
+/** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交 */
+const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
+const hasArchived = computed(() => myApplication.value?.status === 'archived')
+const showApplyForm = computed(() => !hasSubmitted.value && !hasArchived.value)
 
 /** 部门意向仅对已选意向社团开放 */
 const volunteerClubs = computed(() => (detail.value?.clubs || []).filter((c) => volunteerClubIds.value.includes(c.id)))
@@ -143,29 +157,35 @@ async function loadData() {
     detail.value = detailRes.data
     formFields.value = (formRes as { kind: 'completed'; data: { versions: { fields: FormField[] }[] } }).data.versions[0]?.fields || []
     volunteerClubIds.value = (detailRes.data.participants || []).map((p) => p.id)
-    await loadMyApplication()
-    state.value = 'normal'
+    const appLoaded = await loadMyApplication()
+    // 只有申请状态解析成功（含未提交）才进入 normal，避免覆盖 loadMyApplication 设置的 error/forbidden
+    if (appLoaded) state.value = 'normal'
   } else {
     const failed = detailRes.kind === 'completed' ? formRes : detailRes
     state.value = errorToPageState(errorCodeOf(failed))
   }
 }
 
-async function loadMyApplication() {
+/** 返回 true 表示已正常解析申请状态（含未提交），false 表示已进入错误/无权限等终态 */
+async function loadMyApplication(): Promise<boolean> {
   const jointId = route.params.jointId
-  if (typeof jointId !== 'string') return
+  if (typeof jointId !== 'string') return true
   try {
     const result = await get<MyApplication>(`/activity/joint/${jointId}/apply`)
     if (result.kind === 'completed') {
       myApplication.value = result.data
       restoreDraft(result.data)
-    } else if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
-      myApplication.value = null
-    } else {
-      state.value = errorToPageState(errorCodeOf(result))
+      return true
     }
+    if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
+      myApplication.value = null
+      return true
+    }
+    state.value = errorToPageState(errorCodeOf(result))
+    return false
   } catch {
     state.value = 'error'
+    return false
   }
 }
 
@@ -240,6 +260,16 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
+    // mock 契约要求先存在申请草稿才能提交；无记录（含新用户）时先创建草稿
+    if (!myApplication.value) {
+      const draftRes = await post(`/activity/joint/${route.params.jointId}/draft`, {})
+      if (draftRes.kind !== 'completed') {
+        toast.error(draftRes.kind === 'rejected' && draftRes.error
+          ? (draftRes.error as { message?: string }).message || '草稿创建失败，请稍后重试'
+          : '草稿创建失败，请稍后重试')
+        return
+      }
+    }
     const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
       consented: consented.value,
       allowJointAdjustment: allowJointAdjustment.value,
@@ -288,7 +318,8 @@ async function handleSaveDraft() {
 
 onMounted(loadData)
 
-function formatDeadline(iso: string): string {
+function formatDeadline(iso?: string): string {
+  if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -309,9 +340,9 @@ function formatDeadline(iso: string): string {
         <div class="flex flex-wrap gap-2 mb-4">
           <span
             class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium"
-            :class="channelStatusInfo(detail.channelStatus).cls"
+            :class="CHANNEL_STATUS_TONE_CLASS[channelStatusMeta(detail.channelStatus).tone]"
           >
-            {{ channelStatusInfo(detail.channelStatus).text }}
+            {{ channelStatusMeta(detail.channelStatus).label }}
           </span>
           <span v-if="detail.deadline" class="inline-flex items-center px-2.5 py-1 rounded-md bg-subtle text-xs text-text-secondary">
             报名截止：{{ formatDeadline(detail.deadline) }}
@@ -331,10 +362,18 @@ function formatDeadline(iso: string): string {
         </div>
       </Card>
 
-      <Card v-if="isSubmitted" class="mb-4">
+      <Card v-if="hasSubmitted" class="mb-4">
         <div class="flex items-center gap-2 text-success">
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+      </Card>
+
+      <Card v-else-if="hasArchived" class="mb-4">
+        <div class="flex items-center gap-2 text-text-secondary">
+          <CheckCircle2 :size="18" />
+          <p class="text-sm font-medium text-text-primary">您的联合报名已归档</p>
         </div>
         <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
       </Card>
@@ -344,8 +383,8 @@ function formatDeadline(iso: string): string {
         <p class="text-xs text-text-secondary mt-1">暂存草稿会覆盖此前保存的内容</p>
       </div>
 
-      <!-- 共享报名表 -->
-      <Card v-if="!isSubmitted" class="mb-4">
+      <!-- 共享报名表（未提交且未归档时展示，草稿用户仍可编辑） -->
+      <Card v-if="showApplyForm" class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-3">共享报名表</p>
         <div class="space-y-4">
           <div v-for="field in formFields" :key="field.id">
@@ -435,8 +474,8 @@ function formatDeadline(iso: string): string {
         </div>
       </Card>
 
-      <!-- 意向社团 -->
-      <Card v-if="!isSubmitted" class="mb-4">
+      <!-- 意向社团（未提交且未归档时展示；草稿用户仍可编辑） -->
+      <Card v-if="showApplyForm" class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-1 flex items-center gap-1.5"><Users :size="16" /> 意向社团</p>
         <p class="text-xs text-text-secondary mb-3">选择您希望加入的参与社团，未选择的社团只有在您服从联合调剂时才可能向您发出加入邀请。</p>
         <div class="flex flex-wrap gap-2">
@@ -451,8 +490,8 @@ function formatDeadline(iso: string): string {
         </div>
       </Card>
 
-      <!-- 部门意向 -->
-      <Card v-if="!isSubmitted" class="mb-4">
+      <!-- 部门意向（未提交且未归档时展示；草稿用户仍可编辑） -->
+      <Card v-if="showApplyForm" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-2">部门意向</h2>
         <p class="text-xs text-text-secondary mb-3">仅可为已选的意向社团添加部门，点击添加意向部门，可调整优先级顺序（1 为最优先）</p>
 
@@ -494,8 +533,8 @@ function formatDeadline(iso: string): string {
         </div>
       </Card>
 
-      <!-- 共享同意 -->
-      <Card v-if="!isSubmitted" class="mb-4">
+      <!-- 共享同意（未提交且未归档时展示） -->
+      <Card v-if="showApplyForm" class="mb-4">
         <label class="flex items-start gap-3 cursor-pointer">
           <input v-model="consented" type="checkbox" class="mt-0.5 rounded border-border" />
           <div>
@@ -513,7 +552,7 @@ function formatDeadline(iso: string): string {
       </Card>
 
       <button
-        v-if="!isSubmitted"
+        v-if="showApplyForm"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
         :disabled="!consented || volunteerClubIds.length === 0 || submitting"
         @click="handleSubmit"
@@ -522,7 +561,7 @@ function formatDeadline(iso: string): string {
       </button>
 
       <button
-        v-if="!isSubmitted"
+        v-if="showApplyForm"
         class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2"
         :disabled="submitting"
         @click="handleSaveDraft"
