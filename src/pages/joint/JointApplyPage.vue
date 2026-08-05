@@ -13,8 +13,25 @@ interface JointDetail {
   clubName: string
   participants: { id: string; name: string }[]
   description: string
-  channelStatus: string
-  deadline: string
+  channelStatus?: string
+  deadline?: string
+}
+
+/** 联合申请状态 → 用户可读文案（未知状态回退原始值） */
+const APPLICATION_STATUS_LABELS: Record<string, string> = {
+  draft: '草稿',
+  submitted: '等待审核',
+  adjustment_overdue: '调整逾期',
+  identity_anomaly: '身份异常',
+  approved: '已录取',
+  rejected: '未录取',
+  accepted: '已接受邀请',
+  withdrawn: '已撤回',
+  exited: '已退出',
+}
+
+function statusLabel(status: string): string {
+  return APPLICATION_STATUS_LABELS[status] || status
 }
 
 const route = useRoute()
@@ -46,6 +63,10 @@ async function loadMyApplication() {
   const result = await get<{ status: string }>(`/activity/joint/${jointId}/apply`)
   if (result.kind === 'completed') {
     myApplication.value = result.data
+  } else if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
+    myApplication.value = null
+  } else {
+    state.value = 'error'
   }
 }
 
@@ -56,19 +77,22 @@ function toggleVolunteer(clubId: string) {
 
 async function handleSubmit() {
   submitting.value = true
-  const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
-    consented: consented.value,
-    allowJointAdjustment: allowJointAdjustment.value,
-    volunteerClubIds: volunteerClubIds.value,
-  })
-  submitting.value = false
-  if (result.kind === 'completed') {
-    toast.success('联合报名已提交')
-    router.push('/me/ongoing')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error(result.error.message || '提交失败，请稍后重试')
-  } else {
-    toast.error('提交失败，请稍后重试')
+  try {
+    const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
+      consented: consented.value,
+      allowJointAdjustment: allowJointAdjustment.value,
+      volunteerClubIds: volunteerClubIds.value,
+    })
+    if (result.kind === 'completed') {
+      toast.success('联合报名已提交')
+      router.push('/me/ongoing')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error(result.error.message || '提交失败，请稍后重试')
+    } else {
+      toast.error('提交失败，请稍后重试')
+    }
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -88,6 +112,7 @@ onMounted(loadData)
 
 function formatDeadline(iso: string): string {
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 </script>
@@ -133,7 +158,7 @@ function formatDeadline(iso: string): string {
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
         </div>
-        <p class="text-xs text-text-secondary mt-1">当前状态：{{ myApplication.status === 'submitted' ? '等待审核' : myApplication.status }}</p>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication.status) }}</p>
       </Card>
 
       <!-- 意向社团 -->
@@ -153,7 +178,7 @@ function formatDeadline(iso: string): string {
       </Card>
 
       <!-- 共享同意 -->
-      <Card class="mb-4">
+      <Card v-if="!myApplication" class="mb-4">
         <label class="flex items-start gap-3 cursor-pointer">
           <input v-model="consented" type="checkbox" class="mt-0.5 rounded border-border" />
           <div>
