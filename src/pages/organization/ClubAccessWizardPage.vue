@@ -104,8 +104,8 @@ function toSearchResult(g: CasdoorGroupRow): SearchResult {
   }
 }
 
-const { searching, schedule } = useDebouncedSearch({
-  onSearch: async (kw, isStale) => {
+const { searching, seq, schedule } = useDebouncedSearch({
+  onSearch: async (kw) => {
     if (!kw) {
       // 空关键字：立即重置为候选列表，不发请求
       searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
@@ -113,8 +113,9 @@ const { searching, schedule } = useDebouncedSearch({
       return
     }
     searchFailed.value = false
+    const mySeq = seq.value
     const result = await get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw })
-    if (isStale()) return
+    if (mySeq !== seq.value) return
     if (result.kind === 'completed') {
       const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
       searchResults.value = data.items.map(toSearchResult)

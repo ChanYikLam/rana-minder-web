@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Search, Users, Calendar, ChevronRight, Building2, Sparkles, Tag, History } from '@lucide/vue'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 
 interface Club { id: string; name: string; description: string; memberCount: number; logo: string | null; layer: SearchLayer }
 interface Activity {
@@ -31,9 +32,6 @@ const deadlineRange = ref<'all' | 'today' | '3d' | '7d' | 'custom'>('all')
 const customFrom = ref('')
 const customTo = ref('')
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-let requestSeq = 0
-
 const activeTab = computed<'activities' | 'clubs'>(() => (route.meta.tab as 'activities' | 'clubs') || 'activities')
 
 const directMatches = computed(() => activities.value.filter((a) => a.layer === 'exact' || a.layer === 'substring'))
@@ -43,13 +41,13 @@ const directClubs = computed(() => clubs.value.filter((c) => c.layer === 'exact'
 const fuzzyClubs = computed(() => clubs.value.filter((c) => c.layer === 'fuzzy'))
 
 async function loadData() {
-  const seq = ++requestSeq
+  const mySeq = ++seq.value
   state.value = 'loading'
   const [clubsRes, actRes] = await Promise.all([
     get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true)}`),
     get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false)}`),
   ])
-  if (seq !== requestSeq) return
+  if (mySeq !== seq.value) return
   if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
     clubs.value = (clubsRes as { kind: 'completed'; data: { items: Club[] } }).data.items
     activities.value = (actRes as { kind: 'completed'; data: { items: Activity[] } }).data.items
@@ -75,10 +73,12 @@ function buildActivityParams(withClubs: boolean): string {
   return params.toString()
 }
 
-function scheduleSearch() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => { void loadData() }, 300)
-}
+// 搜索输入——300ms 防抖 + 竞态防护
+const { seq, schedule, cancel } = useDebouncedSearch({
+  onSearch: async () => {
+    await loadData()
+  },
+})
 
 function switchTab(tab: 'activities' | 'clubs') {
   // REC-047：切换模式清空全部筛选与搜索条件
@@ -93,6 +93,7 @@ function switchTab(tab: 'activities' | 'clubs') {
 }
 
 function onFilterChange() {
+  cancel()  // 取消待触发的防抖搜索，避免与即时筛选冲突
   void loadData()
 }
 
@@ -123,15 +124,11 @@ watch([typeFilter, statusFilter, deadlineRange, customFrom, customTo], () => {
 // 切换找社团/找活动模式后重新查询（同组件复用不重新挂载，需显式监听）
 watch(activeTab, () => void loadData())
 
-onMounted(loadData)
-onUnmounted(() => {
-  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
-  requestSeq++
-})
+onMounted(() => void loadData())
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="招新公开目录" @retry="loadData">
+  <PageStateBoundary :state="state" title="招新公开目录" @retry="loadData()">
     <div>
       <h1 class="text-2xl font-bold text-primary mb-6">发现社团与活动</h1>
 
@@ -145,7 +142,7 @@ onUnmounted(() => {
             :placeholder="activeTab === 'clubs' ? '按社团展示名称搜索...' : '按活动名称搜索...'"
             class="w-full h-11 pl-10 pr-4 rounded-lg border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             aria-label="搜索"
-            @input="scheduleSearch"
+            @input="schedule(($event.target as HTMLInputElement).value)"
           />
         </div>
         <p class="text-xs text-text-secondary mt-1.5">

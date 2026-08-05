@@ -3,7 +3,7 @@ import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useDebouncedSearch } from './useDebouncedSearch'
 
-type SearchHandler = (kw: string, isStale: () => boolean) => Promise<void> | void
+type SearchHandler = (kw: string) => Promise<void> | void
 
 const Harness = defineComponent({
   props: {
@@ -11,7 +11,7 @@ const Harness = defineComponent({
   },
   setup(props) {
     const { searching, schedule } = useDebouncedSearch({
-      onSearch: (kw, isStale) => (props.onSearch as SearchHandler)(kw, isStale),
+      onSearch: (kw) => (props.onSearch as SearchHandler)(kw),
     })
     return { searching, schedule }
   },
@@ -47,7 +47,7 @@ describe('useDebouncedSearch', () => {
     expect(onSearch).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(onSearch).toHaveBeenCalledTimes(1)
-    expect(onSearch).toHaveBeenCalledWith('ab', expect.any(Function))
+    expect(onSearch).toHaveBeenCalledWith('ab')
   })
 
   it('空关键字与纯空格：立即触发重置且不再发请求', () => {
@@ -55,13 +55,13 @@ describe('useDebouncedSearch', () => {
     const { vm } = mountHarness(onSearch)
     vm.schedule('')
     expect(onSearch).toHaveBeenCalledTimes(1)
-    expect(onSearch).toHaveBeenLastCalledWith('', expect.any(Function))
+    expect(onSearch).toHaveBeenLastCalledWith('')
     vi.advanceTimersByTime(500)
     expect(onSearch).toHaveBeenCalledTimes(1)
 
     vm.schedule('   ')
     expect(onSearch).toHaveBeenCalledTimes(2)
-    expect(onSearch).toHaveBeenLastCalledWith('', expect.any(Function))
+    expect(onSearch).toHaveBeenLastCalledWith('')
   })
 
   it('关键字 trim 后传入搜索回调', () => {
@@ -69,7 +69,7 @@ describe('useDebouncedSearch', () => {
     const { vm } = mountHarness(onSearch)
     vm.schedule('  张三  ')
     vi.advanceTimersByTime(300)
-    expect(onSearch).toHaveBeenCalledWith('张三', expect.any(Function))
+    expect(onSearch).toHaveBeenCalledWith('张三')
   })
 
   it('searching 覆盖防抖窗口并在请求完成后复位', async () => {
@@ -86,11 +86,9 @@ describe('useDebouncedSearch', () => {
     expect(vm.searching).toBe(false)
   })
 
-  it('在途请求被新输入作废：isStale 生效，loading 由最新请求复位', async () => {
+  it('在途请求被新输入作废：seq 机制生效，loading 由最新请求复位', async () => {
     const resolvers: Array<() => void> = []
-    const staleFlags: Array<() => boolean> = []
-    const onSearch = vi.fn((_kw: string, isStale: () => boolean) => {
-      staleFlags.push(isStale)
+    const onSearch = vi.fn(() => {
       return new Promise<void>((resolve) => { resolvers.push(resolve) })
     })
     const { vm } = mountHarness(onSearch)
@@ -102,22 +100,20 @@ describe('useDebouncedSearch', () => {
     vi.advanceTimersByTime(300)
     expect(onSearch).toHaveBeenCalledTimes(2)
 
+    // 旧请求完成：loading 保持 true（最新请求未完成）
     resolvers[0]()
     await Promise.resolve()
-    expect(staleFlags[0]()).toBe(true)
     expect(vm.searching).toBe(true)
 
+    // 新请求完成：loading 复位
     resolvers[1]()
     await Promise.resolve()
-    expect(staleFlags[1]()).toBe(false)
     expect(vm.searching).toBe(false)
   })
 
   it('清空关键字立即作废在途请求并复位 loading', async () => {
     const resolvers: Array<() => void> = []
-    const staleFlags: Array<() => boolean> = []
-    const { vm } = mountHarness((_kw, isStale) => {
-      staleFlags.push(isStale)
+    const { vm } = mountHarness(() => {
       return new Promise<void>((resolve) => { resolvers.push(resolve) })
     })
 
@@ -126,9 +122,10 @@ describe('useDebouncedSearch', () => {
     vm.schedule('')
     expect(vm.searching).toBe(false)
 
+    // 旧请求完成：不影响（seq 已递增）
     resolvers[0]()
     await Promise.resolve()
-    expect(staleFlags[0]()).toBe(true)
+    expect(vm.searching).toBe(false)
   })
 
   it('卸载时清理待触发定时器，不再发请求', () => {

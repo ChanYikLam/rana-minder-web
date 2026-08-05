@@ -5,16 +5,20 @@ export interface UseDebouncedSearchOptions {
   delay?: number
   /**
    * 搜索回调：keyword 为 trim 后的关键字（空字符串表示清空关键字，应立即重置结果）。
-   * isStale() 返回当前请求是否已被作废（期间有更新的输入），作废后不应写回任何状态。
+   * 调用方应在异步操作前捕获 mySeq = seq.value，操作后比较 mySeq !== seq.value 判断是否作废。
    */
-  onSearch: (keyword: string, isStale: () => boolean) => Promise<void> | void
+  onSearch: (keyword: string) => Promise<void> | void
 }
 
 export interface UseDebouncedSearchReturn {
   /** 搜索中（覆盖防抖窗口 + 请求在途），用于 loading 展示与空态文案抑制 */
   searching: Ref<boolean>
+  /** 请求序号：调用方在异步操作前捕获，操作后比较以判断是否作废 */
+  seq: Ref<number>
   /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('') */
   schedule: (keyword: string) => void
+  /** 取消待触发的防抖定时器（不清空 searching，不触发 onSearch） */
+  cancel: () => void
 }
 
 /**
@@ -24,8 +28,8 @@ export interface UseDebouncedSearchReturn {
 export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebouncedSearchReturn {
   const delay = options.delay ?? 300
   const searching = ref(false)
+  const seq = ref(0)
   let timer: ReturnType<typeof setTimeout> | null = null
-  let seq = 0
 
   function schedule(keyword: string) {
     if (timer) {
@@ -34,45 +38,50 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
     }
     const kw = keyword.trim()
     if (!kw) {
-      // 空关键字：立即作废在途请求（旧响应不再生效），不发请求
-      seq++
+      // 空关键字：立即作废在途请求（旧响应不再生效），同步清空
+      seq.value++
       searching.value = false
-      void (async () => {
-        try {
-          await options.onSearch('', () => true)
-        } catch (e) {
-          // 与防抖分支一致：兜底避免浮空 Promise 的未处理拒绝
-          console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+      try {
+        const result = options.onSearch('')
+        if (result instanceof Promise) {
+          result.catch((e) => {
+            console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+          })
         }
-      })()
+      } catch (e) {
+        console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+      }
       return
     }
-    // 输入变化立即递增序号：防抖窗口内到达的旧响应将被 isStale() 识别为作废
-    seq++
+    // 输入变化立即递增序号：防抖窗口内到达的旧响应将被 seq 比较识别为作废
+    seq.value++
     searching.value = true
     timer = setTimeout(() => {
       timer = null
-      const mySeq = ++seq
+      const mySeq = ++seq.value
       void (async () => {
         try {
-          await options.onSearch(kw, () => mySeq !== seq)
+          await options.onSearch(kw)
         } catch (e) {
-          // onSearch 契约要求自行处理业务错误；此处兜底避免浮空 Promise 的未处理拒绝
           console.error('[useDebouncedSearch] onSearch 执行失败:', e)
         } finally {
           // 仅当无更新的输入（未被作废）时复位 loading，避免误清新请求的 loading 状态
-          if (mySeq === seq) searching.value = false
+          if (mySeq === seq.value) searching.value = false
         }
       })()
     }, delay)
   }
 
-  function cleanup() {
+  function cancel() {
     if (timer) {
       clearTimeout(timer)
       timer = null
     }
-    seq++
+  }
+
+  function cleanup() {
+    cancel()
+    seq.value++
     searching.value = false
   }
 
@@ -80,5 +89,5 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
   const instance = getCurrentInstance()
   if (instance) onUnmounted(cleanup)
 
-  return { searching, schedule }
+  return { searching, seq, schedule, cancel }
 }
