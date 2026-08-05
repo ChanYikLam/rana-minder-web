@@ -6,12 +6,22 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Users, Send, Save } from '@lucide/vue'
+import { ArrowLeft, Users, Send, Save, CheckCircle2 } from '@lucide/vue'
+
+interface JointDetail {
+  title: string
+  clubName: string
+  participants: { id: string; name: string }[]
+  description: string
+  channelStatus: string
+  deadline: string
+}
 
 const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
-const detail = ref<{ title: string; clubName: string; participants: { id: string; name: string }[]; description: string } | null>(null)
+const detail = ref<JointDetail | null>(null)
+const myApplication = ref<{ status: string } | null>(null)
 const consented = ref(false)
 const allowJointAdjustment = ref(false)
 const volunteerClubIds = ref<string[]>([])
@@ -21,12 +31,22 @@ async function loadData() {
   state.value = 'loading'
   const jointId = typeof route.params.jointId === 'string' ? route.params.jointId : null
   if (!jointId) { state.value = 'error'; return }
-  const result = await get<{ title: string; description: string; participants: { id: string; name: string }[]; clubName: string }>(`/explore/joint/${jointId}`)
+  const result = await get<JointDetail>(`/explore/joint/${jointId}`)
   if (result.kind === 'completed') {
     detail.value = result.data
     volunteerClubIds.value = (result.data.participants || []).map((p) => p.id)
+    await loadMyApplication()
     state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
+}
+
+async function loadMyApplication() {
+  const jointId = route.params.jointId
+  if (typeof jointId !== 'string') return
+  const result = await get<{ status: string }>(`/activity/joint/${jointId}/apply`)
+  if (result.kind === 'completed') {
+    myApplication.value = result.data
+  }
 }
 
 function toggleVolunteer(clubId: string) {
@@ -45,6 +65,8 @@ async function handleSubmit() {
   if (result.kind === 'completed') {
     toast.success('联合报名已提交')
     router.push('/me/ongoing')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error(result.error.message || '提交失败，请稍后重试')
   } else {
     toast.error('提交失败，请稍后重试')
   }
@@ -63,6 +85,11 @@ async function handleSaveDraft() {
 }
 
 onMounted(loadData)
+
+function formatDeadline(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 </script>
 
 <template>
@@ -75,6 +102,18 @@ onMounted(loadData)
       <Card class="mb-4">
         <h1 class="text-xl font-bold text-text-primary mb-2">{{ detail.title }}</h1>
         <p class="text-sm text-text-secondary mb-4">{{ detail.description }}</p>
+
+        <div class="flex flex-wrap gap-2 mb-4">
+          <span
+            class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium"
+            :class="detail.channelStatus === 'open' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'"
+          >
+            {{ detail.channelStatus === 'open' ? '报名通道开放中' : '报名通道已关闭' }}
+          </span>
+          <span v-if="detail.deadline" class="inline-flex items-center px-2.5 py-1 rounded-md bg-subtle text-xs text-text-secondary">
+            报名截止：{{ formatDeadline(detail.deadline) }}
+          </span>
+        </div>
 
         <div class="rounded-lg bg-warning-subtle p-3 mb-4">
           <p class="text-sm text-warning font-medium mb-1">联合活动说明</p>
@@ -89,8 +128,16 @@ onMounted(loadData)
         </div>
       </Card>
 
+      <Card v-if="myApplication" class="mb-4">
+        <div class="flex items-center gap-2 text-success">
+          <CheckCircle2 :size="18" />
+          <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ myApplication.status === 'submitted' ? '等待审核' : myApplication.status }}</p>
+      </Card>
+
       <!-- 意向社团 -->
-      <Card class="mb-4">
+      <Card v-else class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-1 flex items-center gap-1.5"><Users :size="16" /> 意向社团</p>
         <p class="text-xs text-text-secondary mb-3">选择您希望加入的参与社团，未选择的社团只有在您服从联合调剂时才可能向您发出加入邀请。</p>
         <div class="flex flex-wrap gap-2">
@@ -124,6 +171,7 @@ onMounted(loadData)
       </Card>
 
       <button
+        v-if="!myApplication"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
         :disabled="!consented || volunteerClubIds.length === 0 || submitting"
         @click="handleSubmit"
@@ -132,6 +180,7 @@ onMounted(loadData)
       </button>
 
       <button
+        v-if="!myApplication"
         class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2"
         :disabled="submitting"
         @click="handleSaveDraft"
