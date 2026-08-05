@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { HighRiskConfirm } from '@/components/common'
@@ -47,6 +47,7 @@ const actingId = ref<string | null>(null)
 const showSend = ref(false)
 const candidateKeyword = ref('')
 const candidates = ref<Candidate[]>([])
+const searchFailed = ref(false)
 const selectedCandidate = ref<Candidate | null>(null)
 const targetDept = ref('')
 const sendError = ref('')
@@ -127,14 +128,42 @@ function isExpired(inv: Invite): boolean {
   return inv.status === 'expired' || (isActionable(inv) && new Date(inv.expiredAt).getTime() < Date.now())
 }
 
-// 候选搜索（姓名连续子串/学号精确）
+// 候选搜索（姓名连续子串/学号精确）——300ms 防抖
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let requestSeq = 0
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (!candidateKeyword.value) {
+    // 空关键字：立即重置候选并取消在途请求，不发请求（与 ClubAccessWizard 保持一致）
+    requestSeq++
+    candidates.value = []
+    searchFailed.value = false
+    return
+  }
+  searchFailed.value = false
+  searchTimer = setTimeout(() => { void searchCandidates() }, 300)
+}
+
 async function searchCandidates() {
+  const seq = ++requestSeq
   const clubId = route.params.clubId as string
   const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: candidateKeyword.value })
+  if (seq !== requestSeq) return
   if (r.kind === 'completed') {
     candidates.value = r.data.items
+    searchFailed.value = false
+  } else {
+    // 搜索失败（非 completed）：清空旧候选结果，避免残留误导
+    candidates.value = []
+    searchFailed.value = true
   }
 }
+
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  requestSeq++
+})
 
 const searchResults = computed<SearchResult[]>(() =>
   candidates.value.map((c) => ({
@@ -155,6 +184,7 @@ function onSelectCandidate(r: SearchResult) {
 function openSend() {
   candidateKeyword.value = ''
   candidates.value = []
+  searchFailed.value = false
   selectedCandidate.value = null
   targetDept.value = departments.value[0]?.id ?? ''
   sendError.value = ''
@@ -336,10 +366,11 @@ onMounted(loadData)
                 :results="searchResults"
                 :loading="false"
                 placeholder="姓名或学号..."
-                @update:model-value="searchCandidates"
+                @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
+              <p v-else-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>

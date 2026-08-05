@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
@@ -43,6 +43,7 @@ const selectedLeaderId = ref<string | null>(null)
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
 const wizardError = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchSeq = 0
 
 function toSearchResult(g: GroupSearchResult): SearchResult {
   return { id: g.id, name: g.name, subtitle: `${g.stableId} · ${g.memberCount} 名成员`, group: g.path || g.purpose, match: g.match, score: g.score }
@@ -51,12 +52,17 @@ function toSearchResult(g: GroupSearchResult): SearchResult {
 async function searchGroup() {
   const keyword = groupKeyword.value.trim()
   if (!keyword) {
+    // 空关键字：立即作废在途请求并复位 loading，避免旧响应写回结果
+    searchSeq++
+    groupSearching.value = false
     groupResults.value = []
     rawResults.value = []
     return
   }
+  const seq = ++searchSeq
   groupSearching.value = true
   const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: keyword })
+  if (seq !== searchSeq) return
   groupSearching.value = false
   if (res.kind === 'completed') {
     rawResults.value = res.data.items
@@ -70,6 +76,13 @@ async function searchGroup() {
 function onGroupInput(value: string) {
   groupKeyword.value = value
   if (searchTimer) clearTimeout(searchTimer)
+  if (!value.trim()) {
+    searchSeq++
+    groupSearching.value = false
+    groupResults.value = []
+    rawResults.value = []
+    return
+  }
   searchTimer = setTimeout(searchGroup, 350)
 }
 
@@ -251,6 +264,11 @@ async function handleRebind(club: ClubItem) {
 }
 
 onMounted(loadData)
+
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  searchSeq++
+})
 </script>
 
 <template>
