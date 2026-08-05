@@ -58,7 +58,7 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
     searching.value = true
     timer = setTimeout(() => {
       timer = null
-      const mySeq = ++seq.value
+      const mySeq = seq.value
       void (async () => {
         try {
           await options.onSearch(kw)

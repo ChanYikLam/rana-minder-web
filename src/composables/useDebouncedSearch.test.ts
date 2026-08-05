@@ -10,17 +10,19 @@ const Harness = defineComponent({
     onSearch: { type: Function, required: true },
   },
   setup(props) {
-    const { searching, schedule } = useDebouncedSearch({
+    const { searching, seq, schedule, cancel } = useDebouncedSearch({
       onSearch: (kw) => (props.onSearch as SearchHandler)(kw),
     })
-    return { searching, schedule }
+    return { searching, seq, schedule, cancel }
   },
   render() { return null },
 })
 
 interface HarnessVm {
   schedule: (kw: string) => void
+  cancel: () => void
   searching: boolean
+  seq: number
 }
 
 function mountHarness(onSearch: SearchHandler) {
@@ -160,5 +162,78 @@ describe('useDebouncedSearch', () => {
     vm.schedule('')
     await Promise.resolve()
     expect(vm.searching).toBe(false)
+  })
+
+  it('旧响应被丢弃不写回：页面级 seq 守卫', async () => {
+    const resolvers: Array<() => void> = []
+    const results: string[] = []
+    const capturedSeqs: number[] = []
+
+    const { vm } = mountHarness((kw) => {
+      capturedSeqs.push(vm.seq)
+      const idx = capturedSeqs.length - 1
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          if (capturedSeqs[idx] === vm.seq) {
+            results.push(kw)
+          }
+          resolve()
+        })
+      })
+    })
+
+    vm.schedule('first')
+    vi.advanceTimersByTime(300)
+    vm.schedule('second')
+    vi.advanceTimersByTime(300)
+
+    // 第一个请求完成：应被丢弃
+    resolvers[0]()
+    await Promise.resolve()
+    expect(results).toEqual([])
+
+    // 第二个请求完成：应写回
+    resolvers[1]()
+    await Promise.resolve()
+    expect(results).toEqual(['second'])
+  })
+
+  it('cancel 后新请求覆写：筛选变化场景（PublicCatalogPage 模式）', async () => {
+    const resolvers: Array<() => void> = []
+    const results: string[] = []
+    const capturedSeqs: number[] = []
+
+    const { vm } = mountHarness((kw) => {
+      capturedSeqs.push(vm.seq)
+      const idx = capturedSeqs.length - 1
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          if (capturedSeqs[idx] === vm.seq) {
+            results.push(kw)
+          }
+          resolve()
+        })
+      })
+    })
+
+    // 模拟：搜索在途 → 筛选变化（cancel + schedule）→ 旧响应丢弃 → 新响应写回
+    vm.schedule('keyword-a')
+    vi.advanceTimersByTime(300)
+    expect(vm.searching).toBe(true)
+
+    // 筛选变化：取消待触发定时器，立即发起新请求
+    vm.cancel()
+    vm.schedule('keyword-b')
+    vi.advanceTimersByTime(300)
+
+    // 旧请求完成：应被丢弃
+    resolvers[0]()
+    await Promise.resolve()
+    expect(results).toEqual([])
+
+    // 新请求完成：应写回
+    resolvers[1]()
+    await Promise.resolve()
+    expect(results).toEqual(['keyword-b'])
   })
 })

@@ -40,24 +40,6 @@ const fuzzyMatches = computed(() => activities.value.filter((a) => a.layer === '
 const directClubs = computed(() => clubs.value.filter((c) => c.layer === 'exact' || c.layer === 'substring'))
 const fuzzyClubs = computed(() => clubs.value.filter((c) => c.layer === 'fuzzy'))
 
-async function loadData() {
-  const mySeq = ++seq.value
-  state.value = 'loading'
-  const [clubsRes, actRes] = await Promise.all([
-    get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true)}`),
-    get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false)}`),
-  ])
-  if (mySeq !== seq.value) return
-  if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
-    clubs.value = (clubsRes as { kind: 'completed'; data: { items: Club[] } }).data.items
-    activities.value = (actRes as { kind: 'completed'; data: { items: Activity[] } }).data.items
-    historyActivities.value = (actRes as { kind: 'completed'; data: { history: Activity[] } }).data.history
-    state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
-}
-
 function buildActivityParams(withClubs: boolean): string {
   const params = new URLSearchParams()
   if (searchKeyword.value.trim()) params.set('q', searchKeyword.value.trim())
@@ -73,10 +55,24 @@ function buildActivityParams(withClubs: boolean): string {
   return params.toString()
 }
 
-// 搜索输入——300ms 防抖 + 竞态防护
+// 搜索/筛选/切换模式——统一通过 useDebouncedSearch 管理竞态防护
 const { seq, schedule, cancel } = useDebouncedSearch({
   onSearch: async () => {
-    await loadData()
+    state.value = 'loading'
+    const mySeq = seq.value
+    const [clubsRes, actRes] = await Promise.all([
+      get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true)}`),
+      get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false)}`),
+    ])
+    if (mySeq !== seq.value) return
+    if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
+      clubs.value = (clubsRes as { kind: 'completed'; data: { items: Club[] } }).data.items
+      activities.value = (actRes as { kind: 'completed'; data: { items: Activity[] } }).data.items
+      historyActivities.value = (actRes as { kind: 'completed'; data: { history: Activity[] } }).data.history
+      state.value = 'normal'
+    } else {
+      state.value = 'error'
+    }
   },
 })
 
@@ -94,7 +90,7 @@ function switchTab(tab: 'activities' | 'clubs') {
 
 function onFilterChange() {
   cancel()  // 取消待触发的防抖搜索，避免与即时筛选冲突
-  void loadData()
+  schedule(searchKeyword.value)
 }
 
 let suppressFilterWatch = false
@@ -122,13 +118,13 @@ watch([typeFilter, statusFilter, deadlineRange, customFrom, customTo], () => {
 })
 
 // 切换找社团/找活动模式后重新查询（同组件复用不重新挂载，需显式监听）
-watch(activeTab, () => void loadData())
+watch(activeTab, () => schedule(searchKeyword.value))
 
-onMounted(() => void loadData())
+onMounted(() => schedule(searchKeyword.value))
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="招新公开目录" @retry="loadData()">
+  <PageStateBoundary :state="state" title="招新公开目录" @retry="schedule(searchKeyword)">
     <div>
       <h1 class="text-2xl font-bold text-primary mb-6">发现社团与活动</h1>
 
