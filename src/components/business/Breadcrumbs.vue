@@ -40,11 +40,14 @@ const crumbs = computed<Crumb[]>(() => {
   const result: Crumb[] = [{ label: homeLabel[prefix] || '首页', path: isKnownPath(homePath) ? homePath : null }]
   let acc = `/${prefix}`
 
-  const pathSegments = segments.slice(1).filter((_, idx) => !(prefix === 'org' && idx === 0))
-  const labels = resolveSegmentLabels(prefix, pathSegments)
+  const pathSegments = segments.slice(1)
+  const labelSegments = pathSegments.filter((_, idx) => !(prefix === 'org' && idx === 0))
+  const labels = resolveSegmentLabels(prefix, labelSegments)
   for (let i = 0; i < pathSegments.length; i++) {
     acc += `/${pathSegments[i]}`
-    result.push({ label: labels[i], path: isKnownPath(acc) ? acc : null })
+    if (prefix === 'org' && i === 0) continue
+    const labelIdx = prefix === 'org' ? i - 1 : i
+    result.push({ label: labels[labelIdx], path: isKnownPath(acc) ? acc : null })
   }
 
   return result

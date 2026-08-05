@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { createPinia } from 'pinia'
+import Breadcrumbs from '@/components/business/Breadcrumbs.vue'
 import { resolveSegmentLabels } from '@/components/business/breadcrumb-labels'
 
 /**
@@ -67,5 +71,55 @@ describe('面包屑段名解析', () => {
     expect(resolveSegmentLabels('activity', ['recruitment', 'act-001', 'apply'])).toEqual(['招新活动', '活动详情', '报名申请'])
     expect(resolveSegmentLabels('activity', ['joint', 'jnt-001'])).toEqual(['联合活动', '活动详情'])
     expect(resolveSegmentLabels('activity', ['joint', 'jnt-001', 'apply'])).toEqual(['联合活动', '活动详情', '联合报名'])
+  })
+})
+
+/** 组件级链接用例：路径累积必须保留 org 域 clubId（真实路由 /org/:clubId/...），否则链接失效渲染为纯文本 */
+describe('面包屑组件链接', () => {
+  const routes = [
+    { path: '/me', name: 'mock-me-root', component: { template: '<div />' } },
+    { path: '/me/interviews/recruitment/:rid', name: 'mock-me-interview', component: { template: '<div />' } },
+    { path: '/explore', name: 'mock-explore-root', component: { template: '<div />' } },
+    { path: '/org', name: 'mock-org-root', component: { template: '<div />' } },
+    { path: '/org/:clubId', name: 'mock-org-club', component: { template: '<div />' } },
+    { path: '/org/:clubId/recruitment', name: 'mock-org-recruitment', component: { template: '<div />' } },
+    { path: '/org/:clubId/recruitment/:activityId', name: 'mock-org-recruitment-detail', component: { template: '<div />' } },
+    { path: '/org/:clubId/recruitment/:activityId/applications', name: 'mock-org-applications', component: { template: '<div />' } },
+  ]
+
+  async function mountAt(path: string) {
+    const router = createRouter({ history: createMemoryHistory(), routes })
+    const pinia = createPinia()
+    router.push(path)
+    await router.isReady()
+    return mount(Breadcrumbs, { global: { plugins: [router, pinia] } })
+  }
+
+  it('org 域子级面包屑保留 clubId 累积为可点击链接（P1 回归）', async () => {
+    const wrapper = await mountAt('/org/club-001/recruitment')
+    const links = wrapper.findAll('a')
+    expect(links.map((a) => [a.text(), a.attributes('href')])).toContainEqual(['普通招新', '/org/club-001/recruitment'])
+  })
+
+  it('org 域多级路径逐级累积 clubId 前缀', async () => {
+    const wrapper = await mountAt('/org/club-001/recruitment/act-001/applications')
+    const links = wrapper.findAll('a')
+    expect(links.map((a) => a.attributes('href'))).toEqual([
+      '/org',
+      '/org/club-001/recruitment',
+      '/org/club-001/recruitment/act-001',
+      '/org/club-001/recruitment/act-001/applications',
+    ])
+  })
+
+  it('org 域 clubId 不渲染为面包屑节点', async () => {
+    const wrapper = await mountAt('/org/club-001/recruitment')
+    expect(wrapper.text()).not.toContain('club-001')
+  })
+
+  it('非 org 域路径不受影响（me 详情链接有效）', async () => {
+    const wrapper = await mountAt('/me/interviews/recruitment/rinv-001')
+    const links = wrapper.findAll('a')
+    expect(links.map((a) => [a.text(), a.attributes('href')])).toContainEqual(['面试详情', '/me/interviews/recruitment/rinv-001'])
   })
 })
