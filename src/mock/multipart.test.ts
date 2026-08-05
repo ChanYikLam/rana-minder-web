@@ -68,4 +68,29 @@ describe('mock-plugin multipart/form-data 解析', () => {
     const out = readMultipartBody(requestWith('multipart/form-data; boundary=b2'), raw)
     expect(out).toEqual({ input: { name: 'empty.txt', size: 0, purpose: 'application' } })
   })
+
+  it('字段名含中文时可正确解析（head 已 utf8 解码后匹配 name）', () => {
+    const raw = buildMultipart('b3', [{ name: '用途', value: '材料' }])
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary=b3'), raw)
+    expect(out).toEqual({ 用途: '材料' })
+  })
+
+  it('RFC 5987 filename* 扩展（UTF-8 百分号编码）正确解码文件名', () => {
+    const head = [
+      '--b4',
+      'Content-Disposition: form-data; name="purpose"',
+      '',
+      'application',
+      '--b4',
+      `Content-Disposition: form-data; name="file"; filename*=UTF-8''${encodeURIComponent('简历.pdf')}`,
+      'Content-Type: application/pdf',
+      '',
+      'x',
+      '--b4--',
+      '',
+    ].join('\r\n')
+    const raw = Buffer.from(head, 'utf8')
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary=b4'), raw)
+    expect(out).toEqual({ input: { name: '简历.pdf', size: 1, purpose: 'application' } })
+  })
 })

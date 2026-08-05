@@ -53,10 +53,23 @@ export function readMultipartBody(request: IncomingMessage, rawBody: Buffer): Re
     const nameMatch = head.match(/name="([^"]+)"/)
     if (!nameMatch) continue
     const fieldName = nameMatch[1]
-    const filenameMatch = head.match(/filename="([^"]*)"/)
-    if (filenameMatch) {
+    // RFC 5987 filename* 扩展（UTF-8''percent-encoded）优先，兼容老式客户端的裸 filename
+    const filenameStarMatch = head.match(/filename\*=(?:UTF-8''|utf-8'')([^;\r\n]+)/i)
+    let filename: string
+    const hasFilenameHeader = /filename\*?=/i.test(head)
+    if (filenameStarMatch) {
+      try {
+        filename = decodeURIComponent(filenameStarMatch[1].trim())
+      } catch {
+        filename = ''
+      }
+    } else {
+      const plainFilenameMatch = head.match(/filename="([^"]*)"/)
+      filename = plainFilenameMatch ? plainFilenameMatch[1] || '' : ''
+    }
+    if (hasFilenameHeader) {
       hasFile = true
-      fileName = filenameMatch[1] || ''
+      fileName = filename
       fileSize = Buffer.from(body.replace(/\r\n$/, ''), 'latin1').length
     } else {
       fields[fieldName] = Buffer.from(body.replace(/\r\n$/, ''), 'latin1').toString('utf8')
@@ -118,7 +131,13 @@ export function localMockPlugin(): Plugin {
               ? readMultipartBody(request, rawBody)
               : rawBody.length === 0
                 ? {}
-                : JSON.parse(rawBody.toString('utf8'))
+                : (() => {
+                    try {
+                      return JSON.parse(rawBody.toString('utf8'))
+                    } catch {
+                      throw Object.assign(new Error('请求体 JSON 解析失败'), { parseError: true })
+                    }
+                  })()
           }
           const result = await matched.handler.response({
             url: requestUrl.pathname + requestUrl.search,
@@ -132,7 +151,11 @@ export function localMockPlugin(): Plugin {
             return
           }
           sendJson(response, 200, result)
-        } catch {
+        } catch (error) {
+          if (error && typeof error === 'object' && 'parseError' in error) {
+            sendJson(response, 400, { code: 'IFC-ERR-017', message: '请求体 JSON 解析失败' })
+            return
+          }
           sendJson(response, 500, { code: 'IFC-ERR-016', message: '模拟服务处理失败' })
         }
       })
