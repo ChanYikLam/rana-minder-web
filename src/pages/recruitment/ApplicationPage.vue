@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning } from '@lucide/vue'
+import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Upload, Save, Send, FileWarning, CheckCircle2 } from '@lucide/vue'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string }
 interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
@@ -99,14 +99,77 @@ interface MyApplication {
   status: string
   answers?: Record<string, unknown>
   preferences?: { departmentId: string; departmentName: string }[]
+  allowAdjustment?: boolean
+  submittedAt?: string | null
+}
+
+const myApplication = ref<MyApplication | null>(null)
+const withdrawing = ref(false)
+const confirmWithdraw = ref(false)
+let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
+
+const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
+
+/** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
+function answersOf(fieldId: string): string {
+  const v = myApplication.value?.answers?.[fieldId]
+  if (v == null || v === '') return ''
+  const field = formFields.value.find((f) => f.id === fieldId)
+  if (field?.type === 'file') return '已上传附件'
+  return String(v)
+}
+
+function formatTime(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** 撤销报名提交：先点击进入确认态，5 秒内再次点击才执行（与联合报名一致，避免 iframe/沙箱禁用 window.confirm） */
+function requestWithdrawConfirm() {
+  if (withdrawing.value) return
+  if (!confirmWithdraw.value) {
+    confirmWithdraw.value = true
+    if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+    confirmWithdrawTimer = setTimeout(() => {
+      confirmWithdraw.value = false
+    }, 5000)
+    return
+  }
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+  confirmWithdraw.value = false
+  void handleWithdraw()
+}
+
+/** 撤销提交回到草稿（服务端 SM-REC-003 submitted→draft），可修改后重新提交 */
+async function handleWithdraw() {
+  if (withdrawing.value) return
+  withdrawing.value = true
+  try {
+    const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {})
+    if (result.kind === 'completed') {
+      toast.success('已撤销提交，可修改后重新提交')
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '撤销失败，请稍后重试')
+    } else {
+      toast.error('撤销失败，请稍后重试')
+    }
+  } finally {
+    withdrawing.value = false
+  }
 }
 
 /** 已有草稿时回填表单内容，支持继续修改（尽力而为，失败不阻塞页面） */
 async function loadMyApplication() {
   try {
     const result = await get<MyApplication>(`/activity/recruitment/${route.params.activityId}/apply`)
-    if (result.kind === 'completed' && result.data.status === 'draft') {
-      restoreDraft(result.data)
+    if (result.kind === 'completed') {
+      myApplication.value = result.data
+      if (result.data.status === 'draft') {
+        restoreDraft(result.data)
+      }
     }
   } catch {
     // 忽略：草稿恢复失败不影响表单填写
@@ -218,8 +281,50 @@ onMounted(loadData)
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ activity.title }}</h1>
       <p class="text-sm text-text-secondary mb-6">{{ activity.clubName }} · 报名申请</p>
 
-      <!-- 意向方向排序 -->
-      <Card class="mb-4">
+      <!-- 已提交：只读回显本人填写内容 + 撤销提交（与联合报名一致） -->
+      <Card v-if="hasSubmitted" class="mb-4">
+        <div class="flex items-center gap-2 text-success">
+          <CheckCircle2 :size="18" />
+          <p class="text-sm font-medium text-text-primary">您已提交报名</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">当前状态：等待审核</p>
+
+        <div class="mt-4 border-t border-border pt-3 space-y-2.5">
+          <p class="text-sm font-medium text-text-primary">您的报名详情</p>
+          <div v-for="field in formFields" :key="field.id">
+            <template v-if="answersOf(field.id)">
+              <p class="text-xs text-text-secondary">{{ field.label }}</p>
+              <p class="text-sm text-text-primary whitespace-pre-wrap">{{ answersOf(field.id) }}</p>
+            </template>
+          </div>
+          <div v-if="myApplication?.preferences?.length">
+            <p class="text-xs text-text-secondary">意向方向（按优先级）</p>
+            <p class="text-sm text-text-primary">{{ myApplication.preferences.map((p, i) => `${i + 1}. ${p.departmentName}`).join('、') }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary">服从调剂</p>
+            <p class="text-sm text-text-primary">{{ myApplication?.allowAdjustment ? '是' : '否' }}</p>
+          </div>
+          <div v-if="myApplication?.submittedAt">
+            <p class="text-xs text-text-secondary">提交时间</p>
+            <p class="text-sm text-text-primary">{{ formatTime(myApplication.submittedAt) }}</p>
+          </div>
+        </div>
+
+        <Button
+          variant="outline"
+          class="mt-4 w-full"
+          :class="confirmWithdraw ? '!text-danger !border-danger' : ''"
+          :loading="withdrawing"
+          @click="requestWithdrawConfirm"
+        >
+          <Save :size="14" /> {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
+        </Button>
+        <p class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
+      </Card>
+
+      <!-- 意向方向排序（已提交后隐藏，展示只读卡片） -->
+      <Card v-if="!hasSubmitted" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-2">意向方向</h2>
         <p class="text-xs text-text-secondary mb-3">点击添加意向部门，可拖拽或用按钮调整优先级顺序</p>
 
@@ -258,8 +363,8 @@ onMounted(loadData)
         </div>
       </Card>
 
-      <!-- 动态表单 -->
-      <Card class="mb-4">
+      <!-- 动态表单（已提交后隐藏，展示只读卡片） -->
+      <Card v-if="!hasSubmitted" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-4">报名表单</h2>
         <div class="space-y-4">
           <div v-for="field in formFields" :key="field.id">
@@ -350,11 +455,11 @@ onMounted(loadData)
       </Card>
 
       <!-- 错误提示 -->
-      <p v-if="submitError" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
-      <p v-if="savedDraft" class="text-sm text-success mb-4" role="status">草稿已保存</p>
+      <p v-if="submitError && !hasSubmitted" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
+      <p v-if="savedDraft && !hasSubmitted" class="text-sm text-success mb-4" role="status">草稿已保存</p>
 
-      <!-- 操作区 -->
-      <ResponsiveActionRegion page-family="form">
+      <!-- 操作区（已提交后隐藏） -->
+      <ResponsiveActionRegion v-if="!hasSubmitted" page-family="form">
         <Button variant="outline" :loading="savingDraft" @click="handleSaveDraft">
           <Save :size="16" /> {{ savingDraft ? '保存中...' : '保存草稿' }}
         </Button>

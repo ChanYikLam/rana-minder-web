@@ -88,6 +88,8 @@ const volunteerClubIds = ref<string[]>([])
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
 const withdrawing = ref(false)
+const confirmWithdraw = ref(false)
+let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交 */
 const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
@@ -334,12 +336,26 @@ function clubNamesOf(ids?: string[]): string[] {
     || id)
 }
 
-/** 撤销联合报名提交：回到草稿态，可修改后重新提交 */
+/** 撤销联合报名提交：先点击进入确认态，5 秒内再次点击才执行（避免 iframe/沙箱环境禁用 window.confirm 导致无反应） */
+function requestWithdrawConfirm() {
+  if (withdrawing.value) return
+  if (!confirmWithdraw.value) {
+    confirmWithdraw.value = true
+    if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+    confirmWithdrawTimer = setTimeout(() => {
+      confirmWithdraw.value = false
+    }, 5000)
+    return
+  }
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+  confirmWithdraw.value = false
+  void handleWithdraw()
+}
+
 async function handleWithdraw() {
   if (withdrawing.value) return
   const jointId = route.params.jointId
   if (typeof jointId !== 'string') return
-  if (!window.confirm('确定要撤销本次联合报名提交吗？撤销后将回到草稿状态，可修改后重新提交。')) return
   withdrawing.value = true
   try {
     const result = await post(`/activity/joint/${jointId}/withdraw`, {})
@@ -430,10 +446,11 @@ async function handleWithdraw() {
         <button
           type="button"
           class="mt-4 w-full h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2 disabled:opacity-60"
+          :class="confirmWithdraw ? 'text-danger border-danger' : ''"
           :disabled="withdrawing"
-          @click="handleWithdraw"
+          @click="requestWithdrawConfirm"
         >
-          {{ withdrawing ? '撤销中...' : '撤销提交' }}
+          {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
         </button>
         <p class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后在报名通道关闭前重新提交。</p>
       </Card>

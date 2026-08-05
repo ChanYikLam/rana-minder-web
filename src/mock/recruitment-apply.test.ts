@@ -364,3 +364,59 @@ describe('联合报名撤销提交', () => {
     expect(memberJointApp().status, '已排期面试时保持已提交').toBe('submitted')
   })
 })
+
+/** 普通招新撤销提交（submitted → draft，与联合报名统一规范） */
+describe('普通招新撤销提交', () => {
+  beforeEach(() => {
+    clearMockSession()
+    resetRecruitmentDB()
+    resetNotifications()
+  })
+
+  const draftUrl = '/api/activity/recruitment/:activityId/draft'
+  const applyUrl = '/api/activity/recruitment/:activityId/apply'
+  const memberStudentId = '20210005'
+
+  function app() {
+    return rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === memberStudentId)!
+  }
+
+  it('已提交后保存空草稿即撤销回到草稿，内容保留可修改后重新提交', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    const submit = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '初版自我介绍', f3: '初版经历' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(submit.statusCode, JSON.stringify(submit.body)).toBe(200)
+    expect(app().status).toBe('submitted')
+
+    const out = await invokeHandler(draftUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(app().status, '提交后撤销回到草稿').toBe('draft')
+    expect(app().answers, '撤销后填写内容保留为草稿').toMatchObject({ f1: '初版自我介绍', f3: '初版经历' })
+
+    const resubmit = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '修改后自我介绍' },
+      preferences: [{ departmentId: 'dept-102' }],
+      allowAdjustment: false,
+    })
+    expect(resubmit.statusCode, JSON.stringify(resubmit.body)).toBe(200)
+    expect(app().status, '撤销后可重新提交').toBe('submitted')
+    expect(app().answers).toMatchObject({ f1: '修改后自我介绍' })
+  })
+
+  it('活动不在报名期时已提交申请不可撤销', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
+    act.status = 'completed'
+    const out = await invokeHandler(draftUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(app().status, '活动结束后保持已提交').toBe('submitted')
+  })
+})

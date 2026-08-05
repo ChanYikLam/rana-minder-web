@@ -1181,9 +1181,11 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
   } else if (app.status === 'submitted') {
+    if (a.status !== 'in_progress') return err('活动当前不在报名期，无法撤销提交')
     const t = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
     if (!t.ok) return err(t.reason || '已提交申请当前不可编辑')
     app.status = 'draft'
+    app.submittedAt = null
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
   app.version += 1
