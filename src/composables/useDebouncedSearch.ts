@@ -13,14 +13,18 @@ export interface UseDebouncedSearchOptions {
 export interface UseDebouncedSearchReturn {
   /** 搜索中（覆盖防抖窗口 + 请求在途），用于 loading 展示与空态文案抑制 */
   searching: Ref<boolean>
-  /** 当前请求序号。调用方在 onSearch 内捕获 mySeq = seq.value，异步操作后比较 mySeq !== seq.value 判断是否被作废 */
+  /**
+   * 当前代次号（只读）。
+   * 每次输入变化、清空或卸载时递增。调用方必须在 onSearch 入口处立即捕获 mySeq = seq.value，
+   * 异步操作后比较 mySeq !== seq.value 判断是否被作废。调用方不应修改此值。
+   */
   seq: Ref<number>
   /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('') */
   schedule: (keyword: string) => void
 }
 
 /**
- * 防抖搜索控制器：统一 300ms 防抖、在途请求作废（请求序号）、卸载清理与 loading 状态。
+ * 防抖搜索控制器：统一 300ms 防抖、在途请求作废（代次号）、卸载清理与 loading 状态。
  * 页面仅需提供 onSearch 处理业务状态（结果写入/失败提示），无需自行维护 timer/序号。
  */
 export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebouncedSearchReturn {
@@ -54,7 +58,7 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
     searching.value = true
     timer = setTimeout(() => {
       timer = null
-      const mySeq = ++seq.value
+      const mySeq = seq.value
       void (async () => {
         try {
           await options.onSearch(kw)

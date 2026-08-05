@@ -159,4 +159,39 @@ describe('useDebouncedSearch', () => {
     await Promise.resolve()
     expect(vm.searching).toBe(false)
   })
+
+  it('旧响应被丢弃不写回：页面级 seq 守卫', async () => {
+    const resolvers: Array<() => void> = []
+    const results: string[] = []
+    const capturedSeqs: number[] = []
+
+    const { vm } = mountHarness((kw) => {
+      capturedSeqs.push(vm.seq)
+      const idx = capturedSeqs.length - 1
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          // 模拟页面级守卫：仅当 seq 未变化时才写回结果
+          if (capturedSeqs[idx] === vm.seq) {
+            results.push(kw)
+          }
+          resolve()
+        })
+      })
+    })
+
+    vm.schedule('first')
+    vi.advanceTimersByTime(300)
+    vm.schedule('second')
+    vi.advanceTimersByTime(300)
+
+    // 第一个请求完成：应被丢弃
+    resolvers[0]()
+    await Promise.resolve()
+    expect(results).toEqual([])
+
+    // 第二个请求完成：应写回
+    resolvers[1]()
+    await Promise.resolve()
+    expect(results).toEqual(['second'])
+  })
 })
