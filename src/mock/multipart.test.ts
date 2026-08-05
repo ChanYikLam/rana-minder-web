@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest'
+import { readMultipartBody } from '../../mock-plugin'
+import type { IncomingMessage } from 'node:http'
+
+function buildMultipart(boundary: string, parts: { name: string; value: string; filename?: string; contentType?: string }[]): Buffer {
+  const lines: string[] = []
+  for (const part of parts) {
+    lines.push(`--${boundary}`)
+    if (part.filename) {
+      lines.push(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"`)
+      lines.push(`Content-Type: ${part.contentType || 'application/octet-stream'}`)
+    } else {
+      lines.push(`Content-Disposition: form-data; name="${part.name}"`)
+    }
+    lines.push('')
+    lines.push(part.value)
+  }
+  lines.push(`--${boundary}--`)
+  return Buffer.from(lines.join('\r\n') + '\r\n', 'utf8')
+}
+
+function requestWith(contentType: string): IncomingMessage {
+  return { headers: { 'content-type': contentType } } as IncomingMessage
+}
+
+describe('mock-plugin multipart/form-data 解析', () => {
+  it('提取文件字段的 filename 与 size，普通字段归入 fields（purpose 归入 input）', () => {
+    const raw = buildMultipart('boundary123', [
+      { name: 'purpose', value: 'application' },
+      { name: 'file', value: 'fake-pdf-content', filename: '简历.pdf', contentType: 'application/pdf' },
+    ])
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary=boundary123'), raw)
+    expect(out).toEqual({ input: { name: '简历.pdf', size: 16, purpose: 'application' } })
+  })
+
+  it('boundary 带引号也可解析', () => {
+    const raw = buildMultipart('xyz', [{ name: 'purpose', value: 'application' }])
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary="xyz"'), raw)
+    expect(out).toEqual({ input: { purpose: 'application' } })
+  })
+
+  it('缺少 boundary 时返回空对象（不抛异常）', () => {
+    const raw = Buffer.from('not-multipart', 'latin1')
+    const out = readMultipartBody(requestWith('multipart/form-data'), raw)
+    expect(out).toEqual({})
+  })
+
+  it('无文件字段时回退为普通字段映射', () => {
+    const raw = buildMultipart('b1', [{ name: 'title', value: 'hello' }])
+    const out = readMultipartBody(requestWith('multipart/form-data; boundary=b1'), raw)
+    expect(out).toEqual({ title: 'hello' })
+  })
+})
