@@ -134,6 +134,13 @@ let requestSeq = 0
 
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
+  if (!candidateKeyword.value) {
+    // 空关键字：立即重置候选并取消在途请求，不发请求（与 ClubAccessWizard 保持一致）
+    requestSeq++
+    candidates.value = []
+    searchFailed.value = false
+    return
+  }
   searchFailed.value = false
   searchTimer = setTimeout(() => { void searchCandidates() }, 300)
 }
@@ -363,7 +370,7 @@ onMounted(loadData)
                 @select="onSelectCandidate"
               />
               <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
-              <p v-else-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <p v-else-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>

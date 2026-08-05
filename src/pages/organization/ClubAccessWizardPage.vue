@@ -33,6 +33,7 @@ const step = ref<Step>('group')
 const keyword = ref('')
 const searchResults = ref<SearchResult[]>([])
 const searching = ref(false)
+const searchFailed = ref(false)
 const selectedGroup = ref<CasdoorGroupRow | null>(null)
 const candidateGroups = ref<CasdoorGroupRow[]>([])
 
@@ -112,12 +113,14 @@ function refreshSearch(kw: string) {
   if (!kw) {
     loadingSeq = 0
     searching.value = false
+    searchFailed.value = false
     searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
     return
   }
   const seq = ++searchSeq
   searching.value = true
   loadingSeq = seq
+  searchFailed.value = false
   get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw }).then((result) => {
     if (seq !== searchSeq) {
       // 作废请求：仅当本请求仍持有 loading 时复位，避免极端时序下 loading 残留
@@ -132,6 +135,11 @@ function refreshSearch(kw: string) {
     if (result.kind === 'completed') {
       const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
       searchResults.value = data.items.map(toSearchResult)
+      searchFailed.value = false
+    } else {
+      // 搜索失败（非 completed）：清空旧结果避免残留误导，与 MembershipInvitePage 保持一致
+      searchResults.value = []
+      searchFailed.value = true
     }
   })
 }
@@ -143,6 +151,7 @@ watch(keyword, (kw) => {
     searchSeq++
     loadingSeq = 0
     searching.value = false
+    searchFailed.value = false
     searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
     return
   }
@@ -242,7 +251,8 @@ onMounted(loadInitial)
           </p>
           <p class="text-xs text-text-secondary mt-1">{{ selectedGroup.path }} · {{ selectedGroup.memberCount }} 名成员</p>
         </div>
-        <p v-if="searchResults.length === 0 && keyword" class="mt-2 text-xs text-text-secondary">
+        <p v-if="searchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
+        <p v-else-if="searchResults.length === 0 && keyword && !searching" class="mt-2 text-xs text-text-secondary">
           无匹配 Group：需满足社团级层级且未重复绑定；学院行政类角色 Group 不可作为社团接入。
         </p>
       </Card>
