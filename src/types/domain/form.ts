@@ -32,7 +32,7 @@ export interface FormField {
   arrayFieldTemplateId: string | null
 }
 
-export type FormFieldType = 'text' | 'textarea' | 'number' | 'select' | 'multi_select' | 'radio' | 'checkbox' | 'date' | 'datetime' | 'file' | 'array'
+export type FormFieldType = 'text' | 'textarea' | 'number' | 'select' | 'multi_select' | 'radio' | 'checkbox' | 'date' | 'datetime' | 'file' | 'image' | 'array'
 
 export interface FileMeta {
   id: string
