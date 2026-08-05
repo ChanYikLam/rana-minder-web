@@ -43,6 +43,7 @@ const selectedLeaderId = ref<string | null>(null)
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
 const wizardError = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchSeq = 0
 
 function toSearchResult(g: GroupSearchResult): SearchResult {
   return { id: g.id, name: g.name, subtitle: `${g.stableId} · ${g.memberCount} 名成员`, group: g.path || g.purpose, match: g.match, score: g.score }
@@ -55,8 +56,10 @@ async function searchGroup() {
     rawResults.value = []
     return
   }
+  const seq = ++searchSeq
   groupSearching.value = true
   const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: keyword })
+  if (seq !== searchSeq) return
   groupSearching.value = false
   if (res.kind === 'completed') {
     rawResults.value = res.data.items
@@ -254,6 +257,7 @@ onMounted(loadData)
 
 onUnmounted(() => {
   if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  searchSeq++
 })
 </script>
 
