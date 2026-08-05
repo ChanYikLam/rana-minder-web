@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
@@ -103,13 +103,18 @@ function toSearchResult(g: CasdoorGroupRow): SearchResult {
   }
 }
 
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchSeq = 0
+
 function refreshSearch(kw: string) {
   if (!kw) {
     searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
     return
   }
+  const seq = ++searchSeq
   searching.value = true
   get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw }).then((result) => {
+    if (seq !== searchSeq) return
     searching.value = false
     if (result.kind === 'completed') {
       const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
@@ -118,7 +123,22 @@ function refreshSearch(kw: string) {
   })
 }
 
-watch(keyword, (kw) => refreshSearch(kw))
+// 输入 300ms 防抖；清空关键字立即重置并取消在途请求
+watch(keyword, (kw) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (!kw) {
+    searchSeq++
+    searching.value = false
+    searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
+    return
+  }
+  searchTimer = setTimeout(() => refreshSearch(kw), 300)
+})
+
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  searchSeq++
+})
 
 async function onSelectGroup(r: SearchResult) {
   const g = candidateGroups.value.find((c) => c.id === r.id) ?? (await getGroupByPath(r.subtitle?.split(' · ')[0] ?? ''))

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { HighRiskConfirm } from '@/components/common'
@@ -127,14 +127,29 @@ function isExpired(inv: Invite): boolean {
   return inv.status === 'expired' || (isActionable(inv) && new Date(inv.expiredAt).getTime() < Date.now())
 }
 
-// 候选搜索（姓名连续子串/学号精确）
+// 候选搜索（姓名连续子串/学号精确）——300ms 防抖
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let requestSeq = 0
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { void searchCandidates() }, 300)
+}
+
 async function searchCandidates() {
+  const seq = ++requestSeq
   const clubId = route.params.clubId as string
   const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: candidateKeyword.value })
+  if (seq !== requestSeq) return
   if (r.kind === 'completed') {
     candidates.value = r.data.items
   }
 }
+
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+  requestSeq++
+})
 
 const searchResults = computed<SearchResult[]>(() =>
   candidates.value.map((c) => ({
@@ -336,7 +351,7 @@ onMounted(loadData)
                 :results="searchResults"
                 :loading="false"
                 placeholder="姓名或学号..."
-                @update:model-value="searchCandidates"
+                @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
               <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>

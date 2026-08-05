@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
@@ -251,6 +251,10 @@ async function handleRebind(club: ClubItem) {
 }
 
 onMounted(loadData)
+
+onUnmounted(() => {
+  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
+})
 </script>
 
 <template>
