@@ -568,8 +568,8 @@ router.beforeEach(async (to) => {
       if (!granted) {
         return { name: 'P-GEN-02' }
       }
-    } else if (!workspace.hasWorkspace && session.workspace) {
-      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载时按会话初始化
+    } else if (session.workspace && (!workspace.hasWorkspace || workspace.currentUserId !== session.user?.id)) {
+      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载或登录身份已变化时按会话初始化
       workspace.setWorkspace(
         session.workspace.clubId,
         session.workspace.clubName,
