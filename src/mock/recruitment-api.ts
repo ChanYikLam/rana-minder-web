@@ -10,7 +10,7 @@ import type { MockMethod } from './types'
 // Node HTTP types via any (mock layer, no @types/node in remote baseline)
 type RawReq = any
 type RawRes = any
-import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, USER_APPLICANT_MAP, mockUsers } from './auth'
+import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
 import { pushNotifications, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
 import * as rdb from './db-recruitment'
 import * as db from './db'
@@ -125,11 +125,15 @@ function notFound(message = '请求的内容不存在或已被移除') {
 
 const ok = (data: unknown) => ({ code: 0, data })
 
-/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户（普通成员等）按学号复用/注册申请人档案，使其可报名其他社团招新与联合活动 */
-function actorApplicantId(user: { id: string; studentId?: string; name?: string }): string | null {
+/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户仅限非管理角色
+ * （member/applicant）按学号复用/注册申请人档案，使其可报名其他社团招新与联合活动；
+ * 管理角色（super_admin/club_leader/hr/department_leader/interviewer）不自动注册为申请人 */
+function actorApplicantId(user: MockUser): string | null {
   const mapped = USER_APPLICANT_MAP[user.id]
   if (mapped) return mapped
   if (!user.studentId) return null
+  const primaryRole = user.roles[0]?.role
+  if (primaryRole !== 'member' && primaryRole !== 'applicant') return null
   return rdb.ensureApplicantProfile(user.studentId, user.name || '')
 }
 
@@ -618,7 +622,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!applicantId) return forbidden()
       const act = rdb.findAnyActivity(query.activityId)
       if (!act) return notFound('活动不存在')
-      const studentId = resolveMockUser(url).studentId ?? rdb.applicantStudentIdOf(applicantId) ?? ''
+      const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
       const isExistingMember = db.members.some(
         (m) => m.clubId === act.clubId
           && m.studentId === studentId

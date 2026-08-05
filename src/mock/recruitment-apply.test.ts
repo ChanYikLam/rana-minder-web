@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { recruitmentApiHandlers, rdb } from './recruitment-api'
 import { mockUsers, resolveMockUser, clearMockSession } from './auth'
-import { listNotifications } from './notifications'
+import { listNotifications, userIdOfApplicant } from './notifications'
+import { ensureApplicantProfile, applicantStudentIdOf } from './db-recruitment'
 import { resetRecruitmentDB, resetNotifications } from './reset'
 
 /** 最小 ServerResponse 替身（与 recruitment-review.test.ts 同款） */
@@ -115,5 +116,43 @@ describe('成员提交报名权限链路（member 身份）', () => {
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
     expect(app, 'member 联合申请未落库').toBeTruthy()
+  })
+
+  it('动态申请人档案的通知链路：userIdOfApplicant 按学号回退到 member 账号（录取邀请/结论发布同链路）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === '20210005')
+    expect(app, 'member 申请未落库').toBeTruthy()
+    expect(userIdOfApplicant(app!.applicantId)).toBe('user-member-001')
+  })
+
+  it('管理角色（hr）不自动注册为申请人，报名返回 403', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    const out = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(out.statusCode).toBe(403)
+  })
+
+  it('同毫秒注册多个档案 id 不冲突（递增后缀）', () => {
+    const a = ensureApplicantProfile('20990001', '甲')
+    const b = ensureApplicantProfile('20990002', '乙')
+    expect(a).not.toBe(b)
+    expect(applicantStudentIdOf(a)).toBe('20990001')
+    expect(applicantStudentIdOf(b)).toBe('20990002')
+  })
+
+  it('resetRecruitmentDB 清除动态档案，避免跨用例泄漏', () => {
+    const id = ensureApplicantProfile('20990003', '丙')
+    expect(applicantStudentIdOf(id)).toBe('20990003')
+    resetRecruitmentDB()
+    expect(applicantStudentIdOf(id)).toBe('')
   })
 })

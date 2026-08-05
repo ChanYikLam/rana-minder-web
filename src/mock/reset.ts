@@ -1,4 +1,4 @@
-import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots } from './db-recruitment'
+import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, APPLICANT_PROFILES } from './db-recruitment'
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
 
@@ -24,6 +24,7 @@ const seed = {
   transitionState: structuredClone(transitionState),
   sysNotifications: structuredClone(sysNotifications),
   notificationSeq: notificationSeqBase,
+  applicantProfiles: structuredClone(APPLICANT_PROFILES),
 } as const
 
 export function resetRecruitmentDB(): void {
@@ -38,6 +39,7 @@ export function resetRecruitmentDB(): void {
   jointConclusions.splice(0, jointConclusions.length, ...structuredClone(seed.jointConclusions))
   jointInvitations.splice(0, jointInvitations.length, ...structuredClone(seed.jointInvitations))
   jointSlots.splice(0, jointSlots.length, ...structuredClone(seed.jointSlots))
+  Object.keys(APPLICANT_PROFILES).forEach((k) => { if (k.startsWith('u-auto-')) delete APPLICANT_PROFILES[k] })
 }
 
 export function resetDb(): void {
