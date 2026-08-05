@@ -24,8 +24,28 @@ const APPLICATION_STATUS_LABELS: Record<string, string> = {
   archived: '已归档',
 }
 
+/** 联合报名通道状态 → 文案与色调（ChannelStatus: not_open/open/paused/closed） */
+const CHANNEL_STATUS_META: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+  open: { label: '报名通道开放中', tone: 'success' },
+  paused: { label: '报名通道已暂停', tone: 'warning' },
+  not_open: { label: '报名通道未开放', tone: 'neutral' },
+  closed: { label: '报名通道已关闭', tone: 'danger' },
+}
+
+const CHANNEL_STATUS_TONE_CLASS: Record<string, string> = {
+  success: 'bg-success-subtle text-success',
+  warning: 'bg-warning-subtle text-warning',
+  danger: 'bg-danger-subtle text-danger',
+  neutral: 'bg-subtle text-text-secondary',
+}
+
 function statusLabel(status: string): string {
   return APPLICATION_STATUS_LABELS[status] || status
+}
+
+function channelStatusMeta(status?: string) {
+  const meta = status ? CHANNEL_STATUS_META[status] : undefined
+  return meta || { label: '报名通道状态未知', tone: 'neutral' as const }
 }
 
 const route = useRoute()
@@ -33,8 +53,10 @@ const router = useRouter()
 const state = ref<PageState>('loading')
 const detail = ref<JointDetail | null>(null)
 const myApplication = ref<{ status: string; volunteerClubIds?: string[]; consented?: boolean; allowJointAdjustment?: boolean } | null>(null)
-/** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交 */
+/** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交 */
 const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
+const hasArchived = computed(() => myApplication.value?.status === 'archived')
+const showApplyForm = computed(() => !hasSubmitted.value && !hasArchived.value)
 const consented = ref(false)
 const allowJointAdjustment = ref(false)
 const volunteerClubIds = ref<string[]>([])
@@ -153,9 +175,9 @@ function formatDeadline(iso?: string): string {
         <div class="flex flex-wrap gap-2 mb-4">
           <span
             class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium"
-            :class="detail.channelStatus === 'open' ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'"
+            :class="CHANNEL_STATUS_TONE_CLASS[channelStatusMeta(detail.channelStatus).tone]"
           >
-            {{ detail.channelStatus === 'open' ? '报名通道开放中' : '报名通道已关闭' }}
+            {{ channelStatusMeta(detail.channelStatus).label }}
           </span>
           <span v-if="detail.deadline" class="inline-flex items-center px-2.5 py-1 rounded-md bg-subtle text-xs text-text-secondary">
             报名截止：{{ formatDeadline(detail.deadline) }}
@@ -183,7 +205,15 @@ function formatDeadline(iso?: string): string {
         <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
       </Card>
 
-      <!-- 意向社团（未提交时展示；草稿用户仍可编辑） -->
+      <Card v-else-if="hasArchived" class="mb-4">
+        <div class="flex items-center gap-2 text-text-secondary">
+          <CheckCircle2 :size="18" />
+          <p class="text-sm font-medium text-text-primary">您的联合报名已归档</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+      </Card>
+
+      <!-- 意向社团（未提交且未归档时展示；草稿用户仍可编辑） -->
       <Card v-else class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-1 flex items-center gap-1.5"><Users :size="16" /> 意向社团</p>
         <p class="text-xs text-text-secondary mb-3">选择您希望加入的参与社团，未选择的社团只有在您服从联合调剂时才可能向您发出加入邀请。</p>
@@ -200,7 +230,7 @@ function formatDeadline(iso?: string): string {
       </Card>
 
       <!-- 共享同意 -->
-      <Card v-if="!hasSubmitted" class="mb-4">
+      <Card v-if="showApplyForm" class="mb-4">
         <label class="flex items-start gap-3 cursor-pointer">
           <input v-model="consented" type="checkbox" class="mt-0.5 rounded border-border" />
           <div>
@@ -218,7 +248,7 @@ function formatDeadline(iso?: string): string {
       </Card>
 
       <button
-        v-if="!hasSubmitted"
+        v-if="showApplyForm"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
         :disabled="!consented || volunteerClubIds.length === 0 || submitting"
         @click="handleSubmit"
@@ -227,7 +257,7 @@ function formatDeadline(iso?: string): string {
       </button>
 
       <button
-        v-if="!hasSubmitted"
+        v-if="showApplyForm"
         class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2"
         :disabled="submitting"
         @click="handleSaveDraft"
