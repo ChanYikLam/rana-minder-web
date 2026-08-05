@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -32,7 +32,9 @@ const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
 const detail = ref<JointDetail | null>(null)
-const myApplication = ref<{ status: string } | null>(null)
+const myApplication = ref<{ status: string; volunteerClubIds?: string[]; consented?: boolean; allowJointAdjustment?: boolean } | null>(null)
+/** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交 */
+const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
 const consented = ref(false)
 const allowJointAdjustment = ref(false)
 const volunteerClubIds = ref<string[]>([])
@@ -46,25 +48,36 @@ async function loadData() {
   if (result.kind === 'completed') {
     detail.value = result.data
     volunteerClubIds.value = (result.data.participants || []).map((p) => p.id)
-    await loadMyApplication()
-    state.value = 'normal'
+    const appLoaded = await loadMyApplication()
+    // 只有申请状态解析成功（含未提交）才进入 normal，避免覆盖 loadMyApplication 设置的 error/forbidden
+    if (appLoaded) state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
-async function loadMyApplication() {
+/** 返回 true 表示已正常解析申请状态（含未提交），false 表示已进入错误/无权限等终态 */
+async function loadMyApplication(): Promise<boolean> {
   const jointId = route.params.jointId
-  if (typeof jointId !== 'string') return
+  if (typeof jointId !== 'string') return true
   try {
-    const result = await get<{ status: string }>(`/activity/joint/${jointId}/apply`)
+    const result = await get<{ status: string; volunteerClubIds?: string[]; consented?: boolean; allowJointAdjustment?: boolean }>(`/activity/joint/${jointId}/apply`)
     if (result.kind === 'completed') {
-      myApplication.value = result.data
-    } else if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
-      myApplication.value = null
-    } else {
-      state.value = errorToPageState(errorCodeOf(result))
+      const app = result.data
+      myApplication.value = app
+      // 回填草稿已保存的填写内容，便于用户继续编辑后直接提交
+      if (app.volunteerClubIds) volunteerClubIds.value = app.volunteerClubIds
+      if (typeof app.consented === 'boolean') consented.value = app.consented
+      if (typeof app.allowJointAdjustment === 'boolean') allowJointAdjustment.value = app.allowJointAdjustment
+      return true
     }
+    if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
+      myApplication.value = null
+      return true
+    }
+    state.value = errorToPageState(errorCodeOf(result))
+    return false
   } catch {
     state.value = 'error'
+    return false
   }
 }
 
@@ -76,6 +89,16 @@ function toggleVolunteer(clubId: string) {
 async function handleSubmit() {
   submitting.value = true
   try {
+    // mock 契约要求先存在申请草稿才能提交；无记录（含新用户）时先创建草稿
+    if (!myApplication.value) {
+      const draftRes = await post(`/activity/joint/${route.params.jointId}/draft`, {})
+      if (draftRes.kind !== 'completed') {
+        toast.error(draftRes.kind === 'rejected' && draftRes.error
+          ? (draftRes.error as { message?: string }).message || '草稿创建失败，请稍后重试'
+          : '草稿创建失败，请稍后重试')
+        return
+      }
+    }
     const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
       consented: consented.value,
       allowJointAdjustment: allowJointAdjustment.value,
@@ -108,7 +131,8 @@ async function handleSaveDraft() {
 
 onMounted(loadData)
 
-function formatDeadline(iso: string): string {
+function formatDeadline(iso?: string): string {
+  if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -151,15 +175,15 @@ function formatDeadline(iso: string): string {
         </div>
       </Card>
 
-      <Card v-if="myApplication" class="mb-4">
+      <Card v-if="hasSubmitted" class="mb-4">
         <div class="flex items-center gap-2 text-success">
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
         </div>
-        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication.status) }}</p>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
       </Card>
 
-      <!-- 意向社团 -->
+      <!-- 意向社团（未提交时展示；草稿用户仍可编辑） -->
       <Card v-else class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-1 flex items-center gap-1.5"><Users :size="16" /> 意向社团</p>
         <p class="text-xs text-text-secondary mb-3">选择您希望加入的参与社团，未选择的社团只有在您服从联合调剂时才可能向您发出加入邀请。</p>
@@ -176,7 +200,7 @@ function formatDeadline(iso: string): string {
       </Card>
 
       <!-- 共享同意 -->
-      <Card v-if="!myApplication" class="mb-4">
+      <Card v-if="!hasSubmitted" class="mb-4">
         <label class="flex items-start gap-3 cursor-pointer">
           <input v-model="consented" type="checkbox" class="mt-0.5 rounded border-border" />
           <div>
@@ -194,7 +218,7 @@ function formatDeadline(iso: string): string {
       </Card>
 
       <button
-        v-if="!myApplication"
+        v-if="!hasSubmitted"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
         :disabled="!consented || volunteerClubIds.length === 0 || submitting"
         @click="handleSubmit"
@@ -203,7 +227,7 @@ function formatDeadline(iso: string): string {
       </button>
 
       <button
-        v-if="!myApplication"
+        v-if="!hasSubmitted"
         class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2"
         :disabled="submitting"
         @click="handleSaveDraft"
