@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Users, CheckCircle2, XCircle, AlertTriangle, ArrowLeft, ArrowRight, FolderTree } from '@lucide/vue'
@@ -32,7 +33,6 @@ const state = ref<PageState>('loading')
 const step = ref<Step>('group')
 const keyword = ref('')
 const searchResults = ref<SearchResult[]>([])
-const searching = ref(false)
 const searchFailed = ref(false)
 const selectedGroup = ref<CasdoorGroupRow | null>(null)
 const candidateGroups = ref<CasdoorGroupRow[]>([])
@@ -85,7 +85,7 @@ async function loadInitial() {
   if (groups.kind === 'completed' && clubs.kind === 'completed') {
     candidateGroups.value = (groups as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items
     existingClubs.value = (clubs as { kind: 'completed'; data: { items: ClubRow[] } }).data.items
-    refreshSearch('')
+    schedule('')
     state.value = 'normal'
   } else {
     state.value = 'error'
@@ -104,66 +104,31 @@ function toSearchResult(g: CasdoorGroupRow): SearchResult {
   }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-let searchSeq = 0
-// 当前持有 loading 状态的请求序号：作废请求仅在自己仍持有 loading 时复位，避免误清新请求
-let loadingSeq = 0
-
-function refreshSearch(kw: string) {
-  if (!kw) {
-    loadingSeq = 0
-    searching.value = false
-    searchFailed.value = false
-    searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
-    return
-  }
-  const seq = ++searchSeq
-  searching.value = true
-  loadingSeq = seq
-  searchFailed.value = false
-  get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw }).then((result) => {
-    if (seq !== searchSeq) {
-      // 作废请求：仅当本请求仍持有 loading 时复位，避免极端时序下 loading 残留
-      if (loadingSeq === seq) {
-        loadingSeq = 0
-        searching.value = false
-      }
+const { searching, schedule } = useDebouncedSearch({
+  onSearch: async (kw, isStale) => {
+    if (!kw) {
+      // 空关键字：立即重置为候选列表，不发请求
+      searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
+      searchFailed.value = false
       return
     }
-    loadingSeq = 0
-    searching.value = false
+    searchFailed.value = false
+    const result = await get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw })
+    if (isStale()) return
     if (result.kind === 'completed') {
       const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
       searchResults.value = data.items.map(toSearchResult)
       searchFailed.value = false
     } else {
-      // 搜索失败（非 completed）：清空旧结果避免残留误导，与 MembershipInvitePage 保持一致
+      // 搜索失败（非 completed）：清空旧结果避免残留误导，与其余两处保持一致
       searchResults.value = []
       searchFailed.value = true
     }
-  })
-}
-
-// 输入 300ms 防抖；清空关键字立即重置并取消在途请求
-watch(keyword, (kw) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  if (!kw) {
-    searchSeq++
-    loadingSeq = 0
-    searching.value = false
-    searchFailed.value = false
-    searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
-    return
-  }
-  searchTimer = setTimeout(() => refreshSearch(kw), 300)
+  },
 })
 
-onUnmounted(() => {
-  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
-  searchSeq++
-  loadingSeq = 0
-  searching.value = false
-})
+// 输入 300ms 防抖；清空关键字立即重置并作废在途请求
+watch(keyword, (kw) => schedule(kw))
 
 async function onSelectGroup(r: SearchResult) {
   const g = candidateGroups.value.find((c) => c.id === r.id) ?? (await getGroupByPath(r.subtitle?.split(' · ')[0] ?? ''))
@@ -252,7 +217,7 @@ onMounted(loadInitial)
           <p class="text-xs text-text-secondary mt-1">{{ selectedGroup.path }} · {{ selectedGroup.memberCount }} 名成员</p>
         </div>
         <p v-if="searchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
-        <p v-else-if="searchResults.length === 0 && keyword && !searching" class="mt-2 text-xs text-text-secondary">
+        <p v-else-if="searchResults.length === 0 && keyword.trim() && !searching" class="mt-2 text-xs text-text-secondary">
           无匹配 Group：需满足社团级层级且未重复绑定；学院行政类角色 Group 不可作为社团接入。
         </p>
       </Card>

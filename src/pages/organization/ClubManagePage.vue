@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { useRouter } from 'vue-router'
@@ -35,7 +36,6 @@ async function loadData() {
 const wizardClub = computed<ClubItem | undefined>(() => items.value.find((c) => c.status === 'wizard_pending'))
 
 const groupKeyword = ref('')
-const groupSearching = ref(false)
 const groupSearchFailed = ref(false)
 const groupResults = ref<SearchResult[]>([])
 const rawResults = ref<GroupSearchResult[]>([])
@@ -43,53 +43,39 @@ const selectedGroup = ref<GroupSearchResult | null>(null)
 const selectedLeaderId = ref<string | null>(null)
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
 const wizardError = ref('')
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-let searchSeq = 0
 
 function toSearchResult(g: GroupSearchResult): SearchResult {
   return { id: g.id, name: g.name, subtitle: `${g.stableId} · ${g.memberCount} 名成员`, group: g.path || g.purpose, match: g.match, score: g.score }
 }
 
-async function searchGroup() {
-  const keyword = groupKeyword.value.trim()
-  if (!keyword) {
-    // 空关键字：立即作废在途请求并复位 loading，避免旧响应写回结果
-    searchSeq++
-    groupSearching.value = false
+// Group 搜索——300ms 防抖；清空关键字立即重置并作废在途请求
+const { searching: groupSearching, schedule: scheduleGroupSearch } = useDebouncedSearch({
+  onSearch: async (kw, isStale) => {
+    if (!kw) {
+      groupSearchFailed.value = false
+      groupResults.value = []
+      rawResults.value = []
+      return
+    }
     groupSearchFailed.value = false
-    groupResults.value = []
-    rawResults.value = []
-    return
-  }
-  const seq = ++searchSeq
-  groupSearching.value = true
-  groupSearchFailed.value = false
-  const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: keyword })
-  if (seq !== searchSeq) return
-  groupSearching.value = false
-  if (res.kind === 'completed') {
-    rawResults.value = res.data.items
-    groupResults.value = res.data.items.map(toSearchResult)
-  } else {
-    // 搜索失败（非 completed）：清空旧结果并提示，与其余两处保持一致
-    rawResults.value = []
-    groupResults.value = []
-    groupSearchFailed.value = true
-  }
-}
+    const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: kw })
+    if (isStale()) return
+    if (res.kind === 'completed') {
+      rawResults.value = res.data.items
+      groupResults.value = res.data.items.map(toSearchResult)
+      groupSearchFailed.value = false
+    } else {
+      // 搜索失败（非 completed）：清空旧结果并提示，与其余两处保持一致
+      rawResults.value = []
+      groupResults.value = []
+      groupSearchFailed.value = true
+    }
+  },
+})
 
 function onGroupInput(value: string) {
   groupKeyword.value = value
-  if (searchTimer) clearTimeout(searchTimer)
-  if (!value.trim()) {
-    searchSeq++
-    groupSearching.value = false
-    groupSearchFailed.value = false
-    groupResults.value = []
-    rawResults.value = []
-    return
-  }
-  searchTimer = setTimeout(searchGroup, 300)
+  scheduleGroupSearch(value)
 }
 
 async function onGroupSelect(result: SearchResult) {
@@ -270,11 +256,6 @@ async function handleRebind(club: ClubItem) {
 }
 
 onMounted(loadData)
-
-onUnmounted(() => {
-  if (searchTimer) { clearTimeout(searchTimer); searchTimer = null }
-  searchSeq++
-})
 </script>
 
 <template>
@@ -330,6 +311,7 @@ onUnmounted(() => {
               @select="onGroupSelect"
             />
             <p v-if="groupSearchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
+            <p v-else-if="groupKeyword.trim() && !groupSearching && groupResults.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的 Group</p>
             <p v-if="selectedGroup" class="mt-2 flex items-center gap-1.5 text-xs" :class="wizardBindingWarning.ok ? 'text-success' : 'text-danger'">
               <CheckCircle2 v-if="wizardBindingWarning.ok" :size="14" />
               <Info v-else :size="14" />
