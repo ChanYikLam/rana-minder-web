@@ -275,7 +275,7 @@ async function handleSubmit() {
     const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
       consented: consented.value,
       allowJointAdjustment: allowJointAdjustment.value,
-      volunteerClubIds: volunteerClubIds.value,
+      volunteerClubIds: volunteerClubIds.value ?? [],
       preferences: preferences.value,
       answers: { ...formData },
     })

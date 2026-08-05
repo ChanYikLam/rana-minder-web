@@ -310,6 +310,23 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     expect(app!.preferences).toEqual([])
   })
 
+  it('首次进入（无草稿）直接空意向提交：自动创建草稿后提交仍保持空数组', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    // 模拟前端首次进入流程：无草稿 → 自动创建草稿（空 body）→ 提交空意向
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {})
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: [],
+      answers: { f1: '首次进入空意向提交' },
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.status).toBe('submitted')
+    expect(app!.volunteerClubIds, '首次进入空意向提交不应回退为全部参与社团').toEqual([])
+    expect(app!.preferences).toEqual([])
+  })
+
   it('部门名称以服务端权威数据为准并按 departmentId 去重', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {

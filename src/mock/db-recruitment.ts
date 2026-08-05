@@ -1682,7 +1682,7 @@ export function saveJointApplicationDraft(
   }
   app.consented = input?.consented ?? app.consented
   app.allowJointAdjustment = input?.allowJointAdjustment ?? app.allowJointAdjustment
-  if (input?.volunteerClubIds) {
+  if (input?.volunteerClubIds !== undefined) {
     app.volunteerClubIds = input.volunteerClubIds.filter((id) => ja.clubs.some((c) => c.clubId === id))
   }
   if (input?.preferences) {
