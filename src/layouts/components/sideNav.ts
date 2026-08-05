@@ -63,7 +63,7 @@ export function buildClubGroups(clubId: string, canAccess: (p?: string, permissi
       items: [{ label: '表单列表', path: `${base}/forms` }],
     },
     {
-      label: '统计与导出', icon: BarChart3, prefix: `${base}/stat`,
+      label: '统计与导出', icon: BarChart3, prefix: `${base}/stats`,
       items: [
         { label: '数据统计', path: `${base}/stats`, permission: 'club:stats:view' },
         { label: '数据导出', path: `${base}/exports`, permission: 'club:export:execute' },
@@ -109,7 +109,7 @@ export const ADMIN_NAV: SideNavGroup[] = [
     ],
   },
   {
-    label: '统计导出', icon: BarChart3, prefix: '/admin/stat',
+    label: '统计导出', icon: BarChart3, prefix: '/admin/stats',
     items: [
       { label: '全局统计', path: '/admin/stats' },
       { label: '全平台导出', path: '/admin/exports' },
