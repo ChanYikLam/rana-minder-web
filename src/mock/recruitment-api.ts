@@ -344,9 +344,33 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         id: j.id, title: j.title, type: 'joint',
         status: j.status === 'published' ? 'open' : j.status, channelStatus: j.channelStatus,
         deadline: j.deadline, description: j.description, formId: j.formId,
-        clubs: j.clubs.map((c) => ({ id: c.clubId, name: c.clubName })),
+        sharedAgreement: j.sharedAgreement,
+        clubs: j.clubs.map((c) => ({ id: c.clubId, name: c.clubName, departments: c.departments })),
         participants: j.clubs.map((c) => ({ id: c.clubId, name: c.clubName })),
         clubName: j.clubs.map((c) => c.clubName).join('、'),
+      })
+    },
+  },
+  // 联合活动共享报名表（公开；字段与普通招新 form-001 同构，意向部门选项取参与社团）
+  {
+    url: '/api/explore/joint/:id/form',
+    method: 'get',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const j = rdb.findJoint(query.id || 'jnt-001')
+      if (!j) return notFound('活动不存在')
+      if (j.status !== 'published') return notFound('活动不存在或未开放')
+      return ok({
+        id: j.formId, clubId: j.clubs[0]?.clubId || null, title: '联合招新报名表', status: 'published',
+        versions: [
+          {
+            version: j.formVersion, status: 'published', publishedAt: j.publishedAt || new Date().toISOString(),
+            fields: [
+              { id: 'f1', type: 'text', label: '自我介绍', description: '简要介绍自己的特长和兴趣', required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+              { id: 'f3', type: 'textarea', label: '相关经历', description: '如有相关项目或活动经历请填写', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+              { id: 'f4', type: 'file', label: '作品附件', description: '可选，上传作品集或简历', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
+            ],
+          },
+        ],
       })
     },
   },
@@ -1660,7 +1684,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
-      const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown> }
+      const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown>; preferences?: { departmentId: string; departmentName: string }[] }
       const r = rdb.submitJointApplication(query.jointId, applicantId, input)
       return result(r)
     },
@@ -1669,11 +1693,15 @@ const jointHandlers: MockMethod[] = [
   {
     url: '/api/activity/joint/:jointId/draft',
     method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
       const me = resolveMockUser(url)
-      const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId)
+      const input = unwrap(body) as { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[] }
+      const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId, {
+        answers: input.answers, volunteerClubIds: input.volunteerClubIds,
+        allowJointAdjustment: input.allowJointAdjustment, consented: input.consented, preferences: input.preferences,
+      })
       return result(r)
     },
   },
