@@ -2,6 +2,32 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { recruitmentApiHandlers, rdb } from './recruitment-api'
 import { mockUsers, resolveMockUser, clearMockSession, USER_MEMBER_MAP } from './auth'
 
+/** 最小 ServerResponse 替身：覆盖 mock 层实际调用面（setHeader/statusCode/end），并为常见写接口兜底；mock 层扩展新接口时在此补齐，避免测试静默失联难排查 */
+function createFakeRes() {
+  const headers = new Map<string, string>()
+  const chunks: string[] = []
+  let statusCode = 200
+  let ended = false
+  return {
+    get statusCode() { return statusCode },
+    set statusCode(v: number) { statusCode = v },
+    get statusMessage() { return undefined as string | undefined },
+    headers,
+    chunks,
+    setHeader(name: string, value: string) { headers.set(name, value) },
+    getHeader(name: string) { return headers.get(name) },
+    removeHeader(name: string) { headers.delete(name) },
+    writeHead(code: number) { statusCode = code },
+    write(chunk: string) { chunks.push(chunk) },
+    flushHeaders() {},
+    end(body?: string) {
+      if (body !== undefined) chunks.push(body)
+      ended = true
+    },
+    get ended() { return ended },
+  }
+}
+
 /** 复用真实分发路径（withStatus.rawResponse）：url + 假 req/res */
 function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode: number; body: Record<string, unknown> }> {
   const handler = recruitmentApiHandlers.find((h) => h.url === urlPattern && h.method === 'post')
@@ -11,17 +37,10 @@ function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode
     headers: {},
     [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true, value: undefined }) }),
   }
-  let captured = ''
-  const res = {
-    statusCode: 200,
-    setHeader: () => undefined,
-    end: (body: string) => {
-      captured = body
-    },
-  }
+  const res = createFakeRes()
   return (handler.rawResponse(req, res) as Promise<unknown>).then(() => ({
     statusCode: res.statusCode,
-    body: captured ? (JSON.parse(captured) as Record<string, unknown>) : {},
+    body: res.chunks.length ? (JSON.parse(res.chunks.join('')) as Record<string, unknown>) : {},
   }))
 }
 
@@ -33,17 +52,19 @@ function mockUserKeyOf(userId: string): string {
 }
 
 const INTERVIEWER_KEY = mockUserKeyOf('user-interviewer-001')
-const INTERVIEWER_MEMBER_ID = 'mem-002' // USER_MEMBER_MAP['user-interviewer-001']
+const INTERVIEWER_MEMBER_ID = USER_MEMBER_MAP['user-interviewer-001']
+if (!INTERVIEWER_MEMBER_ID) throw new Error('USER_MEMBER_MAP 缺少面试官成员映射: user-interviewer-001')
 const MEMBER_KEY = mockUserKeyOf('user-member-001')
 
 const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude'
+/** plainUrl 依赖种子（见 db-recruitment.ts）：recruitmentReviews rev-001（applicantId u-002）←→ recruitmentInterviews int-002（interviewerIds [user-interviewer-001]） */
 const plainUrl = '/api/org/club-001/recruitment/act-001/reviews/rev-001/conclude'
 
-/** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 快照，afterEach 还原，避免用例间共享状态污染 */
+/** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 深拷贝快照（history 数组不共享引用），afterEach 还原，避免用例间共享状态污染 */
 let reviewsSnapshot: unknown[]
 let reviewIdsByActivity: Record<string, string[]>
 function snapshotDb() {
-  reviewsSnapshot = rdb.recruitmentReviews.map((r) => ({ ...r }))
+  reviewsSnapshot = rdb.recruitmentReviews.map((r) => structuredClone(r))
   reviewIdsByActivity = {}
   for (const a of rdb.recruitmentActivities) reviewIdsByActivity[a.id] = [...a.reviewIds]
 }
