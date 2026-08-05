@@ -222,8 +222,10 @@ function toggleVolunteer(clubId: string) {
     volunteerClubIds.value.push(clubId)
   } else {
     volunteerClubIds.value = volunteerClubIds.value.filter((id) => id !== clubId)
-    const deptIds = new Set(departmentsOfClub(clubId).map((d) => d.id))
-    preferences.value = preferences.value.filter((p) => !deptIds.has(p.departmentId))
+    const keptDeptIds = new Set(
+      volunteerClubIds.value.flatMap((cid) => departmentsOfClub(cid).map((d) => d.id)),
+    )
+    preferences.value = preferences.value.filter((p) => keptDeptIds.has(p.departmentId))
   }
 }
 

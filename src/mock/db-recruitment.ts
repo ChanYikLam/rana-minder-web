@@ -1711,8 +1711,9 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
   app.agreementClubSnapshot = ja.clubs.map((c) => c.clubName)
   app.allowJointAdjustment = input.allowJointAdjustment
   const availableClubIds = ja.clubs.map((c) => c.clubId)
-  app.volunteerClubIds = input.volunteerClubIds && input.volunteerClubIds.length > 0
-    ? availableClubIds.filter((id) => input.volunteerClubIds!.includes(id))
+  const volunteerClubIds = input.volunteerClubIds
+  app.volunteerClubIds = volunteerClubIds !== undefined
+    ? availableClubIds.filter((id) => volunteerClubIds.includes(id))
     : availableClubIds
   app.preferences = filterJointPreferences(ja, input.preferences, app.volunteerClubIds)
   app.answers = { ...(input.answers || {}) }

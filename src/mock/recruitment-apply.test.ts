@@ -287,6 +287,29 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     expect(app!.preferences, '空意向社团时部门意向应被清空').toEqual([])
   })
 
+  it('草稿清空意向社团后提交仍保持为空（submit 层与 draft 层同语义）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: ['club-001'],
+      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+    })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
+      volunteerClubIds: [],
+      preferences: [],
+    })
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: false,
+      volunteerClubIds: [],
+      answers: { f1: '清空意向后的提交' },
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
+    expect(app!.status).toBe('submitted')
+    expect(app!.volunteerClubIds, '提交时空数组不应回退为全部参与社团').toEqual([])
+    expect(app!.preferences).toEqual([])
+  })
+
   it('部门名称以服务端权威数据为准并按 departmentId 去重', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
