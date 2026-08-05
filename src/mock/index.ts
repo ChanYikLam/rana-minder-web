@@ -21,7 +21,7 @@ interface CorrectionRecord {
   submittedAt: string
   submitterName: string
 }
-const correctionsDb: CorrectionRecord[] = [
+export const correctionsDb: CorrectionRecord[] = [
   { id: 'cor-001', targetType: '申请记录', targetId: 'app-003', reason: '评分有误，应为 5 分', evidence: '截图', status: 'submitted', submittedAt: '2025-07-30T10:00:00+08:00', submitterName: '王浩然' },
   { id: 'cor-002', targetType: '成员信息', targetId: 'mem-002', reason: '部门信息未更新', evidence: '审批截图', status: 'approved', submittedAt: '2025-07-25T10:00:00+08:00', submitterName: '李思颖' },
 ]
@@ -2844,7 +2844,7 @@ policies: retentionPolicies,
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
-  // 管理员路由：事实纠错
+  // 管理员路由：事实纠错（共享 correctionsDb，与社团版/个人版真实落库一致）
   {
     url: '/api/admin/audit/corrections',
     method: 'get',
@@ -2852,9 +2852,7 @@ policies: retentionPolicies,
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'cor-003', targetType: '社团信息', targetId: 'club-002', reason: '社团名称有误', evidence: '审批文件', status: 'submitted', submittedAt: '2025-07-28T10:00:00+08:00', submitterName: '超级管理员' },
-          ],
+          items: [...correctionsDb].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
           nextCursor: null,
         },
       }
@@ -2864,24 +2862,42 @@ policies: retentionPolicies,
     url: '/api/admin/audit/corrections',
     method: 'post',
     response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { id: 'cor-' + Date.now(), status: 'submitted', submittedAt: new Date().toISOString(), ...body.input } }
+      const record: CorrectionRecord = {
+        id: 'cor-' + Date.now(),
+        targetType: String(body.input?.targetType || ''),
+        targetId: String(body.input?.targetId || ''),
+        reason: String(body.input?.reason || ''),
+        evidence: String(body.input?.evidence || ''),
+        status: 'submitted',
+        submittedAt: new Date().toISOString(),
+        submitterName: String(body.input?.submitterName || ''),
+      }
+      correctionsDb.unshift(record)
+      return { code: 0, data: record }
     },
   },
   {
     url: '/api/admin/audit/corrections/:correctionId/decide',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: { input: { decision: string } } }) => {
-      return {
-        code: 0,
-        data: { id: query.correctionId, status: body.input?.decision === 'approve' ? 'approved' : 'rejected', decidedAt: new Date().toISOString() },
+      const record = correctionsDb.find((c) => c.id === query.correctionId)
+      if (!record) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      record.status = body.input?.decision === 'approve' ? 'approved' : 'rejected'
+      return { code: 0, data: { id: record.id, status: record.status, decidedAt: new Date().toISOString() } }
     },
   },
   {
     url: '/api/admin/audit/corrections/:correctionId/withdraw',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
-      return { code: 0, data: { id: query.correctionId, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+      const record = correctionsDb.find((c) => c.id === query.correctionId)
+      if (!record) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
+      }
+      record.status = 'withdrawn'
+      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
     },
   },
   // 管理员路由：邮件配置

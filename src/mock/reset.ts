@@ -1,6 +1,7 @@
 import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots } from './db-recruitment'
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
+import { correctionsDb } from './index'
 
 const seed = {
   recruitmentActivities: structuredClone(recruitmentActivities),
@@ -24,6 +25,7 @@ const seed = {
   transitionState: structuredClone(transitionState),
   sysNotifications: structuredClone(sysNotifications),
   notificationSeq: notificationSeqBase,
+  correctionsDb: structuredClone(correctionsDb),
 } as const
 
 export function resetRecruitmentDB(): void {
@@ -54,4 +56,8 @@ export function resetDb(): void {
 export function resetNotifications(): void {
   sysNotifications.splice(0, sysNotifications.length, ...structuredClone(seed.sysNotifications))
   setNotificationSeq(seed.notificationSeq)
+}
+
+export function resetCorrections(): void {
+  correctionsDb.splice(0, correctionsDb.length, ...structuredClone(seed.correctionsDb))
 }
