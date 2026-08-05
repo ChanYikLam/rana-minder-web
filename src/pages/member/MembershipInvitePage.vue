@@ -7,6 +7,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import { NameSearch, type SearchResult } from '@/components/form'
 import WithdrawAction from '@/components/operation/WithdrawAction.vue'
 import { get, post } from '@/services/client'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
@@ -47,6 +48,7 @@ const actingId = ref<string | null>(null)
 const showSend = ref(false)
 const candidateKeyword = ref('')
 const candidates = ref<Candidate[]>([])
+const searchFailed = ref(false)
 const selectedCandidate = ref<Candidate | null>(null)
 const targetDept = ref('')
 const sendError = ref('')
@@ -127,14 +129,28 @@ function isExpired(inv: Invite): boolean {
   return inv.status === 'expired' || (isActionable(inv) && new Date(inv.expiredAt).getTime() < Date.now())
 }
 
-// 候选搜索（姓名连续子串/学号精确）
-async function searchCandidates() {
-  const clubId = route.params.clubId as string
-  const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: candidateKeyword.value })
-  if (r.kind === 'completed') {
-    candidates.value = r.data.items
-  }
-}
+// 候选搜索（姓名连续子串/学号精确）——300ms 防抖；清空关键字立即重置并作废在途请求
+const { searching: candidateSearching, schedule: scheduleSearch } = useDebouncedSearch({
+  onSearch: async (kw, isStale) => {
+    if (!kw) {
+      candidates.value = []
+      searchFailed.value = false
+      return
+    }
+    searchFailed.value = false
+    const clubId = route.params.clubId as string
+    const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: kw })
+    if (isStale()) return
+    if (r.kind === 'completed') {
+      candidates.value = r.data.items
+      searchFailed.value = false
+    } else {
+      // 搜索失败（非 completed）：清空旧候选结果，避免残留误导
+      candidates.value = []
+      searchFailed.value = true
+    }
+  },
+})
 
 const searchResults = computed<SearchResult[]>(() =>
   candidates.value.map((c) => ({
@@ -155,6 +171,7 @@ function onSelectCandidate(r: SearchResult) {
 function openSend() {
   candidateKeyword.value = ''
   candidates.value = []
+  searchFailed.value = false
   selectedCandidate.value = null
   targetDept.value = departments.value[0]?.id ?? ''
   sendError.value = ''
@@ -334,12 +351,13 @@ onMounted(loadData)
               <NameSearch
                 v-model="candidateKeyword"
                 :results="searchResults"
-                :loading="false"
+                :loading="candidateSearching"
                 placeholder="姓名或学号..."
-                @update:model-value="searchCandidates"
+                @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <p v-if="candidateKeyword && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
+              <p v-else-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>

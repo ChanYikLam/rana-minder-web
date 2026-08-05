@@ -216,6 +216,7 @@ export interface JointClub {
   confirmedAt: string | null
   confirmedBy: string | null
   suspendedSince: string | null
+  departments: { id: string; name: string }[]
 }
 
 export interface JointActivity {
@@ -262,6 +263,7 @@ export interface JointApplication {
   agreementVersion: number | null
   allowJointAdjustment: boolean
   volunteerClubIds: string[]
+  preferences: { departmentId: string; departmentName: string }[]
   agreementClubSnapshot: string[]
   answers: Record<string, unknown>
   formVersion: number
@@ -535,13 +537,27 @@ export const recruitmentInvitations: RecInvitation[] = [
   },
 ]
 
+/** 各社团招新部门（联合活动拟参与社团展示用；与 act-001/act-002 种子一致） */
+const JOINT_CLUB_DEPARTMENTS: Record<string, { id: string; name: string }[]> = {
+  'club-001': [
+    { id: 'dept-001', name: '技术部' },
+    { id: 'dept-002', name: '运营部' },
+    { id: 'dept-003', name: '设计部' },
+  ],
+  'club-002': [
+    { id: 'dept-101', name: '嵌入式组' },
+    { id: 'dept-102', name: '硬件组' },
+  ],
+  'club-003': [{ id: 'dept-201', name: '训练部' }],
+}
+
 export const jointActivities: JointActivity[] = [
   {
     id: 'jnt-001', title: '2025 计算机与电子设计联合招新', description: '两个协会联合开展的新生招新面试',
     status: 'published',
     clubs: [
-      { clubId: 'club-001', clubName: '计算机协会', status: 'locked', confirmedAt: daysFromNow(-27), confirmedBy: '张明远', suspendedSince: null },
-      { clubId: 'club-002', clubName: '电子设计协会', status: 'locked', confirmedAt: daysFromNow(-27), confirmedBy: '林晓峰', suspendedSince: null },
+      { clubId: 'club-001', clubName: '计算机协会', status: 'locked', confirmedAt: daysFromNow(-27), confirmedBy: '张明远', suspendedSince: null, departments: JOINT_CLUB_DEPARTMENTS['club-001'] },
+      { clubId: 'club-002', clubName: '电子设计协会', status: 'locked', confirmedAt: daysFromNow(-27), confirmedBy: '林晓峰', suspendedSince: null, departments: JOINT_CLUB_DEPARTMENTS['club-002'] },
     ],
     confirmRound: 1, confirmDeadline: daysFromNow(10),
     sharedAgreement: { version: 1, text: '您的报名资料将在两个参与社团之间共享，用于联合面试与选拔。您可以在提交前选择是否同意共享；拒绝共享则不能参加本次联合活动。' },
@@ -561,14 +577,14 @@ export const jointApplications: JointApplication[] = [
   {
     id: 'japp-001', jointId: 'jnt-001', applicantId: 'u-006', applicantName: '林婉婷', studentId: '20240006',
     status: 'submitted', consented: true, consentAt: daysFromNow(-25),
-    agreementVersion: 1, allowJointAdjustment: true, volunteerClubIds: ['club-001', 'club-002'], agreementClubSnapshot: ['计算机协会', '电子设计协会'],
+    agreementVersion: 1, allowJointAdjustment: true, volunteerClubIds: ['club-001', 'club-002'], preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }], agreementClubSnapshot: ['计算机协会', '电子设计协会'],
     answers: {}, formVersion: 1,
     submittedAt: daysFromNow(-25), version: 1,
   },
   {
     id: 'japp-002', jointId: 'jnt-001', applicantId: 'u-001', applicantName: '刘子豪', studentId: '20240001',
     status: 'draft', consented: false, consentAt: null,
-    agreementVersion: 1, allowJointAdjustment: false, volunteerClubIds: [], agreementClubSnapshot: [],
+    agreementVersion: 1, allowJointAdjustment: false, volunteerClubIds: [], preferences: [], agreementClubSnapshot: [],
     answers: {}, formVersion: 1,
     submittedAt: null, version: 1,
   },
@@ -1541,6 +1557,7 @@ export function createJointActivity(clubId: string, clubName: string, actorName:
       confirmedAt: cid === clubId ? now() : null,
       confirmedBy: cid === clubId ? actorName : null,
       suspendedSince: null,
+      departments: JOINT_CLUB_DEPARTMENTS[cid] || [],
     })),
     confirmRound: 1, confirmDeadline: input.confirmDeadline,
     sharedAgreement: { version: 1, text: input.sharedAgreement || '您的报名资料将在全部参与社团之间共享，用于联合面试与选拔。' },
@@ -1584,7 +1601,7 @@ export function adjustJointClubList(jointId: string, clubIds: string[], newDeadl
   if (clubIds.length < 2) return err('联合活动至少需要两个参与社团')
   ja.clubs = clubIds.map((cid) => {
     const old = ja.clubs.find((c) => c.clubId === cid)
-    return old ? { ...old, status: old.status === 'accepted' ? 'confirm_pending' : old.status, confirmedAt: old.status === 'accepted' ? null : old.confirmedAt, confirmedBy: old.status === 'accepted' ? null : old.confirmedBy } : { clubId: cid, clubName: cid, status: 'invited', confirmedAt: null, confirmedBy: null, suspendedSince: null }
+    return old ? { ...old, status: old.status === 'accepted' ? 'confirm_pending' : old.status, confirmedAt: old.status === 'accepted' ? null : old.confirmedAt, confirmedBy: old.status === 'accepted' ? null : old.confirmedBy } : { clubId: cid, clubName: cid, status: 'invited', confirmedAt: null, confirmedBy: null, suspendedSince: null, departments: JOINT_CLUB_DEPARTMENTS[cid] || [] }
   })
   ja.confirmRound += 1
   ja.confirmDeadline = newDeadline
@@ -1618,7 +1635,21 @@ export function publishJointActivity(jointId: string): { ok: boolean; error?: st
   return ok()
 }
 
-export function saveJointApplicationDraft(jointId: string, applicantId: string, applicantName: string, studentId: string): { ok: boolean; error?: string; data?: JointApplication } {
+/** 过滤部门意向为已选意向社团的合法部门（先选协会才能选部门），保留优先级顺序；未选社团时默认全部参与社团 */
+function filterJointPreferences(ja: JointActivity, prefs?: { departmentId: string; departmentName: string }[], volunteerClubIds?: string[]): { departmentId: string; departmentName: string }[] {
+  if (!prefs) return []
+  const clubIds = volunteerClubIds && volunteerClubIds.length > 0 ? volunteerClubIds : ja.clubs.map((c) => c.clubId)
+  const valid = new Set(ja.clubs.filter((c) => clubIds.includes(c.clubId)).flatMap((c) => c.departments.map((d) => d.id)))
+  return prefs.filter((p) => valid.has(p.departmentId)).map((p) => ({ departmentId: p.departmentId, departmentName: p.departmentName }))
+}
+
+export function saveJointApplicationDraft(
+  jointId: string,
+  applicantId: string,
+  applicantName: string,
+  studentId: string,
+  input?: { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[] },
+): { ok: boolean; error?: string; data?: JointApplication } {
   const ja = findJoint(jointId)
   if (!ja) return err('联合活动不存在')
   if (ja.status === 'draft' || ja.status === 'confirmed') return err('联合活动尚未首次公布')
@@ -1627,15 +1658,24 @@ export function saveJointApplicationDraft(jointId: string, applicantId: string, 
     app = {
       id: 'japp-' + Date.now(), jointId, applicantId, applicantName, studentId,
       status: 'draft', consented: false, consentAt: null, agreementVersion: null,
-      allowJointAdjustment: true, volunteerClubIds: [], agreementClubSnapshot: [], answers: {}, formVersion: ja.formVersion, submittedAt: null, version: 1,
+      allowJointAdjustment: true, volunteerClubIds: [], preferences: [], agreementClubSnapshot: [], answers: {}, formVersion: ja.formVersion, submittedAt: null, version: 1,
     }
     jointApplications.push(app)
     ja.applicantIds.push(app.id)
   }
+  app.consented = input?.consented ?? app.consented
+  app.allowJointAdjustment = input?.allowJointAdjustment ?? app.allowJointAdjustment
+  if (input?.volunteerClubIds) {
+    app.volunteerClubIds = input.volunteerClubIds.filter((id) => ja.clubs.some((c) => c.clubId === id))
+  }
+  if (input?.preferences) app.preferences = filterJointPreferences(ja, input.preferences, app.volunteerClubIds)
+  if (input?.answers) app.answers = { ...input.answers }
+  app.formVersion = ja.formVersion
+  app.version += 1
   return ok(app)
 }
 
-export function submitJointApplication(jointId: string, applicantId: string, input: { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown> }): { ok: boolean; error?: string; data?: JointApplication } {
+export function submitJointApplication(jointId: string, applicantId: string, input: { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown>; preferences?: { departmentId: string; departmentName: string }[] }): { ok: boolean; error?: string; data?: JointApplication } {
   const ja = findJoint(jointId)
   if (!ja) return err('联合活动不存在')
   if (ja.channelStatus !== 'open') return err('联合报名通道当前未开放')
@@ -1655,6 +1695,7 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
   app.volunteerClubIds = input.volunteerClubIds && input.volunteerClubIds.length > 0
     ? availableClubIds.filter((id) => input.volunteerClubIds!.includes(id))
     : availableClubIds
+  app.preferences = filterJointPreferences(ja, input.preferences, app.volunteerClubIds)
   app.answers = { ...(input.answers || {}) }
   app.formVersion = ja.formVersion
   app.submittedAt = now()

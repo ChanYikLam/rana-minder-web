@@ -88,9 +88,44 @@ async function loadData() {
     activity.value = actRes.data
     const versions = (formRes as { kind: 'completed'; data: { versions: { fields: FormField[] }[] } }).data.versions
     formFields.value = versions[0]?.fields || []
+    await loadMyApplication()
     state.value = 'normal'
   } else {
     state.value = 'error'
+  }
+}
+
+interface MyApplication {
+  status: string
+  answers?: Record<string, unknown>
+  preferences?: { departmentId: string; departmentName: string }[]
+}
+
+/** 已有草稿时回填表单内容，支持继续修改（尽力而为，失败不阻塞页面） */
+async function loadMyApplication() {
+  try {
+    const result = await get<MyApplication>(`/activity/recruitment/${route.params.activityId}/apply`)
+    if (result.kind === 'completed' && result.data.status === 'draft') {
+      restoreDraft(result.data)
+    }
+  } catch {
+    // 忽略：草稿恢复失败不影响表单填写
+  }
+}
+
+function restoreDraft(app: MyApplication) {
+  if (app.answers) {
+    for (const [fieldId, value] of Object.entries(app.answers)) {
+      if (typeof value !== 'string') continue
+      formData[fieldId] = value
+      const field = formFields.value.find((f) => f.id === fieldId)
+      if (field?.type === 'file' && value) {
+        formFiles[fieldId] = { fileId: value, name: '已上传附件', size: 0, checking: false, error: false }
+      }
+    }
+  }
+  if (app.preferences) {
+    preferences.value = app.preferences.map((p) => ({ departmentId: p.departmentId, departmentName: p.departmentName }))
   }
 }
 
