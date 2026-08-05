@@ -24,6 +24,15 @@ export function applicantStudentIdOf(applicantId: string): string {
   return APPLICANT_PROFILES[applicantId]?.studentId || ''
 }
 
+/** 动态申请人档案：按学号反查已有档案（成员与申请人同人复用），未命中注册 u-auto-* 档案 */
+export function ensureApplicantProfile(studentId: string, name: string): string {
+  const existing = Object.entries(APPLICANT_PROFILES).find(([, p]) => p.studentId === studentId)
+  if (existing) return existing[0]
+  const id = 'u-auto-' + Date.now()
+  APPLICANT_PROFILES[id] = { name, studentId }
+  return id
+}
+
 const now = () => new Date().toISOString()
 export function daysFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
