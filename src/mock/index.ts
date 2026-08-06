@@ -922,7 +922,7 @@ const personalHandlers: MockMethod[] = [
           return {
             id: a.id, type: 'application', title: `招新报名：${act?.title || a.activityId}`,
             description: `${act?.clubName || ''} · ${a.status === 'identity_anomaly' ? '身份异常待处理' : a.status === 'revision_requested' ? '补充材料待处理' : '报名审核中'}`,
-            submittedAt: a.submittedAt, link: `/activity/recruitment/${a.activityId}`,
+            submittedAt: a.submittedAt, link: `/activity/recruitment/${a.activityId}/apply`,
             activityId: a.activityId, status: a.status,
           }
         })
@@ -932,7 +932,7 @@ const personalHandlers: MockMethod[] = [
           return {
             id: a.id, type: 'joint', title: `联合报名：${ja?.title || a.jointId}`,
             description: '联合活动报名进行中',
-            submittedAt: a.submittedAt, link: `/activity/joint/${a.jointId}`,
+            submittedAt: a.submittedAt, link: `/activity/joint/${a.jointId}/apply`,
             activityId: '', status: a.status,
           }
         })
