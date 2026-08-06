@@ -15,22 +15,31 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      include: ['src/mock/**', 'src/services/**', 'src/router/**', 'src/components/**'],
+      include: [
+        'src/mock/**',
+        'src/services/**',
+        'src/router/**',
+        'src/components/**',
+        'src/composables/**',
+        'src/lib/**',
+        'src/state/**',
+        'src/utils/**',
+      ],
       exclude: [
         'src/**/*.test.ts',
         'src/**/*.d.ts',
         'src/mock/index.ts',
         'src/mock/recruitment-api.ts',
         'src/router/index.ts',
-        'src/router/guards.ts',
+        'src/components/ui/**',
       ],
-// 基线防倒退门槛（2026-08-04 实测 lines 24.4/stmts 22.4/funcs 19.8/branches 17.7）。
-      // 实际覆盖集中在 mock/services 模块；随页面/composables 测试补齐后应上调。
+      // 基线防倒退门槛（2026-08-07 实测 lines 50.1/stmts 46.4/funcs 45.0/branches 38.5）。
+      // 统计范围已扩至 composables/lib/state/utils；随页面测试补齐可继续上调。
       thresholds: {
-        statements: 20,
-        functions: 18,
-        branches: 16,
-        lines: 22,
+        statements: 42,
+        functions: 40,
+        branches: 34,
+        lines: 45,
       },
     },
   },
