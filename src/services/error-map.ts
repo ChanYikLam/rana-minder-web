@@ -103,7 +103,7 @@ export function parseApiError(body: unknown): ApiError {
     }
     return {
       code: rawCode,
-      message: String(b.message || ERROR_MESSAGES['IFC-ERR-016']),
+      message: String(b.message || ERROR_MESSAGES[rawCode]),
       supportId: b.supportId ? String(b.supportId) : undefined,
       fieldErrors: b.fieldErrors as Record<string, string[]> | undefined,
     }

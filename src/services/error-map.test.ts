@@ -63,6 +63,12 @@ describe('parseApiError', () => {
     expect(result.message).toBe('请求体 JSON 解析失败')
   })
 
+  it('已知码缺 message 时用该码自身文案兜底（回归：此前回退 016 文案）', () => {
+    const result = parseApiError({ code: 'IFC-ERR-017' })
+    expect(result.code).toBe('IFC-ERR-017')
+    expect(result.message).toBe(ERROR_MESSAGES['IFC-ERR-017'])
+  })
+
   it('falls back to IFC-ERR-016 for unknown codes', () => {
     const result = parseApiError({ code: 'UNKNOWN_CODE', message: 'sensitive stack trace' })
     expect(result.code).toBe('IFC-ERR-016')
