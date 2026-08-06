@@ -1181,9 +1181,7 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
   } else if (app.status === 'submitted') {
-    const t = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
-    if (!t.ok) return err(t.reason || '已提交申请当前不可编辑')
-    app.status = 'draft'
+    return err('申请已提交，请通过撤销提交回到草稿')
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
   app.version += 1
@@ -1222,6 +1220,7 @@ export function submitApplication(activityId: string, applicantId: string, input
     recruitmentApplications.push(app)
     a.applicantIds.push(app.id)
   }
+  if (app && app.status === 'submitted' && !inAdjustment) return err('申请已提交，请通过撤销提交回到草稿')
   let okResult: { ok: boolean; reason?: string }
   if (app.status === 'exited') {
     okResult = assertTransition('SM-REC-003', 'exited', 'submitted', 'recovery_resubmit')
@@ -1229,11 +1228,6 @@ export function submitApplication(activityId: string, applicantId: string, input
     okResult = assertTransition('SM-REC-003', 'revision_requested', 'submitted', 'submit_in_window')
   } else if (inAdjustment && app.status === 'submitted') {
     okResult = assertTransition('SM-REC-003', 'submitted', 'submitted', 'rule_tightening')
-  } else if (app.status === 'submitted') {
-    okResult = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
-    if (okResult.ok) {
-      okResult = assertTransition('SM-REC-003', 'draft', 'submitted', 'submit')
-    }
   } else {
     okResult = assertTransition('SM-REC-003', app.status, 'submitted', 'submit')
   }
