@@ -1,43 +1,50 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Type, AlignLeft, Hash, Calendar, CircleDot, ListChecks, Image, FileUp, Plus, X, GripVertical, Save, Eye } from '@lucide/vue'
+import { Type, AlignLeft, Hash, Calendar, CalendarClock, CircleDot, ListChecks, ChevronDown, CheckSquare, Image, FileUp, Rows3, Plus, X, GripVertical, Save, Eye, Send, Archive, RotateCcw, Copy } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
 interface Field { id: string; type: string; label: string; required: boolean; readonly: boolean; permission: string; options: string[] | null; description: string | null }
 
 const route = useRoute()
+const router = useRouter()
 const state = ref<PageState>('loading')
 const formTitle = ref('')
 const formId = ref('')
+const formStatus = ref('draft')
 const currentVersion = ref(1)
 const fields = ref<Field[]>([])
 const selectedFieldId = ref<string | null>(null)
 const saving = ref(false)
 const previewOpen = ref(false)
+const publishing = ref(false)
 
 const selectedField = computed(() => {
   if (!selectedFieldId.value) return null
   return fields.value.find((f) => f.id === selectedFieldId.value) || null
 })
 
-// P-FORM-01：字段类型按规格对齐为 8 种（短文本/长文本/数字/日期/单选/多选/图片/文件）
+// P-FORM-01：字段类型与 domain/form.ts FormFieldType 全量对齐（12 种）
 const fieldTypes = [
   { type: 'text', label: '短文本', icon: Type },
   { type: 'textarea', label: '长文本', icon: AlignLeft },
   { type: 'number', label: '数字', icon: Hash },
   { type: 'date', label: '日期', icon: Calendar },
+  { type: 'datetime', label: '日期时间', icon: CalendarClock },
   { type: 'radio', label: '单选', icon: CircleDot },
   { type: 'multi_select', label: '多选', icon: ListChecks },
+  { type: 'select', label: '下拉选择', icon: ChevronDown },
+  { type: 'checkbox', label: '勾选', icon: CheckSquare },
   { type: 'image', label: '图片', icon: Image },
   { type: 'file', label: '文件', icon: FileUp },
+  { type: 'array', label: '子表单', icon: Rows3 },
 ]
 
-// 历史类型标签兜底（select/checkbox/datetime 等旧数据仍可渲染）
+// 历史类型标签兜底（rating 等旧数据仍可渲染）
 const legacyTypeLabels: Record<string, string> = {
   select: '下拉选择', checkbox: '勾选', datetime: '日期时间', array: '子表单',
 }
@@ -46,18 +53,19 @@ function labelOf(type: string): string {
   return fieldTypes.find((ft) => ft.type === type)?.label || legacyTypeLabels[type] || type
 }
 
-const optionableTypes = ['radio', 'multi_select', 'select']
+const optionableTypes = ['radio', 'multi_select', 'select', 'checkbox']
 
 async function loadData() {
   state.value = 'loading'
   const id = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) { state.value = 'error'; return }
-  const result = await get<{ id: string; title: string; fields: Field[]; version: number }>(`${apiScope.prefix}/forms/designer/${id}`)
+  const result = await get<{ id: string; title: string; status: string; fields: Field[]; version: number }>(`${apiScope.prefix}/forms/designer/${id}`)
   if (result.kind === 'completed') {
     formTitle.value = result.data.title
     fields.value = result.data.fields
     formId.value = result.data.id || id
+    formStatus.value = result.data.status || 'draft'
     currentVersion.value = typeof result.data.version === 'number' ? result.data.version : 1
     state.value = 'normal'
   } else { state.value = 'error' }
@@ -106,8 +114,83 @@ async function handleSave() {
     if (typeof data?.version === 'number') currentVersion.value = data.version
     else currentVersion.value = nextVersion
     toast.success(`表单已保存（v${currentVersion.value}）`)
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
   } else {
     toast.error('保存失败，请稍后重试')
+  }
+}
+
+// SM-FORM-001：draft --publish--> published（发布当前草稿版本）
+async function handlePublish() {
+  publishing.value = true
+  const id = (formId.value || (route.params.formId as string))
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { publishing.value = false; return }
+  const result = await post(`${apiScope.prefix}/forms/designer/${id}/publish`, { version: currentVersion.value })
+  publishing.value = false
+  if (result.kind === 'completed') {
+    toast.success(`表单 v${currentVersion.value} 已发布`)
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '发布失败')
+  } else {
+    toast.error('发布失败，请稍后重试')
+  }
+}
+
+// SM-FORM-001：published --deprecate--> deprecated
+async function handleDeprecate() {
+  const id = (formId.value || (route.params.formId as string))
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
+  const result = await post(`${apiScope.prefix}/forms/designer/${id}/deprecate`, {})
+  if (result.kind === 'completed') {
+    toast.success('表单已停用（历史版本保留）')
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '停用失败')
+  } else {
+    toast.error('停用失败，请稍后重试')
+  }
+}
+
+// SM-FORM-001：deprecated --reuse--> draft
+async function handleReuse() {
+  const id = (formId.value || (route.params.formId as string))
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
+  const result = await post(`${apiScope.prefix}/forms/designer/${id}/reuse`, {})
+  if (result.kind === 'completed') {
+    toast.success('表单已复用，可继续编辑')
+    await loadData()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '复用失败')
+  } else {
+    toast.error('复用失败，请稍后重试')
+  }
+}
+
+// SM-FORM-001：published|deprecated --clone--> draft（生成独立草稿）
+async function handleClone() {
+  const id = (formId.value || (route.params.formId as string))
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
+  const result = await post(`${apiScope.prefix}/forms/designer/${id}/clone`, { title: `${formTitle.value}（副本）` })
+  if (result.kind === 'completed') {
+    const data = result.data as { id?: string }
+    toast.success('已克隆生成新草稿')
+    const newId = data?.id
+    if (newId) {
+      const base = apiScope.prefix === '/admin' ? '/admin' : `/org/${route.params.clubId}`
+      router.push(`${base}/forms/designer/${newId}`)
+    } else {
+      await loadData()
+    }
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '克隆失败')
+  } else {
+    toast.error('克隆失败，请稍后重试')
   }
 }
 
@@ -118,8 +201,21 @@ onMounted(loadData)
   <PageStateBoundary :state="state" title="表单设计器" @retry="loadData">
     <div v-if="state === 'normal'" class="max-w-5xl">
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-text-primary">{{ formTitle }}</h1>
+        <div>
+          <h1 class="text-2xl font-bold text-text-primary">{{ formTitle }}</h1>
+          <p class="text-sm text-text-secondary mt-0.5">
+            v{{ currentVersion }}
+            <span class="ml-2 px-2 py-0.5 rounded-full text-xs" :class="formStatus === 'published' ? 'bg-success-subtle text-success' : formStatus === 'deprecated' ? 'bg-warning-subtle text-warning' : 'bg-subtle text-text-secondary'">
+              {{ formStatus === 'published' ? '已发布' : formStatus === 'deprecated' ? '已停用' : '草稿' }}
+            </span>
+          </p>
+        </div>
         <div class="flex gap-2">
+          <template v-if="formStatus === 'published' || formStatus === 'deprecated'">
+            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="handleClone"><Copy :size="16" /> 克隆</button>
+          </template>
+          <button v-if="formStatus === 'published'" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="handleDeprecate"><Archive :size="16" /> 停用</button>
+          <button v-if="formStatus === 'deprecated'" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="handleReuse"><RotateCcw :size="16" /> 复用</button>
           <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="previewOpen = true"><Eye :size="16" /> 预览</button>
           <button
             class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
@@ -127,6 +223,13 @@ onMounted(loadData)
             @click="handleSave"
           >
             <Save :size="16" /> {{ saving ? '保存中...' : '保存' }}
+          </button>
+          <button
+            class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+            :disabled="publishing"
+            @click="handlePublish"
+          >
+            <Send :size="16" /> {{ publishing ? '发布中...' : '发布' }}
           </button>
         </div>
       </div>
@@ -243,8 +346,8 @@ onMounted(loadData)
               </label>
               <p v-if="field.description" class="text-xs text-text-secondary mb-1">{{ field.description }}</p>
               <input
-                v-if="['text', 'date', 'number'].includes(field.type)"
-                :type="field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'"
+                v-if="['text', 'date', 'datetime', 'number'].includes(field.type)"
+                :type="field.type === 'date' || field.type === 'datetime' ? 'datetime-local' : field.type === 'number' ? 'number' : 'text'"
                 :placeholder="field.type === 'text' ? '请输入' : ''"
                 disabled
                 class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary opacity-70"
@@ -269,6 +372,9 @@ onMounted(loadData)
               </div>
               <div v-else-if="field.type === 'file'" class="w-full h-9 px-3 rounded-md border border-dashed border-border flex items-center justify-center text-xs text-text-secondary">
                 文件上传区域（预览）
+              </div>
+              <div v-else-if="field.type === 'array'" class="rounded-md border border-dashed border-border px-3 py-2 text-xs text-text-secondary">
+                子表单：可添加多条记录（预览）
               </div>
             </div>
           </div>
