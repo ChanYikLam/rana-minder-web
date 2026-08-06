@@ -49,7 +49,7 @@ function toSearchResult(g: GroupSearchResult): SearchResult {
 }
 
 // Group 搜索——300ms 防抖；清空关键字立即重置并作废在途请求
-const { searching: groupSearching, schedule: scheduleGroupSearch, seq } = useDebouncedSearch({
+const { searching: groupSearching, seq: groupSearchSeq, schedule: scheduleGroupSearch } = useDebouncedSearch({
   onSearch: async (kw) => {
     if (!kw) {
       groupSearchFailed.value = false
@@ -58,9 +58,9 @@ const { searching: groupSearching, schedule: scheduleGroupSearch, seq } = useDeb
       return
     }
     groupSearchFailed.value = false
-    const mySeq = seq.value
+    const mySeq = groupSearchSeq.value
     const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: kw })
-    if (mySeq !== seq.value) return
+    if (mySeq !== groupSearchSeq.value) return
     if (res.kind === 'completed') {
       rawResults.value = res.data.items
       groupResults.value = res.data.items.map(toSearchResult)

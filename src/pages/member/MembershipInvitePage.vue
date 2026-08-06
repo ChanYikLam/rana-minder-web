@@ -130,7 +130,7 @@ function isExpired(inv: Invite): boolean {
 }
 
 // 候选搜索（姓名连续子串/学号精确）——300ms 防抖；清空关键字立即重置并作废在途请求
-const { searching: candidateSearching, schedule: scheduleSearch, seq } = useDebouncedSearch({
+const { searching: candidateSearching, seq: candidateSeq, schedule: scheduleSearch } = useDebouncedSearch({
   onSearch: async (kw) => {
     if (!kw) {
       candidates.value = []
@@ -139,9 +139,9 @@ const { searching: candidateSearching, schedule: scheduleSearch, seq } = useDebo
     }
     searchFailed.value = false
     const clubId = route.params.clubId as string
-    const mySeq = seq.value
+    const mySeq = candidateSeq.value
     const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: kw })
-    if (mySeq !== seq.value) return
+    if (mySeq !== candidateSeq.value) return
     if (r.kind === 'completed') {
       candidates.value = r.data.items
       searchFailed.value = false

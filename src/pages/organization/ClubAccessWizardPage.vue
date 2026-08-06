@@ -104,9 +104,10 @@ function toSearchResult(g: CasdoorGroupRow): SearchResult {
   }
 }
 
-const { searching, schedule, seq } = useDebouncedSearch({
+const { searching, seq, schedule } = useDebouncedSearch({
   onSearch: async (kw) => {
     if (!kw) {
+      // 空关键字：立即重置为候选列表，不发请求
       searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
       searchFailed.value = false
       return
