@@ -337,12 +337,20 @@ function formatDateTime(iso?: string): string {
 }
 
 /** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
+/** 提交详情只读回显：表单字段值按类型渲染（数组 join、结构化对象 JSON、文件显示「已上传附件」），空值不展示 */
+function renderAnswerValue(v: unknown): string {
+  if (v == null || v === '') return ''
+  if (Array.isArray(v)) return v.map(renderAnswerValue).filter(Boolean).join('、')
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
 function answersOf(fieldId: string): string {
   const v = myApplication.value?.answers?.[fieldId]
   if (v == null || v === '') return ''
   const field = formFields.value.find((f) => f.id === fieldId)
   if (field?.type === 'file') return '已上传附件'
-  return String(v)
+  return renderAnswerValue(v)
 }
 
 /** 意向社团 id → 名称（详情接口参与社团与部门列表同源，取任一可用的名称） */

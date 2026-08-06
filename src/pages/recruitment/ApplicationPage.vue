@@ -123,13 +123,20 @@ function statusLabel(status: string): string {
   return READONLY_STATUS_LABELS[status] || '等待审核'
 }
 
-/** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
+/** 提交详情只读回显：表单字段值按类型渲染（数组 join、结构化对象 JSON、文件显示「已上传附件」），空值不展示 */
+function renderAnswerValue(v: unknown): string {
+  if (v == null || v === '') return ''
+  if (Array.isArray(v)) return v.map(renderAnswerValue).filter(Boolean).join('、')
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
 function answersOf(fieldId: string): string {
   const v = myApplication.value?.answers?.[fieldId]
   if (v == null || v === '') return ''
   const field = formFields.value.find((f) => f.id === fieldId)
   if (field?.type === 'file') return '已上传附件'
-  return String(v)
+  return renderAnswerValue(v)
 }
 
 function formatDateTime(iso?: string | null): string {
