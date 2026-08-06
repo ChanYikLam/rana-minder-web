@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
-import { resolveLoginTarget, ADMIN_HOME_PATH } from '@/pages/auth/loginTarget'
+import { resolveLoginTarget, ADMIN_HOME_PATH, PROFILE_GATE_PATH } from '@/pages/auth/loginTarget'
 import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
 
 const routes: RouteRecordRaw[] = [
@@ -542,7 +542,7 @@ router.beforeEach(async (to) => {
     if (target === ADMIN_HOME_PATH) {
       return { name: 'P-ORG-01' }
     }
-    if (target === '/me/profile/required') {
+    if (target === PROFILE_GATE_PATH) {
       return { name: 'P-GEN-04' }
     }
     if (target.startsWith('/org/')) {

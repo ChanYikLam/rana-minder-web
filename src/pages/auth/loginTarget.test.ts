@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveLoginTarget, parseSameOriginRedirect, ADMIN_HOME_PATH } from './loginTarget'
+import { resolveLoginTarget, parseSameOriginRedirect, ADMIN_HOME_PATH, PROFILE_GATE_PATH } from './loginTarget'
 
 function makeCtx(overrides: {
   workspace?: { clubId: string } | null
@@ -70,14 +70,14 @@ describe('resolveLoginTarget', () => {
         needsProfileGate: true,
       }),
     )
-    expect(target).toBe('/me/profile/required')
+    expect(target).toBe(PROFILE_GATE_PATH)
   })
 
   it('资料未完善但无 workspace 时同样进入门禁页', () => {
     const target = resolveLoginTarget(
       makeCtx({ needsProfileGate: true }),
     )
-    expect(target).toBe('/me/profile/required')
+    expect(target).toBe(PROFILE_GATE_PATH)
   })
 })
 
@@ -100,5 +100,19 @@ describe('parseSameOriginRedirect', () => {
 
   it('畸形路径不抛错：URL 规范化后仍按同源路径处理', () => {
     expect(parseSameOriginRedirect('/%', ORIGIN)).toBe('/%')
+  })
+
+  it('WHATWG 反斜杠变体："/\\evil.com" 会被解析为跨源，显式拒绝返回 null', () => {
+    expect(parseSameOriginRedirect('/\\evil.com', ORIGIN)).toBeNull()
+  })
+
+  it('制表符/换行变体："/\\t/evil.com" 剥离开后为协议相对引用，显式拒绝返回 null', () => {
+    expect(parseSameOriginRedirect('/\t/evil.com', ORIGIN)).toBeNull()
+    expect(parseSameOriginRedirect('/\n/evil.com', ORIGIN)).toBeNull()
+  })
+
+  it('保守策略：任何含反斜杠的 redirect 一律拒绝（合法回跳不应含反斜杠）', () => {
+    expect(parseSameOriginRedirect('/org\\club-001', ORIGIN)).toBeNull()
+    expect(parseSameOriginRedirect('/\\', ORIGIN)).toBeNull()
   })
 })

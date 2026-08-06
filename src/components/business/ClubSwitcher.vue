@@ -43,8 +43,10 @@ async function switchClub(club: MyClub) {
   const ok = await workspace.loadWorkspace(club.clubId)
   switching.value = false
   if (!ok) return
-  // 同步会话工作空间，避免 store 为 club-002、session.workspace 仍为 club-001 的双源不一致
+  // 同步会话工作空间与权限集，避免 store 为 club-002、session 仍为 club-001 的双源不一致
+  // （setWorkspaceInfo 合并保留 memberId，自审逻辑不失效；权限按新社团上下文刷新）
   session.setWorkspaceInfo({ clubId: club.clubId, clubName: club.clubName, role: club.role })
+  session.setPermissions([...workspace.currentPermissions])
   await router.push(`/org/${club.clubId}/dashboard`)
 }
 
