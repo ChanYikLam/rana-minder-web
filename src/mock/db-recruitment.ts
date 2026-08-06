@@ -1193,8 +1193,8 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
 
 /**
  * 撤销报名提交（普通招新专用，与联合版 withdrawJointApplication 同规范）：
- * 仅通道开放且未截止时可撤销；已有排期面试或形成审核结论时拒绝；
- * 撤销时清理未排期面试记录、作废待处理录取邀请、清空未形成结论的部门路径，
+ * 仅通道开放且未截止时可撤销；已有排期/进行中/已完结面试（多轮面试全量校验）或形成审核结论时拒绝；
+ * 撤销时清理全部轮次的未排期面试记录、作废待处理录取邀请、清空未形成结论的部门路径，
  * 回到草稿可修改后重新提交。
  */
 export function withdrawApplicationSubmission(activityId: string, applicantId: string): { ok: boolean; error?: string; data?: RecApplication } {
@@ -1207,8 +1207,11 @@ export function withdrawApplicationSubmission(activityId: string, applicantId: s
   if (!app) return err('申请不存在')
   const t = assertTransition('SM-REC-003', app.status, 'draft', 'withdraw_submission')
   if (!t.ok) return err(t.reason || '仅已提交的申请可撤销')
-  const interview = recruitmentInterviews.find((i) => i.activityId === activityId && i.applicantId === applicantId)
-  if (interview && interview.status !== 'pending_selection') return err('已安排面试，无法撤销提交')
+  // 同一活动+申请人可跨多轮存多条面试记录，须全量校验：任一非 pending_selection/cancelled 即视为已排期/已产生结果
+  const committedInterview = recruitmentInterviews.some(
+    (i) => i.activityId === activityId && i.applicantId === applicantId && i.status !== 'pending_selection' && i.status !== 'cancelled',
+  )
+  if (committedInterview) return err('已安排面试，无法撤销提交')
   const activePath = Object.values(app.paths).find((p) => p.status !== 'evaluating')
   if (activePath) return err('已有审核结论，无法撤销提交')
   for (let i = recruitmentInterviews.length - 1; i >= 0; i--) {
@@ -1781,6 +1784,11 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
   return ok(app)
 }
 
+/**
+ * 撤销联合报名提交（submitted → draft）：仅通道开放且未截止时可撤销；
+ * 已有排期面试或形成审核结论时拒绝；撤销时清理未排期面试记录、待审结论，
+ * 并作废未关联结论的待处理邀请（与普通版 withdrawApplicationSubmission 同规范）。
+ */
 export function withdrawJointApplication(jointId: string, applicantId: string): { ok: boolean; error?: string; data?: JointApplication } {
   const ja = findJoint(jointId)
   if (!ja) return err('联合活动不存在')
@@ -1800,6 +1808,12 @@ export function withdrawJointApplication(jointId: string, applicantId: string): 
   for (let i = jointConclusions.length - 1; i >= 0; i--) {
     const con = jointConclusions[i]
     if (con.jointId === jointId && con.applicantId === applicantId && con.status === 'pending') jointConclusions.splice(i, 1)
+  }
+  for (const inv of jointInvitations) {
+    if (inv.jointId === jointId && inv.applicantId === applicantId && inv.status === 'pending_acceptance') {
+      inv.status = 'expired'
+      inv.reviewFlag = false
+    }
   }
   app.status = 'draft'
   app.submittedAt = null

@@ -423,6 +423,30 @@ describe('联合报名撤销提交', () => {
     expect(memberJointApp().status, '通道关闭时保持已提交').toBe('submitted')
   })
 
+  it('撤销时作废未关联结论的待处理邀请', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-001'],
+      answers: { f1: '自我介绍' },
+    })
+    const applicantId = memberJointApp().applicantId
+    rdb.jointInvitations.unshift({
+      id: 'jinv-' + Date.now(), jointId: 'jnt-001', clubId: 'club-001', applicantId,
+      type: 'join', status: 'pending_acceptance', sentAt: new Date().toISOString(),
+      expiredAt: new Date(Date.now() + 86400000).toISOString(), acceptedAt: null,
+      reviewFlag: false, frozenRemainingMs: null, casdoorSync: 'none', version: 1,
+    })
+    const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(memberJointApp().status, '撤销后回到草稿').toBe('draft')
+    const inv = rdb.jointInvitations.find((i) => i.applicantId === applicantId)
+    expect(inv, '邀请记录保留但作废').toBeTruthy()
+    expect(inv!.status, '未关联结论的待处理邀请应被作废').toBe('expired')
+  })
+
   it('已安排面试时不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
@@ -564,6 +588,35 @@ describe('普通招新撤销提交', () => {
     expect(app().status, '已排期面试时保持已提交').toBe('submitted')
   })
 
+  it('多轮面试并存（pending_selection + scheduled）时不可撤销且排期记录不残留', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
+    const applicantId = app().applicantId
+    rdb.recruitmentInterviews.push({
+      id: 'int-101', activityId: 'act-002', clubId: act.clubId,
+      applicantId, applicantName: app().applicantName, roundId: 'rd-101',
+      status: 'pending_selection', slotId: null, startAt: null, endAt: null,
+      actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+      interviewerIds: [], version: 1,
+    })
+    rdb.recruitmentInterviews.push({
+      id: 'int-201', activityId: 'act-002', clubId: act.clubId,
+      applicantId, applicantName: app().applicantName, roundId: 'rd-201',
+      status: 'scheduled', slotId: 'slot-201', startAt: new Date(Date.now() + 86400000).toISOString(), endAt: new Date(Date.now() + 90000000).toISOString(),
+      actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+      interviewerIds: [], version: 1,
+    })
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(app().status, '多轮并存含排期面试时保持已提交').toBe('submitted')
+    expect(rdb.recruitmentInterviews.find((i) => i.id === 'int-201'), '排期记录不得被删除').toBeTruthy()
+  })
+
   it('已有审核结论时不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(applyUrl, otherClubUrl, {
@@ -597,6 +650,33 @@ describe('普通招新撤销提交', () => {
     expect(app().status).toBe('draft')
     expect(app().paths, '撤销后清空部门路径').toEqual({})
     expect(rdb.recruitmentInterviews.some((i) => i.applicantId === app().applicantId && i.activityId === 'act-002'), '撤销后清理未排期面试记录').toBe(false)
+  })
+
+  it('撤销时清理全部轮次的未排期面试记录（多轮并存）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    await invokeHandler(applyUrl, otherClubUrl, {
+      formData: { f1: '自我介绍' },
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    const act = rdb.recruitmentActivities.find((a) => a.id === 'act-002')!
+    const applicantId = app().applicantId
+    for (const roundId of ['rd-101', 'rd-201', 'rd-301']) {
+      rdb.recruitmentInterviews.push({
+        id: 'int-' + roundId, activityId: 'act-002', clubId: act.clubId,
+        applicantId, applicantName: app().applicantName, roundId,
+        status: 'pending_selection', slotId: null, startAt: null, endAt: null,
+        actualStartAt: null, actualEndAt: null, attendance: 'none', invalidReason: null, skipReason: null, cancelReason: null,
+        interviewerIds: [], version: 1,
+      })
+    }
+    const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(app().status).toBe('draft')
+    expect(
+      rdb.recruitmentInterviews.some((i) => i.activityId === 'act-002' && i.applicantId === applicantId),
+      '全部轮次的未排期面试记录都应被清理',
+    ).toBe(false)
   })
 
   it('提交未传 allowAdjustment 时回退活动默认值', async () => {
