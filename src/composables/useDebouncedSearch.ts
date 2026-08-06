@@ -1,4 +1,4 @@
-import { getCurrentInstance, onUnmounted, ref, type Ref } from 'vue'
+import { getCurrentInstance, onUnmounted, readonly, ref, type Ref } from 'vue'
 
 export interface UseDebouncedSearchOptions {
   /** 防抖窗口，默认 300ms */
@@ -18,12 +18,12 @@ export interface UseDebouncedSearchReturn {
    */
   searching: Ref<boolean>
   /**
-   * 当前代次号（只读，调用方不得修改）。
+   * 当前代次号（只读，调用方不得修改——由 readonly 在类型层面固化）。
    * 每次输入变化、清空或卸载时递增。调用方必须在 onSearch 入口处立即捕获 mySeq = seq.value，
    * 异步操作后比较 mySeq !== seq.value 判断是否被作废。严禁在 onSearch 内自增 seq（如 ++seq.value），
    * 否则将被 composable 内部的 searching 复位逻辑误判为 stale。
    */
-  seq: Ref<number>
+  seq: Readonly<Ref<number>>
   /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('')。immediate=true 跳过防抖立即执行 */
   schedule: (keyword: string, immediate?: boolean) => void
   /** 取消待触发的防抖定时器，并作废在途请求（内部递增代次号并复位 searching）。取消后如需继续查询请调用 schedule */
@@ -118,5 +118,6 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
   const instance = getCurrentInstance()
   if (instance) onUnmounted(cleanup)
 
-  return { searching, seq, schedule, cancel }
+  // seq 以只读引用返回：外部仅能捕获/比较，无法篡改代次号，避免破坏内部 searching 复位语义
+  return { searching, seq: readonly(seq), schedule, cancel }
 }

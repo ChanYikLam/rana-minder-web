@@ -32,14 +32,20 @@ const { seq, schedule } = useDebouncedSearch({
     const mySeq = seq.value
     const apiScope = resolveApiScope(route)
     if (!apiScope) { state.value = 'error'; return }
-    // 有关键字才转圈；清空关键字保持就绪态静默刷新（不闪现 loading）
-    if (kw) state.value = 'loading'
+    // 统一置 loading（含空关键字）：若在途请求 A 后清空输入，空关键字请求 B 若不置 loading，
+    // A 返回被作废后 state 会停留在 A 的 loading 态直到 B 返回，造成 loading 残留；
+    // 与迁移前的 loadData 行为保持一致，每次查询都进入加载态。
+    state.value = 'loading'
     const result = await get<{ items: AuditLog[] }>(`${apiScope.prefix}/audit/logs`, { search: kw || undefined })
     if (mySeq !== seq.value) return
     if (result.kind === 'completed') {
       items.value = (result as { kind: 'completed'; data: { items: AuditLog[] } }).data.items
       state.value = 'normal'
-    } else { state.value = 'error' }
+    } else {
+      // 失败时清空旧结果，避免残留误导（与 ClubManage/ClubAccessWizard 语义一致）
+      items.value = []
+      state.value = 'error'
+    }
   },
 })
 

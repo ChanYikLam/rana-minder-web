@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent } from 'vue'
+import { defineComponent, isReadonly } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useDebouncedSearch } from './useDebouncedSearch'
 
@@ -13,7 +13,9 @@ const Harness = defineComponent({
     const { searching, seq, schedule, cancel } = useDebouncedSearch({
       onSearch: (kw) => (props.onSearch as SearchHandler)(kw),
     })
-    return { searching, seq, schedule, cancel }
+    // seq 应以只读引用返回（readonly 类型固化“调用方不得修改”契约）
+    const seqIsReadonly = isReadonly(seq)
+    return { searching, seq, schedule, cancel, seqIsReadonly }
   },
   render() { return null },
 })
@@ -23,6 +25,7 @@ interface HarnessVm {
   cancel: () => void
   searching: boolean
   seq: number
+  seqIsReadonly: boolean
 }
 
 function mountHarness(onSearch: SearchHandler) {
@@ -50,6 +53,11 @@ describe('useDebouncedSearch', () => {
     vi.advanceTimersByTime(1)
     expect(onSearch).toHaveBeenCalledTimes(1)
     expect(onSearch).toHaveBeenCalledWith('ab')
+  })
+
+  it('seq 以只读引用返回：readonly 类型固化“调用方不得修改”契约', () => {
+    const { vm } = mountHarness(() => {})
+    expect(vm.seqIsReadonly).toBe(true)
   })
 
   it('空关键字与纯空格：立即触发重置且不再发请求', () => {

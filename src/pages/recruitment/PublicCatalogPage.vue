@@ -72,6 +72,10 @@ const { seq, schedule, cancel } = useDebouncedSearch({
       historyActivities.value = (actRes as { kind: 'completed'; data: { history: Activity[] } }).data.history
       state.value = 'normal'
     } else {
+      // 失败时清空旧结果，避免残留误导（与 ClubManage/ClubAccessWizard 语义一致）
+      clubs.value = []
+      activities.value = []
+      historyActivities.value = []
       state.value = 'error'
     }
   },
