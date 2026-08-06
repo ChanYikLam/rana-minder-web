@@ -40,9 +40,9 @@ const fuzzyMatches = computed(() => activities.value.filter((a) => a.layer === '
 const directClubs = computed(() => clubs.value.filter((c) => c.layer === 'exact' || c.layer === 'substring'))
 const fuzzyClubs = computed(() => clubs.value.filter((c) => c.layer === 'fuzzy'))
 
-function buildActivityParams(withClubs: boolean): string {
+function buildActivityParams(withClubs: boolean, kw: string): string {
   const params = new URLSearchParams()
-  if (searchKeyword.value.trim()) params.set('q', searchKeyword.value.trim())
+  if (kw.trim()) params.set('q', kw.trim())
   if (!withClubs) {
     if (typeFilter.value !== 'all') params.set('type', typeFilter.value)
     if (statusFilter.value !== 'all') params.set('status', statusFilter.value)
@@ -57,12 +57,13 @@ function buildActivityParams(withClubs: boolean): string {
 
 // 搜索/筛选/切换模式——统一通过 useDebouncedSearch 管理竞态防护
 const { seq, schedule, cancel } = useDebouncedSearch({
-  onSearch: async () => {
-    state.value = 'loading'
+  onSearch: async (kw) => {
+    // 入口处立即捕获代次号，请求返回后对比作废
     const mySeq = seq.value
+    state.value = 'loading'
     const [clubsRes, actRes] = await Promise.all([
-      get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true)}`),
-      get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false)}`),
+      get<{ items: Club[] }>(`/explore/clubs?${buildActivityParams(true, kw)}`),
+      get<{ items: Activity[]; history: Activity[] }>(`/explore/activities?${buildActivityParams(false, kw)}`),
     ])
     if (mySeq !== seq.value) return
     if (clubsRes.kind === 'completed' && actRes.kind === 'completed') {
@@ -78,7 +79,8 @@ const { seq, schedule, cancel } = useDebouncedSearch({
 
 function switchTab(tab: 'activities' | 'clubs') {
   // REC-047：切换模式清空全部筛选与搜索条件
-  cancel()  // 取消待触发的防抖 timer，避免切换后触发带旧关键字的查询
+  // 取消待触发的防抖 timer 并作废在途请求，避免旧关键字/旧筛选结果写回
+  cancel()
   suppressFilterWatch = true
   typeFilter.value = 'all'
   statusFilter.value = 'all'
@@ -90,8 +92,8 @@ function switchTab(tab: 'activities' | 'clubs') {
 }
 
 function onFilterChange() {
-  cancel()  // 取消待触发的防抖搜索，避免与即时筛选冲突
-  schedule(searchKeyword.value)
+  // 筛选（类型/状态/截止/自定义日期）是服务端语义，跳过防抖立即查询；schedule 内部会清 timer 并作废在途请求
+  schedule(searchKeyword.value, true)
 }
 
 let suppressFilterWatch = false

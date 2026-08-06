@@ -19,7 +19,7 @@ const Harness = defineComponent({
 })
 
 interface HarnessVm {
-  schedule: (kw: string) => void
+  schedule: (kw: string, immediate?: boolean) => void
   cancel: () => void
   searching: boolean
   seq: number
@@ -198,6 +198,16 @@ describe('useDebouncedSearch', () => {
     expect(results).toEqual(['second'])
   })
 
+  it('immediate=true 跳过防抖立即执行', async () => {
+    const onSearch = vi.fn()
+    const { vm } = mountHarness(onSearch)
+    vm.schedule('立即查询', true)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+    expect(onSearch).toHaveBeenCalledWith('立即查询')
+    vi.advanceTimersByTime(500)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+  })
+
   it('cancel 后新请求覆写：筛选变化场景（PublicCatalogPage 模式）', async () => {
     const resolvers: Array<() => void> = []
     const results: string[] = []
@@ -232,6 +242,47 @@ describe('useDebouncedSearch', () => {
     expect(results).toEqual([])
 
     // 新请求完成：应写回
+    resolvers[1]()
+    await Promise.resolve()
+    expect(results).toEqual(['keyword-b'])
+  })
+
+  it('cancel 作废在途请求：仅取消不发新查询时旧响应也不写回，且 searching 复位', async () => {
+    const resolvers: Array<() => void> = []
+    const results: string[] = []
+    const capturedSeqs: number[] = []
+
+    const { vm } = mountHarness((kw) => {
+      capturedSeqs.push(vm.seq)
+      const idx = capturedSeqs.length - 1
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          if (capturedSeqs[idx] === vm.seq) {
+            results.push(kw)
+          }
+          resolve()
+        })
+      })
+    })
+
+    vm.schedule('keyword-a')
+    vi.advanceTimersByTime(300)
+    expect(vm.searching).toBe(true)
+
+    // cancel：取消待触发 timer，同时作废在途请求并复位 searching
+    vm.cancel()
+    expect(vm.searching).toBe(false)
+    vi.advanceTimersByTime(1000)
+    expect(resolvers.length).toBe(1)
+
+    // 在途旧请求返回：代次号已递增，应被丢弃
+    resolvers[0]()
+    await Promise.resolve()
+    expect(results).toEqual([])
+
+    // 继续输入不受影响，新请求正常写回
+    vm.schedule('keyword-b')
+    vi.advanceTimersByTime(300)
     resolvers[1]()
     await Promise.resolve()
     expect(results).toEqual(['keyword-b'])

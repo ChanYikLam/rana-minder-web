@@ -11,7 +11,11 @@ export interface UseDebouncedSearchOptions {
 }
 
 export interface UseDebouncedSearchReturn {
-  /** 搜索中（覆盖防抖窗口 + 请求在途），用于 loading 展示与空态文案抑制 */
+  /**
+   * 搜索中（覆盖防抖窗口 + 请求在途）。
+   * 仅服务候选搜索/内联结果类页面（成员邀请候选人、社团分组匹配等）的 loading 展示；
+   * 页面级状态机（PageStateBoundary 的 state）页面可不消费。
+   */
   searching: Ref<boolean>
   /**
    * 当前代次号（只读，调用方不得修改）。
@@ -22,13 +26,14 @@ export interface UseDebouncedSearchReturn {
   seq: Ref<number>
   /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('')。immediate=true 跳过防抖立即执行 */
   schedule: (keyword: string, immediate?: boolean) => void
-  /** 取消待触发的防抖定时器（不清空 searching，不触发 onSearch） */
+  /** 取消待触发的防抖定时器，并作废在途请求（内部递增代次号并复位 searching）。取消后如需继续查询请调用 schedule */
   cancel: () => void
 }
 
 /**
  * 防抖搜索控制器：统一 300ms 防抖、在途请求作废（代次号）、卸载清理与 loading 状态。
  * 页面仅需提供 onSearch 处理业务状态（结果写入/失败提示），无需自行维护 timer/序号。
+ * schedule(keyword, immediate=true) 跳过防抖立即执行（重试、筛选即时查询等场景）。
  * onSearch 内不得修改 seq（如 ++seq.value），仅允许捕获 mySeq = seq.value 后比较。
  */
 export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebouncedSearchReturn {
@@ -92,17 +97,21 @@ export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebou
     }, delay)
   }
 
+  /**
+   * 取消待触发的防抖定时器，并作废在途请求（递增代次号 + 复位 searching），
+   * 保证「先 cancel 后 schedule」窗口期内返回的旧响应不会写回结果。
+   */
   function cancel() {
     if (timer) {
       clearTimeout(timer)
       timer = null
     }
+    seq.value++
+    searching.value = false
   }
 
   function cleanup() {
     cancel()
-    seq.value++
-    searching.value = false
   }
 
   // 组件挂载场景自动注册卸载清理；无实例（独立测试）时由测试方自行管理

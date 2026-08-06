@@ -27,12 +27,14 @@ const timelineItems = computed<TimelineEntry[]>(() =>
 )
 
 const { seq, schedule } = useDebouncedSearch({
-  onSearch: async () => {
-    state.value = 'loading'
+  onSearch: async (kw) => {
+    // 入口处立即捕获代次号，请求返回后对比作废
+    const mySeq = seq.value
     const apiScope = resolveApiScope(route)
     if (!apiScope) { state.value = 'error'; return }
-    const mySeq = seq.value
-    const result = await get<{ items: AuditLog[] }>(`${apiScope.prefix}/audit/logs`, { search: searchKeyword.value || undefined })
+    // 有关键字才转圈；清空关键字保持就绪态静默刷新（不闪现 loading）
+    if (kw) state.value = 'loading'
+    const result = await get<{ items: AuditLog[] }>(`${apiScope.prefix}/audit/logs`, { search: kw || undefined })
     if (mySeq !== seq.value) return
     if (result.kind === 'completed') {
       items.value = (result as { kind: 'completed'; data: { items: AuditLog[] } }).data.items
