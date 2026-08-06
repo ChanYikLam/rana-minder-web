@@ -72,8 +72,8 @@ describe('ApplicationPage 状态渲染', () => {
     await flushPromises()
     await nextTick()
 
-    // 已提交卡片可见
-    expect(wrapper.text()).toContain('您已提交报名申请')
+    // 已提交卡片可见（合并 dev 后文案为“您已提交报名”，含只读回显与撤销）
+    expect(wrapper.text()).toContain('您已提交报名')
     expect(wrapper.text()).toContain('已提交')
 
     // 表单区域不可见（"提交报名"会作为"已提交报名申请"子串出现，改用表单标题验证）
@@ -124,8 +124,8 @@ describe('ApplicationPage 状态渲染', () => {
     await flushPromises()
     await nextTick()
 
-    // 无状态卡片（"草稿"会作为"保存草稿"按钮子串出现，改用完整提示文案验证）
-    expect(wrapper.text()).not.toContain('已提交报名申请')
+    // 无状态卡片（“草稿”会作为“保存草稿”按钮子串出现，改用完整提示文案验证）
+    expect(wrapper.text()).not.toContain('您已提交报名')
     expect(wrapper.text()).not.toContain('已归档')
     expect(wrapper.text()).not.toContain('您有已保存的草稿')
 
@@ -148,14 +148,15 @@ describe('ApplicationPage 状态渲染', () => {
     // 修订提示可见
     expect(wrapper.text()).toContain('需修订')
     expect(wrapper.text()).toContain('请修改后重新提交')
+    expect(wrapper.text()).toContain('您的报名需补充材料')
 
     // 表单区域可见
     expect(wrapper.text()).toContain('意向方向')
     expect(wrapper.text()).toContain('报名表单')
 
-    // 操作按钮可见
+    // 操作按钮可见（需修订态提交按钮为“重新提交”）
     expect(wrapper.text()).toContain('保存草稿')
-    expect(wrapper.text()).toContain('提交报名')
+    expect(wrapper.text()).toContain('重新提交')
   })
 
   it('已退出态：展示终态卡片，隐藏表单', async () => {

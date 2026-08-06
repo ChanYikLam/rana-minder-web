@@ -263,6 +263,7 @@ export interface JointApplication {
   agreementVersion: number | null
   allowJointAdjustment: boolean
   volunteerClubIds: string[]
+  volunteerClubSnapshot: string[]
   preferences: { departmentId: string; departmentName: string }[]
   agreementClubSnapshot: string[]
   answers: Record<string, unknown>
@@ -577,14 +578,14 @@ export const jointApplications: JointApplication[] = [
   {
     id: 'japp-001', jointId: 'jnt-001', applicantId: 'u-006', applicantName: '林婉婷', studentId: '20240006',
     status: 'submitted', consented: true, consentAt: daysFromNow(-25),
-    agreementVersion: 1, allowJointAdjustment: true, volunteerClubIds: ['club-001', 'club-002'], preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }], agreementClubSnapshot: ['计算机协会', '电子设计协会'],
+    agreementVersion: 1, allowJointAdjustment: true, volunteerClubIds: ['club-001', 'club-002'], volunteerClubSnapshot: ['计算机协会', '电子设计协会'], preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }], agreementClubSnapshot: ['计算机协会', '电子设计协会'],
     answers: {}, formVersion: 1,
     submittedAt: daysFromNow(-25), version: 1,
   },
   {
     id: 'japp-002', jointId: 'jnt-001', applicantId: 'u-001', applicantName: '刘子豪', studentId: '20240001',
     status: 'draft', consented: false, consentAt: null,
-    agreementVersion: 1, allowJointAdjustment: false, volunteerClubIds: [], preferences: [], agreementClubSnapshot: [],
+    agreementVersion: 1, allowJointAdjustment: false, volunteerClubIds: [], volunteerClubSnapshot: [], preferences: [], agreementClubSnapshot: [],
     answers: {}, formVersion: 1,
     submittedAt: null, version: 1,
   },
@@ -1181,11 +1182,51 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
   } else if (app.status === 'submitted') {
-    const t = assertTransition('SM-REC-003', 'submitted', 'draft', 'edit_before_deadline')
-    if (!t.ok) return err(t.reason || '已提交申请当前不可编辑')
-    app.status = 'draft'
+    return err('已提交的申请请通过「撤销提交」回到草稿')
+  } else if (app.status === 'identity_anomaly') {
+    return err('账号身份异常，不能保存或修改报名')
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
+  app.version += 1
+  return ok(app)
+}
+
+/**
+ * 撤销报名提交（普通招新专用，与联合版 withdrawJointApplication 同规范）：
+ * 仅通道开放且未截止时可撤销；已有排期/进行中/已完结面试（多轮面试全量校验）或形成审核结论时拒绝；
+ * 撤销时清理全部轮次的未排期面试记录、作废待处理录取邀请、清空未形成结论的部门路径，
+ * 回到草稿可修改后重新提交。
+ */
+export function withdrawApplicationSubmission(activityId: string, applicantId: string): { ok: boolean; error?: string; data?: RecApplication } {
+  const a = findAnyActivity(activityId)
+  if (!a) return err('活动不存在')
+  if (a.status !== 'in_progress') return err('活动当前不在报名期，无法撤销提交')
+  if (a.channelStatus !== 'open') return err('报名通道已关闭，无法撤销提交')
+  if (new Date(a.deadline).getTime() < Date.now()) return err('报名已截止，无法撤销提交')
+  const app = findApplication(activityId, applicantId)
+  if (!app) return err('申请不存在')
+  const t = assertTransition('SM-REC-003', app.status, 'draft', 'withdraw_submission')
+  if (!t.ok) return err(t.reason || '仅已提交的申请可撤销')
+  // 同一活动+申请人可跨多轮存多条面试记录，须全量校验：任一非 pending_selection/cancelled 即视为已排期/已产生结果
+  const committedInterview = recruitmentInterviews.some(
+    (i) => i.activityId === activityId && i.applicantId === applicantId && i.status !== 'pending_selection' && i.status !== 'cancelled',
+  )
+  if (committedInterview) return err('已安排面试，无法撤销提交')
+  const activePath = Object.values(app.paths).find((p) => p.status !== 'evaluating')
+  if (activePath) return err('已有审核结论，无法撤销提交')
+  for (let i = recruitmentInterviews.length - 1; i >= 0; i--) {
+    const it = recruitmentInterviews[i]
+    if (it.activityId === activityId && it.applicantId === applicantId && it.status === 'pending_selection') recruitmentInterviews.splice(i, 1)
+  }
+  for (const inv of recruitmentInvitations) {
+    if (inv.activityId === activityId && inv.applicantId === applicantId && inv.status === 'pending_acceptance') {
+      inv.status = 'expired'
+    }
+  }
+  app.paths = {}
+  app.status = 'draft'
+  app.submittedAt = null
+  app.withdrawnAt = null
   app.version += 1
   return ok(app)
 }
@@ -1215,7 +1256,7 @@ export function submitApplication(activityId: string, applicantId: string, input
   if (!app) {
     app = {
       id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
-      status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment, formVersion: a.formVersion,
+      status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment ?? a.allowAdjustmentDefault, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
       recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
     }
@@ -1243,7 +1284,7 @@ export function submitApplication(activityId: string, applicantId: string, input
     const d = a.departments.find((x) => x.id === p.departmentId)!
     return { order: i + 1, departmentId: d.id, departmentName: d.name }
   })
-  app.allowAdjustment = input.allowAdjustment
+  app.allowAdjustment = input.allowAdjustment ?? a.allowAdjustmentDefault
   app.answers = { ...(input.answers || {}) }
   app.formVersion = a.formVersion
   app.submittedAt = now()
@@ -1675,7 +1716,7 @@ export function saveJointApplicationDraft(
     app = {
       id: 'japp-' + Date.now(), jointId, applicantId, applicantName, studentId,
       status: 'draft', consented: false, consentAt: null, agreementVersion: null,
-      allowJointAdjustment: true, volunteerClubIds: [], preferences: [], agreementClubSnapshot: [], answers: {}, formVersion: ja.formVersion, submittedAt: null, version: 1,
+      allowJointAdjustment: true, volunteerClubIds: [], volunteerClubSnapshot: [], preferences: [], agreementClubSnapshot: [], answers: {}, formVersion: ja.formVersion, submittedAt: null, version: 1,
     }
     jointApplications.push(app)
     ja.applicantIds.push(app.id)
@@ -1715,6 +1756,8 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
   app.volunteerClubIds = volunteerClubIds !== undefined
     ? availableClubIds.filter((id) => volunteerClubIds.includes(id))
     : availableClubIds
+  const byId = new Map(ja.clubs.map((c) => [c.clubId, c.clubName]))
+  app.volunteerClubSnapshot = app.volunteerClubIds.map((id) => byId.get(id) || id)
   app.preferences = filterJointPreferences(ja, input.preferences, app.volunteerClubIds)
   app.answers = { ...(input.answers || {}) }
   app.formVersion = ja.formVersion
@@ -1738,6 +1781,48 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
       })
     }
   }
+  return ok(app)
+}
+
+/**
+ * 撤销联合报名提交（submitted → draft）：仅通道开放且未截止时可撤销；
+ * 已有排期面试或形成审核结论时拒绝；撤销时清理未排期面试记录、待审结论，
+ * 并作废未关联结论的待处理邀请（与普通版 withdrawApplicationSubmission 同规范）。
+ */
+export function withdrawJointApplication(jointId: string, applicantId: string): { ok: boolean; error?: string; data?: JointApplication } {
+  const ja = findJoint(jointId)
+  if (!ja) return err('联合活动不存在')
+  if (['closed', 'cancelled', 'force_closed'].includes(ja.status)) return err('联合活动已结束，无法撤销提交')
+  if (ja.channelStatus !== 'open') return err('联合报名通道已关闭，无法撤销提交')
+  if (new Date(ja.deadline).getTime() < Date.now()) return err('联合报名已截止，无法撤销提交')
+  const app = findJointApplication(jointId, applicantId)
+  if (!app) return err('联合申请不存在')
+  const t = assertTransition('SM-JNT-003', app.status, 'draft', 'withdraw')
+  if (!t.ok) return err(t.reason || '仅已提交的联合申请可撤销')
+  const interview = jointInterviews.find((i) => i.jointId === jointId && i.applicantId === applicantId)
+  if (interview && interview.status !== 'pending_selection') return err('已安排面试，无法撤销提交')
+  const activeConclusion = jointConclusions.find((c) => c.jointId === jointId && c.applicantId === applicantId && c.status !== 'pending')
+  if (activeConclusion) return err('已有审核结论，无法撤销提交')
+  const idx = jointInterviews.findIndex((i) => i.jointId === jointId && i.applicantId === applicantId)
+  if (idx >= 0) jointInterviews.splice(idx, 1)
+  for (let i = jointConclusions.length - 1; i >= 0; i--) {
+    const con = jointConclusions[i]
+    if (con.jointId === jointId && con.applicantId === applicantId && con.status === 'pending') jointConclusions.splice(i, 1)
+  }
+  for (const inv of jointInvitations) {
+    if (inv.jointId === jointId && inv.applicantId === applicantId && inv.status === 'pending_acceptance') {
+      inv.status = 'expired'
+      inv.reviewFlag = false
+    }
+  }
+  app.status = 'draft'
+  app.submittedAt = null
+  app.consented = false
+  app.consentAt = null
+  app.agreementVersion = null
+  app.agreementClubSnapshot = []
+  app.volunteerClubSnapshot = []
+  app.version += 1
   return ok(app)
 }
 

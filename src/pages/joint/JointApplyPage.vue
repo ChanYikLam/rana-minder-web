@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -34,9 +34,11 @@ interface MyApplication {
   status: string
   answers?: Record<string, unknown>
   volunteerClubIds?: string[]
+  volunteerClubSnapshot?: string[]
   preferences?: { departmentId: string; departmentName: string }[]
   allowJointAdjustment?: boolean
   consented?: boolean
+  submittedAt?: string | null
 }
 
 /** 联合申请状态 → 用户可读文案（未知状态回退原始值；联合申请状态集仅 draft/submitted/archived） */
@@ -86,6 +88,9 @@ const allowJointAdjustment = ref(false)
 const volunteerClubIds = ref<string[]>([])
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
+const withdrawing = ref(false)
+const confirmWithdraw = ref(false)
+let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交 */
 const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
@@ -300,7 +305,7 @@ async function handleSaveDraft() {
   if (submitting.value) return
   const result = await post(`/activity/joint/${route.params.jointId}/draft`, {
     answers: { ...formData },
-    volunteerClubIds: volunteerClubIds.value,
+    volunteerClubIds: volunteerClubIds.value ?? [],
     preferences: preferences.value,
     allowJointAdjustment: allowJointAdjustment.value,
     consented: consented.value,
@@ -324,11 +329,77 @@ async function handleSaveDraft() {
 
 onMounted(loadData)
 
-function formatDeadline(iso?: string): string {
+onUnmounted(() => {
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+})
+
+function formatDateTime(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
+/** 提交详情只读回显：表单字段值按类型渲染（数组 join、结构化对象 JSON、文件显示「已上传附件」），空值不展示 */
+function renderAnswerValue(v: unknown): string {
+  if (v == null || v === '') return ''
+  if (Array.isArray(v)) return v.map(renderAnswerValue).filter(Boolean).join('、')
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+function answersOf(fieldId: string): string {
+  const v = myApplication.value?.answers?.[fieldId]
+  if (v == null || v === '') return ''
+  const field = formFields.value.find((f) => f.id === fieldId)
+  if (field?.type === 'file') return '已上传附件'
+  return renderAnswerValue(v)
+}
+
+/** 意向社团 id → 名称（详情接口参与社团与部门列表同源，取任一可用的名称） */
+function clubNamesOf(ids?: string[]): string[] {
+  if (!ids || ids.length === 0) return []
+  if (myApplication.value?.volunteerClubSnapshot?.length) return myApplication.value.volunteerClubSnapshot
+  return ids.map((id) => detail.value?.participants?.find((p) => p.id === id)?.name
+    || detail.value?.clubs?.find((c) => c.id === id)?.name
+    || id)
+}
+
+/** 撤销联合报名提交：先点击进入确认态，5 秒内再次点击才执行（避免 iframe/沙箱环境禁用 window.confirm 导致无反应） */
+function requestWithdrawConfirm() {
+  if (withdrawing.value) return
+  if (!confirmWithdraw.value) {
+    confirmWithdraw.value = true
+    if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+    confirmWithdrawTimer = setTimeout(() => {
+      confirmWithdraw.value = false
+    }, 5000)
+    return
+  }
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+  confirmWithdraw.value = false
+  void handleWithdraw()
+}
+
+async function handleWithdraw() {
+  if (withdrawing.value) return
+  const jointId = route.params.jointId
+  if (typeof jointId !== 'string') return
+  withdrawing.value = true
+  try {
+    const result = await post(`/activity/joint/${jointId}/withdraw`, {})
+    if (result.kind === 'completed') {
+      toast.success('已撤销提交，可修改后重新提交')
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '撤销失败，请稍后重试')
+    } else {
+      toast.error('撤销失败，请稍后重试')
+    }
+  } finally {
+    withdrawing.value = false
+  }
 }
 </script>
 
@@ -351,7 +422,7 @@ function formatDeadline(iso?: string): string {
             {{ channelStatusMeta(detail.channelStatus).label }}
           </span>
           <span v-if="detail.deadline" class="inline-flex items-center px-2.5 py-1 rounded-md bg-subtle text-xs text-text-secondary">
-            报名截止：{{ formatDeadline(detail.deadline) }}
+            报名截止：{{ formatDateTime(detail.deadline) }}
           </span>
         </div>
 
@@ -374,6 +445,44 @@ function formatDeadline(iso?: string): string {
           <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
         </div>
         <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+
+        <!-- 报名详情（提交后只读回显本人填写内容） -->
+        <div class="mt-4 border-t border-border pt-3 space-y-2.5">
+          <p class="text-sm font-medium text-text-primary">您的报名详情</p>
+          <div v-for="field in formFields" :key="field.id">
+            <template v-if="answersOf(field.id)">
+              <p class="text-xs text-text-secondary">{{ field.label }}</p>
+              <p class="text-sm text-text-primary whitespace-pre-wrap">{{ answersOf(field.id) }}</p>
+            </template>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary">意向社团</p>
+            <p class="text-sm text-text-primary">{{ clubNamesOf(myApplication?.volunteerClubIds).join('、') || '未选择' }}</p>
+          </div>
+          <div v-if="myApplication?.preferences?.length">
+            <p class="text-xs text-text-secondary">部门意向（按优先级）</p>
+            <p class="text-sm text-text-primary">{{ myApplication.preferences.map((p, i) => `${i + 1}. ${p.departmentName}`).join('、') }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary">服从联合调剂</p>
+            <p class="text-sm text-text-primary">{{ myApplication?.allowJointAdjustment ? '是' : '否' }}</p>
+          </div>
+          <div v-if="myApplication?.submittedAt">
+            <p class="text-xs text-text-secondary">提交时间</p>
+            <p class="text-sm text-text-primary">{{ formatDateTime(myApplication.submittedAt) }}</p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="mt-4 w-full h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2 disabled:opacity-60"
+          :class="confirmWithdraw ? 'text-danger border-danger' : ''"
+          :disabled="withdrawing"
+          @click="requestWithdrawConfirm"
+        >
+          {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
+        </button>
+        <p class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后在报名通道关闭前重新提交。</p>
       </Card>
 
       <Card v-else-if="hasArchived" class="mb-4">
