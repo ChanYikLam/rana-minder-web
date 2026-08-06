@@ -66,6 +66,15 @@ describe('已提交申请闸门', () => {
     expect(second.ok).toBe(false)
     expect(second.error).toContain('撤销提交')
   })
+
+  it('收紧暂停通道后窗口内已提交用户重提仍可走 rule_tightening（闸门不拦截窗口内用户）', () => {
+    const first = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(first.ok).toBe(true)
+    tightenRecruitmentRules('act-001', '学院范围收紧为信息学院', 7)
+    const re = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: true })
+    expect(re.ok, re.error || '').toBe(true)
+    expect(re.data?.status).toBe('submitted')
+  })
 })
 /** PRD-OPT-013：明确面试官任务硬冲突检测 */
 describe('面试官任务冲突检测', () => {

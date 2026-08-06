@@ -1237,6 +1237,7 @@ export function submitApplication(activityId: string, applicantId: string, input
   if (a.status !== 'in_progress') return err('活动当前不可报名')
   const existing = findApplication(activityId, applicantId)
   const inAdjustment = !!existing?.adjustmentDeadline && new Date(existing.adjustmentDeadline).getTime() >= Date.now()
+  // 已提交（非补救窗口内）优先引导撤销；窗口内用户与 rule_tightening 路径条件互斥，不在此拦截
   if (existing && existing.status === 'submitted' && !inAdjustment) return err('申请已提交，请通过撤销提交回到草稿')
   if (a.channelStatus !== 'open' && !inAdjustment) return err('报名通道当前未开放')
   if (a.channelStatus !== 'open' && existing?.status === 'adjustment_overdue') return err('调整逾期，请联系管理员延长窗口或处理')
