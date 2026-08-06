@@ -536,6 +536,25 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
   return { ok: false, error: '仅接受待同步的邀请可确认生效' }
 }
 
+/**
+ * 录取/联合邀请接受后的成员创建桥（06「接受普通或联合录取后，成员业务生效时间为接受时间」）。
+ * 幂等：同社团同学号的现有/退出中成员不重复创建；业务生效时间取邀请接受时间，而非回读确认时间。
+ */
+export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string }): { ok: boolean; created: boolean; member?: MockMember } {
+  if (!input.studentId) return { ok: true, created: false, member: undefined }
+  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
+  if (existing) return { ok: true, created: false, member: existing }
+  const member: MockMember = {
+    id: 'mem-' + Date.now(), clubId, studentId: input.studentId, name: input.name,
+    email: 'new@example.edu.cn', phone: '13900000000', status: 'active',
+    joinedAt: input.acceptedAt, exitedAt: null,
+    positions: input.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: input.departmentId, departmentName: input.departmentName || '', title: '成员', startDate: new Date(input.acceptedAt).toISOString().slice(0, 10), endDate: null, status: 'active' }] : [],
+    tenures: [], departmentHistory: input.departmentId ? [{ id: 'dhis-' + Date.now(), action: 'join', departmentName: input.departmentName || '', at: input.acceptedAt }] : [], anomalies: [],
+  }
+  members.push(member)
+  return { ok: true, created: true, member }
+}
+
 export function createAppointmentCommand(clubId: string, input: { action: AppointmentAction; memberId: string; memberName: string; departmentId: string | null; departmentName: string | null; title: string | null; scheduledAt: string | null; actorName: string }): { ok: boolean; error?: string; command?: MockAppointmentCommand } {
   if (input.action === 'dismiss' && input.memberId) {
     const member = findMember(clubId, input.memberId)
