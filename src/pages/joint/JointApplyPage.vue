@@ -280,7 +280,7 @@ async function handleSubmit() {
     const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
       consented: consented.value,
       allowJointAdjustment: allowJointAdjustment.value,
-      volunteerClubIds: volunteerClubIds.value,
+      volunteerClubIds: volunteerClubIds.value ?? [],
       preferences: preferences.value,
       answers: { ...formData },
     })
@@ -301,7 +301,7 @@ async function handleSaveDraft() {
   if (submitting.value) return
   const result = await post(`/activity/joint/${route.params.jointId}/draft`, {
     answers: { ...formData },
-    volunteerClubIds: volunteerClubIds.value,
+    volunteerClubIds: volunteerClubIds.value ?? [],
     preferences: preferences.value,
     allowJointAdjustment: allowJointAdjustment.value,
     consented: consented.value,
@@ -657,7 +657,7 @@ async function handleWithdraw() {
       <button
         v-if="showApplyForm"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
-        :disabled="!consented || volunteerClubIds.length === 0 || submitting"
+        :disabled="!consented || submitting"
         @click="handleSubmit"
       >
         <Send :size="16" /> {{ submitting ? '提交中...' : '提交联合报名' }}
