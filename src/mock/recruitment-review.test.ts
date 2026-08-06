@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { recruitmentApiHandlers, rdb } from './recruitment-api'
-import { mockUsers, resolveMockUser, clearMockSession, USER_MEMBER_MAP, USER_APPLICANT_MAP } from './auth'
+import { mockUsers, resolveMockUser, clearMockSession, USER_APPLICANT_MAP } from './auth'
+import { resolveMemberId } from './db'
 
 /** 最小 ServerResponse 替身：仅实现分发层（withStatus）当前调用的 setHeader/statusCode/end；mock 层扩展新方法时此处显式报缺，便于定位 */
 class MockServerResponse {
@@ -39,8 +40,8 @@ function mockUserKeyOf(userId: string): string {
 }
 
 const INTERVIEWER_KEY = mockUserKeyOf('user-interviewer-001')
-const INTERVIEWER_MEMBER_ID = USER_MEMBER_MAP['user-interviewer-001']
-if (!INTERVIEWER_MEMBER_ID) throw new Error('USER_MEMBER_MAP 缺少面试官成员映射: user-interviewer-001')
+const INTERVIEWER_MEMBER_ID = resolveMemberId('user-interviewer-001', 'club-001')
+if (!INTERVIEWER_MEMBER_ID) throw new Error('缺少面试官成员映射: user-interviewer-001 / club-001')
 const MEMBER_KEY = mockUserKeyOf('user-member-001')
 
 // 依赖种子（db-recruitment.ts）：rev-001 是 act-001 下申请人 u-002 的已有评价（authorId=mem-004，leader 撰写，见 recruitmentReviews/reviewIds 种子）
@@ -99,7 +100,7 @@ describe('面试官提交评价（conclude）权限链路', () => {
   it('无效 key user-interviewer-001 会回落 leader（authorId 为 mem-004）——证明 key 必须用 interviewer，否则测试走管理放行形同虚设', () => {
     const user = resolveMockUser('/api/auth/session?_mock_user=user-interviewer-001')
     expect(user.id).toBe('user-leader-001')
-    expect(USER_MEMBER_MAP[user.id]).toBe('mem-004')
+    expect(resolveMemberId(user.id, 'club-001')).toBe('mem-004')
   })
 
   it('无面试权限的普通成员提交评价仍被 403（权限边界未放松）', async () => {

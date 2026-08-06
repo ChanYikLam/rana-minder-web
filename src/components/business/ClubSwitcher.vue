@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { identityApi } from '@/services'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
-import { useSessionViewStore } from '@/state/sessionViewStore'
+import { useSessionViewStore, mergeClubPermissions } from '@/state/sessionViewStore'
 import { useStateView } from '@/composables/useStateView'
 import type { WorkspaceContext } from '@/types/domain'
 
@@ -44,9 +44,16 @@ async function switchClub(club: MyClub) {
   switching.value = false
   if (!ok) return
   // 同步会话工作空间与权限集，避免 store 为 club-002、session 仍为 club-001 的双源不一致
-  // （setWorkspaceInfo 合并保留 memberId，自审逻辑不失效；权限按新社团上下文刷新）
-  session.setWorkspaceInfo({ clubId: club.clubId, clubName: club.clubName, role: club.role })
-  session.setPermissions([...workspace.currentPermissions])
+  // memberId 与社团级权限按新社团上下文重新解析后整体写入（而非合并缺省字段），
+  // 避免跨社团切换时沿用上一社团的 memberId 导致成员生命周期自审误判
+  session.setWorkspaceInfo({
+    clubId: club.clubId,
+    clubName: club.clubName,
+    role: club.role,
+    memberId: workspace.currentMemberId ?? undefined,
+  })
+  // 社团切换不抹掉 platform:* 等全局权限：保留全局权限位，仅以新社团权限覆盖 club:* 域
+  session.setPermissions(mergeClubPermissions(session.permissions, workspace.currentPermissions))
   await router.push(`/org/${club.clubId}/dashboard`)
 }
 

@@ -3,6 +3,11 @@ import { ref, computed } from 'vue'
 import type { SessionInfo, User, ProfileGate, WorkspaceInfo } from '@/types/domain'
 import { getSession, logout as logoutAuth } from '@/services/auth'
 
+/** 社团切换后的会话权限集：保留 platform:* 等全局权限，仅以新社团权限覆盖 club:* 域 */
+export function mergeClubPermissions(current: readonly string[], clubPermissions: readonly string[]): string[] {
+  return [...current.filter((p) => !p.startsWith('club:')), ...clubPermissions]
+}
+
 export const useSessionViewStore = defineStore('sessionView', () => {
   const user = ref<User | null>(null)
   const profileGate = ref<ProfileGate>({ complete: false, emailVerified: false })

@@ -3,6 +3,8 @@
  * 模拟不同角色登录后的会话和权限
  */
 
+import { resolveMemberId } from './db'
+
 export interface MockUser {
   id: string
   studentId: string
@@ -383,15 +385,6 @@ export function getPermissions(user: MockUser, clubId: string): string[] {
   return role?.permissions || []
 }
 
-/** mock 用户 id → 社团成员 id（成员生命周期以成员视角模拟操作者） */
-export const USER_MEMBER_MAP: Record<string, string> = {
-  'user-leader-001': 'mem-004',
-  'user-hr-001': 'mem-003',
-  'user-interviewer-001': 'mem-002',
-  'user-member-001': 'mem-001',
-  'user-deptleader-001': 'mem-006',
-}
-
 /** mock 用户 id → 候选人 id 映射（申请人视角操作者；通知/业务侧经此反查接收用户） */
 export const USER_APPLICANT_MAP: Record<string, string> = {
   'user-applicant-001': 'u-001',
@@ -404,5 +397,5 @@ export function getWorkspace(user: MockUser): { clubId: string; clubName: string
   if (!user.currentClubId) return null
   const role = user.roles.find((r) => r.clubId === user.currentClubId)
   if (!role) return null
-  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, permissions: role.permissions, memberId: USER_MEMBER_MAP[user.id] }
+  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, permissions: role.permissions, memberId: resolveMemberId(user.id, role.clubId) ?? undefined }
 }

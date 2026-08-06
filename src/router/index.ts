@@ -530,10 +530,10 @@ router.beforeEach(async (to) => {
     }
     // 工作空间以最近加载的 store 上下文为准（如经 ClubSwitcher 切到 club-002 时 store 比
     // session.workspace 新，避免按旧社团解析落点）；store 未加载或非当前身份时回落会话
-    const useStoreCtx = workspace.hasWorkspace && workspace.currentUserId === session.user?.id
+    const storeClubId = workspace.hasWorkspace && workspace.currentUserId === session.user?.id ? workspace.currentClubId : null
     const target = resolveLoginTarget({
-      workspace: useStoreCtx ? { clubId: workspace.currentClubId! } : session.workspace,
-      hasPermission: useStoreCtx
+      workspace: storeClubId ? { clubId: storeClubId } : session.workspace,
+      hasPermission: storeClubId
         ? (permission) => workspace.hasPermission(permission)
         : (permission) => session.hasPermission(permission),
       requestedRedirect: null,
@@ -593,6 +593,7 @@ router.beforeEach(async (to) => {
         session.workspace.role,
         session.permissions,
         session.user?.id ?? null,
+        session.workspace.memberId ?? null,
       )
     }
   }
