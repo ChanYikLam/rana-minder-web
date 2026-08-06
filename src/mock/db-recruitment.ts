@@ -1182,7 +1182,7 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
   } else if (app.status === 'submitted') {
-    return err('已提交的申请请通过「撤销提交」回到草稿')
+    return err('申请已提交，请通过撤销提交回到草稿')
   } else if (app.status === 'identity_anomaly') {
     return err('账号身份异常，不能保存或修改报名')
   }
@@ -1237,6 +1237,7 @@ export function submitApplication(activityId: string, applicantId: string, input
   if (a.status !== 'in_progress') return err('活动当前不可报名')
   const existing = findApplication(activityId, applicantId)
   const inAdjustment = !!existing?.adjustmentDeadline && new Date(existing.adjustmentDeadline).getTime() >= Date.now()
+  if (existing && existing.status === 'submitted' && !inAdjustment) return err('申请已提交，请通过撤销提交回到草稿')
   if (a.channelStatus !== 'open' && !inAdjustment) return err('报名通道当前未开放')
   if (a.channelStatus !== 'open' && existing?.status === 'adjustment_overdue') return err('调整逾期，请联系管理员延长窗口或处理')
   if (a.channelStatus === 'open' && new Date(a.deadline).getTime() < Date.now()) return err('报名已截止')
@@ -1263,7 +1264,6 @@ export function submitApplication(activityId: string, applicantId: string, input
     recruitmentApplications.push(app)
     a.applicantIds.push(app.id)
   }
-  if (app && app.status === 'submitted' && !inAdjustment) return err('申请已提交，请通过撤销提交回到草稿')
   let okResult: { ok: boolean; reason?: string }
   if (app.status === 'exited') {
     okResult = assertTransition('SM-REC-003', 'exited', 'submitted', 'recovery_resubmit')

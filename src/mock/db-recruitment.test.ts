@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, afterEach } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, saveApplicationDraft, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, saveApplicationDraft, closeChannel, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews } from './db-recruitment'
 import { resetRecruitmentDB } from './reset'
 
 beforeEach(() => {
@@ -55,6 +55,16 @@ describe('已提交申请闸门', () => {
     const app = recruitmentApplications.find((a) => a.applicantId === 'u-006')
     expect(app?.status).toBe('submitted')
     expect(app?.answers.name).toBeUndefined()
+  })
+
+  it('通道关闭时已提交用户重提仍优先命中闸门提示（前置通道校验之前）', () => {
+    const first = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(first.ok).toBe(true)
+    const closed = closeChannel('act-001', '测试关闭通道')
+    expect(closed.ok).toBe(true)
+    const second = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(second.ok).toBe(false)
+    expect(second.error).toContain('撤销提交')
   })
 })
 /** PRD-OPT-013：明确面试官任务硬冲突检测 */
