@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import PublicLayout from '@/layouts/PublicLayout.vue'
+import { Toaster } from '@/components/ui/sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 
@@ -33,4 +34,5 @@ watch(
   <component :is="layout">
     <RouterView />
   </component>
+  <Toaster />
 </template>
