@@ -90,7 +90,7 @@ function switchTab(tab: 'activities' | 'clubs') {
 }
 
 function onFilterChange() {
-  cancel()  // 取消待触发的防抖搜索，避免与即时筛选冲突
+  // schedule 内部会先清掉防抖 timer（含对空关键字的在途作废），无需额外 cancel
   schedule(searchKeyword.value)
 }
 
@@ -125,7 +125,7 @@ onMounted(() => schedule(searchKeyword.value))
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="招新公开目录" @retry="schedule(searchKeyword)">
+  <PageStateBoundary :state="state" title="招新公开目录" @retry="schedule(searchKeyword, true)">
     <div>
       <h1 class="text-2xl font-bold text-primary mb-6">发现社团与活动</h1>
 

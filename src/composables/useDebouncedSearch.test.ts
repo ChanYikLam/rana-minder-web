@@ -19,7 +19,7 @@ const Harness = defineComponent({
 })
 
 interface HarnessVm {
-  schedule: (kw: string) => void
+  schedule: (kw: string, immediate?: boolean) => void
   cancel: () => void
   searching: boolean
   seq: number
@@ -196,6 +196,32 @@ describe('useDebouncedSearch', () => {
     resolvers[1]()
     await Promise.resolve()
     expect(results).toEqual(['second'])
+  })
+
+  it('immediate=true 跳过防抖立即执行（重试场景）', async () => {
+    const onSearch = vi.fn()
+    const { vm } = mountHarness(onSearch)
+    vm.schedule('a')
+    vi.advanceTimersByTime(100)
+    // 防抖窗口内以 immediate 重试：立即触发，且不等待剩余防抖时间
+    vm.schedule('a', true)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+    expect(onSearch).toHaveBeenCalledWith('a')
+    // 剩余防抖窗口内不应再触发第二次
+    vi.advanceTimersByTime(300)
+    expect(onSearch).toHaveBeenCalledTimes(1)
+  })
+
+  it('immediate=true 请求完成后复位 searching', async () => {
+    let resolveFn!: () => void
+    const { vm } = mountHarness(
+      () => new Promise<void>((resolve) => { resolveFn = resolve }),
+    )
+    vm.schedule('a', true)
+    expect(vm.searching).toBe(true)
+    resolveFn()
+    await Promise.resolve()
+    expect(vm.searching).toBe(false)
   })
 
   it('cancel 后新请求覆写：筛选变化场景（PublicCatalogPage 模式）', async () => {
