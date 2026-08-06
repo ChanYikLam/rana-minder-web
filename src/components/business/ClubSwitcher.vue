@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { identityApi } from '@/services'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useStateView } from '@/composables/useStateView'
 import type { WorkspaceContext } from '@/types/domain'
 
@@ -19,6 +20,7 @@ interface MyClub {
 
 const router = useRouter()
 const workspace = useWorkspaceContextStore()
+const session = useSessionViewStore()
 const { roleLabel } = useStateView()
 
 const clubs = ref<MyClub[]>([])
@@ -41,6 +43,8 @@ async function switchClub(club: MyClub) {
   const ok = await workspace.loadWorkspace(club.clubId)
   switching.value = false
   if (!ok) return
+  // 同步会话工作空间，避免 store 为 club-002、session.workspace 仍为 club-001 的双源不一致
+  session.setWorkspaceInfo({ clubId: club.clubId, clubName: club.clubName, role: club.role })
   await router.push(`/org/${club.clubId}/dashboard`)
 }
 

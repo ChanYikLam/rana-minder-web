@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
-import { resolveLoginTarget } from '@/pages/auth/loginTarget'
+import { resolveLoginTarget, ADMIN_HOME_PATH } from '@/pages/auth/loginTarget'
 import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
 
 const routes: RouteRecordRaw[] = [
@@ -528,13 +528,18 @@ router.beforeEach(async (to) => {
     if (!session.isAuthenticated) {
       return { name: 'P-IDN-01' }
     }
+    // 工作空间以最近加载的 store 上下文为准（如经 ClubSwitcher 切到 club-002 时 store 比
+    // session.workspace 新，避免按旧社团解析落点）；store 未加载或非当前身份时回落会话
+    const useStoreCtx = workspace.hasWorkspace && workspace.currentUserId === session.user?.id
     const target = resolveLoginTarget({
-      workspace: session.workspace,
-      hasPermission: (permission) => session.hasPermission(permission),
+      workspace: useStoreCtx ? { clubId: workspace.currentClubId! } : session.workspace,
+      hasPermission: useStoreCtx
+        ? (permission) => workspace.hasPermission(permission)
+        : (permission) => session.hasPermission(permission),
       requestedRedirect: null,
       needsProfileGate: session.needsProfileGate,
     })
-    if (target === '/admin/clubs') {
+    if (target === ADMIN_HOME_PATH) {
       return { name: 'P-ORG-01' }
     }
     if (target === '/me/profile/required') {

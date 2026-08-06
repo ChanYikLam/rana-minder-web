@@ -109,6 +109,11 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     }
   }
 
+  /** 同步当前工作空间（如社团切换后），保持与 workspaceContextStore 单源一致 */
+  function setWorkspaceInfo(info: WorkspaceInfo) {
+    workspace.value = info
+  }
+
   function hasPermission(permission: string): boolean {
     return permissions.value.includes(permission)
   }
@@ -132,5 +137,6 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     clearSession,
     logout,
     hasPermission,
+    setWorkspaceInfo,
   }
 })

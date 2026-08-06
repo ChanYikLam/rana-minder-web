@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveLoginTarget } from './loginTarget'
+import { resolveLoginTarget, parseSameOriginRedirect, ADMIN_HOME_PATH } from './loginTarget'
 
 function makeCtx(overrides: {
   workspace?: { clubId: string } | null
@@ -38,11 +38,11 @@ describe('resolveLoginTarget', () => {
     expect(target).toBe('/me')
   })
 
-  it('平台管理员：无工作空间但具平台权限时进入社团接入', () => {
+  it('平台管理员：无工作空间但具平台权限时进入社团接入（共用 ADMIN_HOME_PATH 常量）', () => {
     const target = resolveLoginTarget(
       makeCtx({ permissions: ['platform:club:manage'] }),
     )
-    expect(target).toBe('/admin/clubs')
+    expect(target).toBe(ADMIN_HOME_PATH)
   })
 
   it('无工作空间且无平台权限（申请人）时进入个人中心', () => {
@@ -78,5 +78,27 @@ describe('resolveLoginTarget', () => {
       makeCtx({ needsProfileGate: true }),
     )
     expect(target).toBe('/me/profile/required')
+  })
+})
+
+describe('parseSameOriginRedirect', () => {
+  const ORIGIN = 'https://app.example.edu.cn'
+
+  it('同源绝对路径：保留 pathname/search/hash', () => {
+    expect(parseSameOriginRedirect('/org/club-001/dashboard?tab=a#x', ORIGIN)).toBe('/org/club-001/dashboard?tab=a#x')
+  })
+
+  it('跨源 URL（开放重定向防护）返回 null', () => {
+    expect(parseSameOriginRedirect('https://evil.example.com/phish', ORIGIN)).toBeNull()
+  })
+
+  it('协议相对 // 与非字符串/数组/对象输入返回 null', () => {
+    expect(parseSameOriginRedirect('//evil.example.com', ORIGIN)).toBeNull()
+    expect(parseSameOriginRedirect(undefined, ORIGIN)).toBeNull()
+    expect(parseSameOriginRedirect(['/me'], ORIGIN)).toBeNull()
+  })
+
+  it('畸形路径不抛错：URL 规范化后仍按同源路径处理', () => {
+    expect(parseSameOriginRedirect('/%', ORIGIN)).toBe('/%')
   })
 })
