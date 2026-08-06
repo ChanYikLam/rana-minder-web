@@ -303,7 +303,7 @@ const recHandlers: MockMethod[] = [
         id: a.id, clubId: a.clubId, clubName: a.clubName, title: a.title, type: 'recruitment',
         status: a.status, channelStatus: a.channelStatus, historical,
         deadline: a.deadline, description: a.description, departments: a.departments, formId: a.formId,
-        eligibility: a.eligibility, volunteerRules: a.volunteerRules,
+        eligibility: a.eligibility, volunteerRules: a.volunteerRules, allowAdjustmentDefault: a.allowAdjustmentDefault,
       })
     },
   },
@@ -677,6 +677,18 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers ?? input.formData ?? input.formAnswers })
       if (!r.ok) return businessError(r.error || '保存失败')
       return ok({ activityId: query.activityId, status: 'draft', savedAt: new Date().toISOString(), ...r.data })
+    },
+  },
+  // 撤销报名提交（普通招新，回到草稿；通道开放且未排期面试/未形成审核结论时可用）
+  // 注意：不复用 /withdraw（那是「退出招新」端点，语义不同，避免路由遮蔽）
+  {
+    url: '/api/activity/recruitment/:activityId/apply/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const r = rdb.withdrawApplicationSubmission(query.activityId, applicantId)
+      return result(r)
     },
   },
   // 我的申请（申请人视角）
@@ -1652,7 +1664,7 @@ const jointHandlers: MockMethod[] = [
           id: a.id, jointId: a.jointId, applicantId: a.applicantId, applicantName: a.applicantName,
           applicantStudentId: a.studentId, status: a.status, consented: a.consented,
           consentAt: a.consentAt, agreementVersion: a.agreementVersion, allowJointAdjustment: a.allowJointAdjustment,
-          volunteerClubIds: a.volunteerClubIds, agreementClubSnapshot: a.agreementClubSnapshot,
+          volunteerClubIds: a.volunteerClubIds, volunteerClubSnapshot: a.volunteerClubSnapshot, agreementClubSnapshot: a.agreementClubSnapshot,
           submittedAt: a.submittedAt, version: a.version,
         }))
       return ok({ items, nextCursor: null })
@@ -1672,7 +1684,7 @@ const jointHandlers: MockMethod[] = [
         id: app.id, jointId: app.jointId, applicantId: app.applicantId, applicantName: app.applicantName,
         applicantStudentId: app.studentId, status: app.status, consented: app.consented,
         consentAt: app.consentAt, agreementVersion: app.agreementVersion, allowJointAdjustment: app.allowJointAdjustment,
-        volunteerClubIds: app.volunteerClubIds, agreementClubSnapshot: app.agreementClubSnapshot,
+        volunteerClubIds: app.volunteerClubIds, volunteerClubSnapshot: app.volunteerClubSnapshot, agreementClubSnapshot: app.agreementClubSnapshot,
         answers: app.answers, formVersion: app.formVersion, submittedAt: app.submittedAt, version: app.version,
       })
     },
@@ -1715,6 +1727,17 @@ const jointHandlers: MockMethod[] = [
       const app = rdb.findJointApplication(query.jointId, applicantId)
       if (!app) return notFound('尚未提交联合申请')
       return ok(app)
+    },
+  },
+  // 撤销联合报名提交（回到草稿，通道开放且未安排面试/审核时可用）
+  {
+    url: '/api/activity/joint/:jointId/withdraw',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const r = rdb.withdrawJointApplication(query.jointId, applicantId)
+      return result(r)
     },
   },
   // 联合面试官任务（JNT-031：参与社团负责人/人事可为本社团当前成员指派；活动级覆盖全部联合面试者）

@@ -109,4 +109,57 @@ describe('workspaceContextStore 工作空间缓存（按用户身份）', () => 
     expect(store.hasWorkspace).toBe(false)
     expect(store.currentUserId).toBeNull()
   })
+
+  it('syncWithSession：身份切换到无工作空间用户时清空上一身份残留上下文', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('club_leader') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+    expect(store.hasWorkspace).toBe(true)
+    expect(store.currentUserId).toBe('u-leader')
+
+    // 新身份（申请人，无工作空间）→ 清空
+    seedUser('u-applicant')
+    store.syncWithSession(null, [], 'u-applicant')
+
+    expect(store.hasWorkspace).toBe(false)
+    expect(store.currentClubId).toBeNull()
+    expect(store.currentUserId).toBeNull()
+  })
+
+  it('syncWithSession：同一身份且已有上下文时不重置（保留最近访问的社团上下文）', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('club_leader') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+    // 同一身份再次进入非工作空间页：上下文保持 club-001 不变
+    store.syncWithSession({ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, ['club:dashboard:view'], 'u-leader')
+
+    expect(store.currentClubId).toBe('club-001')
+    expect(store.currentRole).toBe('club_leader')
+    expect(store.currentUserId).toBe('u-leader')
+  })
+
+  it('syncWithSession：身份切换为新身份（有工作空间）时按会话初始化上下文', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('club_leader') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+
+    // 新身份 → 有工作空间：按会话初始化（角色/权限/归属用户一并覆盖）
+    seedUser('u-member')
+    store.syncWithSession(
+      { clubId: 'club-001', clubName: '计算机协会', role: 'member' },
+      ['club:member:view-self'],
+      'u-member',
+    )
+
+    expect(store.currentClubId).toBe('club-001')
+    expect(store.currentRole).toBe('member')
+    expect(store.currentPermissions).toEqual(['club:member:view-self'])
+    expect(store.currentUserId).toBe('u-member')
+  })
 })

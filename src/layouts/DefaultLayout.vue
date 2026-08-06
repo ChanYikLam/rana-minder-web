@@ -21,6 +21,7 @@ import ClubSwitcher from '@/components/business/ClubSwitcher.vue'
 import Breadcrumbs from '@/components/business/Breadcrumbs.vue'
 import RoleBadge from '@/components/business/RoleBadge.vue'
 import { useTheme } from '@/composables/useTheme'
+import { useUserMenu } from '@/composables/useUserMenu'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +29,7 @@ const session = useSessionViewStore()
 const workspace = useWorkspaceContextStore()
 const notifications = useNotificationViewStore()
 const { theme, toggleTheme } = useTheme()
+const { canAccessPlatformAdmin, hasAnyPlatformPermission: isAdmin, handleLogout } = useUserMenu({ beforeRedirect: closeMobileNav })
 
 const currentClubId = computed(() => workspace.currentClubId)
 const clubIdFromRoute = computed(() => (route.params.clubId as string) || currentClubId.value)
@@ -47,27 +49,10 @@ const canAccessDashboard = computed(() => !!clubIdFromRoute.value && canAccess('
 
 const adminNavGroups = ADMIN_NAV
 
-const isAdmin = computed(() => {
-  return session.hasPermission('platform:club:manage') ||
-    session.hasPermission('platform:form:design') ||
-    session.hasPermission('platform:config:manage') ||
-    session.hasPermission('platform:audit:view') ||
-    session.hasPermission('platform:export:execute') ||
-    session.hasPermission('platform:delete:execute') ||
-    session.hasPermission('platform:ops:view')
-})
-
 const mobileNavOpen = ref(false)
 
 function closeMobileNav() {
   mobileNavOpen.value = false
-}
-
-async function handleLogout() {
-  await session.logout()
-  workspace.clearWorkspace()
-  closeMobileNav()
-  await router.push('/login')
 }
 </script>
 
@@ -114,7 +99,7 @@ async function handleLogout() {
             <User :size="16" /> 个人中心
           </router-link>
           <router-link
-            v-if="isAdmin"
+            v-if="canAccessPlatformAdmin"
             to="/admin/clubs"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
             :class="{ 'text-primary bg-primary-subtle': route.path.startsWith('/admin') }"
@@ -170,7 +155,7 @@ async function handleLogout() {
             <DropdownMenuItem @click="router.push('/me/profile')" class="cursor-pointer">
               <User :size="16" class="mr-2" /> 个人资料
             </DropdownMenuItem>
-            <DropdownMenuItem v-if="isAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
+            <DropdownMenuItem v-if="canAccessPlatformAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
               <Settings :size="16" class="mr-2" /> 平台管理
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -283,7 +268,7 @@ async function handleLogout() {
               <User :size="16" /> 个人中心
             </router-link>
             <router-link
-              v-if="isAdmin"
+              v-if="canAccessPlatformAdmin"
               to="/admin/clubs"
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
               :class="{ 'text-primary bg-primary-subtle': route.path.startsWith('/admin') }"

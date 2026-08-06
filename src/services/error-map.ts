@@ -5,6 +5,7 @@ export const ERROR_CODES = [
   'IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008',
   'IFC-ERR-009', 'IFC-ERR-010', 'IFC-ERR-011', 'IFC-ERR-012',
   'IFC-ERR-013', 'IFC-ERR-014', 'IFC-ERR-015', 'IFC-ERR-016',
+  'IFC-ERR-017',
 ] as const
 
 export type ErrorCode = (typeof ERROR_CODES)[number]
@@ -30,6 +31,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   'IFC-ERR-014': '操作正在处理中，请勿重复提交',
   'IFC-ERR-015': '请求的内容不存在或当前不可见',
   'IFC-ERR-016': '操作未能安全提交，请稍后重试',
+  'IFC-ERR-017': '请求体解析失败，请检查提交内容',
 }
 
 export const ERROR_AUTO_RETRY: Record<ErrorCode, boolean> = {
@@ -49,6 +51,7 @@ export const ERROR_AUTO_RETRY: Record<ErrorCode, boolean> = {
   'IFC-ERR-014': false,
   'IFC-ERR-015': false,
   'IFC-ERR-016': false,
+  'IFC-ERR-017': false,
 }
 
 export const ERROR_RESUBMIT_ALLOWED: Record<ErrorCode, boolean> = {
@@ -68,6 +71,7 @@ export const ERROR_RESUBMIT_ALLOWED: Record<ErrorCode, boolean> = {
   'IFC-ERR-014': false,
   'IFC-ERR-015': false,
   'IFC-ERR-016': true,
+  'IFC-ERR-017': false,
 }
 
 export type PageStateFromError = 'error' | 'forbidden' | 'loading'
@@ -99,7 +103,7 @@ export function parseApiError(body: unknown): ApiError {
     }
     return {
       code: rawCode,
-      message: String(b.message || ERROR_MESSAGES['IFC-ERR-016']),
+      message: String(b.message || ERROR_MESSAGES[rawCode]),
       supportId: b.supportId ? String(b.supportId) : undefined,
       fieldErrors: b.fieldErrors as Record<string, string[]> | undefined,
     }

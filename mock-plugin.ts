@@ -28,14 +28,58 @@ function matchRoute(handler: MockMethod, method: string, pathname: string): Matc
   return { handler, params, specificity: segments.length * 10 - names.length }
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of request) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+/**
+ * 解析 multipart/form-data 请求体（表单文件上传）。
+ * 浏览器 FormData 无法被 JSON.parse，此处提取分块的字段名/文件名/大小，
+ * 以 { input: { name, size, purpose } } 的 JSON 契约传给 mock handler，
+ * 与真实后端请求契约保持一致（mock 端点无需感知 multipart 细节）。
+ */
+export function readMultipartBody(request: IncomingMessage, rawBody: Buffer): Record<string, unknown> {
+  const contentType = request.headers['content-type'] || ''
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)
+  const boundary = boundaryMatch?.[1] || boundaryMatch?.[2]
+  if (!boundary) return {}
+  const separator = Buffer.from(`--${boundary}`)
+  const parts = rawBody.toString('latin1').split(separator.toString('latin1'))
+  const fields: Record<string, string> = {}
+  let fileName = ''
+  let fileSize = 0
+  let hasFile = false
+  for (const part of parts) {
+    const endIndex = part.indexOf('\r\n\r\n')
+    if (endIndex < 0) continue
+    const head = Buffer.from(part.slice(0, endIndex), 'latin1').toString('utf8')
+    const body = part.slice(endIndex + 4)
+    const nameMatch = head.match(/name="([^"]+)"/)
+    if (!nameMatch) continue
+    const fieldName = nameMatch[1]
+    // RFC 5987 filename* 扩展（UTF-8''percent-encoded）优先，兼容老式客户端的裸 filename
+    const filenameStarMatch = head.match(/filename\*=(?:UTF-8''|utf-8'')([^;\r\n]+)/i)
+    let filename: string
+    const hasFilenameHeader = /filename\*?=/i.test(head)
+    if (filenameStarMatch) {
+      try {
+        filename = decodeURIComponent(filenameStarMatch[1].trim())
+      } catch {
+        filename = ''
+      }
+    } else {
+      const plainFilenameMatch = head.match(/filename="([^"]*)"/)
+      filename = plainFilenameMatch ? plainFilenameMatch[1] || '' : ''
+    }
+    if (hasFilenameHeader) {
+      hasFile = true
+      fileName = filename
+      fileSize = Buffer.from(body.replace(/\r\n$/, ''), 'latin1').length
+    } else {
+      fields[fieldName] = Buffer.from(body.replace(/\r\n$/, ''), 'latin1').toString('utf8')
+    }
   }
-  if (chunks.length === 0) return {}
-  const text = Buffer.concat(chunks).toString('utf8')
-  return text ? JSON.parse(text) : {}
+  const input: Record<string, unknown> = {}
+  if (hasFile) input.name = fileName
+  if (hasFile) input.size = fileSize
+  if (fields.purpose) input.purpose = fields.purpose
+  return Object.keys(input).length > 0 ? { input } : { ...fields }
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
@@ -75,7 +119,26 @@ export function localMockPlugin(): Plugin {
 
         try {
           const searchParams = Object.fromEntries(requestUrl.searchParams.entries())
-          const body = request.method === 'GET' || request.method === 'HEAD' ? {} : await readJsonBody(request)
+          let body: unknown = {}
+          if (request.method !== 'GET' && request.method !== 'HEAD') {
+            const chunks: Uint8Array[] = []
+            for await (const chunk of request) {
+              chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+            }
+            const rawBody = Buffer.concat(chunks)
+            const contentType = request.headers['content-type'] || ''
+            body = contentType.includes('multipart/form-data')
+              ? readMultipartBody(request, rawBody)
+              : rawBody.length === 0
+                ? {}
+                : (() => {
+                    try {
+                      return JSON.parse(rawBody.toString('utf8'))
+                    } catch {
+                      throw Object.assign(new Error('请求体 JSON 解析失败'), { parseError: true })
+                    }
+                  })()
+          }
           const result = await matched.handler.response({
             url: requestUrl.pathname + requestUrl.search,
             query: { ...searchParams, ...matched.params },
@@ -88,7 +151,11 @@ export function localMockPlugin(): Plugin {
             return
           }
           sendJson(response, 200, result)
-        } catch {
+        } catch (error) {
+          if (error && typeof error === 'object' && 'parseError' in error) {
+            sendJson(response, 400, { code: 'IFC-ERR-017', message: '请求体 JSON 解析失败' })
+            return
+          }
           sendJson(response, 500, { code: 'IFC-ERR-016', message: '模拟服务处理失败' })
         }
       })

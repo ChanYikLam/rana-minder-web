@@ -3,17 +3,17 @@ import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useDebouncedSearch } from './useDebouncedSearch'
 
-type SearchHandler = (kw: string, isStale: () => boolean) => Promise<void> | void
+type SearchHandler = (kw: string) => Promise<void> | void
 
 const Harness = defineComponent({
   props: {
     onSearch: { type: Function, required: true },
   },
   setup(props) {
-    const { searching, schedule } = useDebouncedSearch({
-      onSearch: (kw, isStale) => (props.onSearch as SearchHandler)(kw, isStale),
+    const { searching, schedule, seq } = useDebouncedSearch({
+      onSearch: (kw) => (props.onSearch as SearchHandler)(kw),
     })
-    return { searching, schedule }
+    return { searching, schedule, seq }
   },
   render() { return null },
 })
@@ -21,6 +21,7 @@ const Harness = defineComponent({
 interface HarnessVm {
   schedule: (kw: string) => void
   searching: boolean
+  seq: number
 }
 
 function mountHarness(onSearch: SearchHandler) {
@@ -47,7 +48,7 @@ describe('useDebouncedSearch', () => {
     expect(onSearch).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(onSearch).toHaveBeenCalledTimes(1)
-    expect(onSearch).toHaveBeenCalledWith('ab', expect.any(Function))
+    expect(onSearch).toHaveBeenCalledWith('ab')
   })
 
   it('空关键字与纯空格：立即触发重置且不再发请求', () => {
@@ -55,13 +56,13 @@ describe('useDebouncedSearch', () => {
     const { vm } = mountHarness(onSearch)
     vm.schedule('')
     expect(onSearch).toHaveBeenCalledTimes(1)
-    expect(onSearch).toHaveBeenLastCalledWith('', expect.any(Function))
+    expect(onSearch).toHaveBeenLastCalledWith('')
     vi.advanceTimersByTime(500)
     expect(onSearch).toHaveBeenCalledTimes(1)
 
     vm.schedule('   ')
     expect(onSearch).toHaveBeenCalledTimes(2)
-    expect(onSearch).toHaveBeenLastCalledWith('', expect.any(Function))
+    expect(onSearch).toHaveBeenLastCalledWith('')
   })
 
   it('关键字 trim 后传入搜索回调', () => {
@@ -69,7 +70,7 @@ describe('useDebouncedSearch', () => {
     const { vm } = mountHarness(onSearch)
     vm.schedule('  张三  ')
     vi.advanceTimersByTime(300)
-    expect(onSearch).toHaveBeenCalledWith('张三', expect.any(Function))
+    expect(onSearch).toHaveBeenCalledWith('张三')
   })
 
   it('searching 覆盖防抖窗口并在请求完成后复位', async () => {
@@ -86,49 +87,43 @@ describe('useDebouncedSearch', () => {
     expect(vm.searching).toBe(false)
   })
 
-  it('在途请求被新输入作废：isStale 生效，loading 由最新请求复位', async () => {
+  it('在途请求被新输入作废：seq 递增，loading 由最新请求复位', async () => {
     const resolvers: Array<() => void> = []
-    const staleFlags: Array<() => boolean> = []
-    const onSearch = vi.fn((_kw: string, isStale: () => boolean) => {
-      staleFlags.push(isStale)
-      return new Promise<void>((resolve) => { resolvers.push(resolve) })
-    })
+    const onSearch = vi.fn(() => new Promise<void>((resolve) => { resolvers.push(resolve) }))
     const { vm } = mountHarness(onSearch)
 
     vm.schedule('a')
     vi.advanceTimersByTime(300)
     expect(onSearch).toHaveBeenCalledTimes(1)
+    const seqAfterFirstCall = vm.seq
+
     vm.schedule('ab')
     vi.advanceTimersByTime(300)
     expect(onSearch).toHaveBeenCalledTimes(2)
+    expect(vm.seq).not.toBe(seqAfterFirstCall)
 
     resolvers[0]()
     await Promise.resolve()
-    expect(staleFlags[0]()).toBe(true)
+    expect(vm.seq).not.toBe(seqAfterFirstCall)
     expect(vm.searching).toBe(true)
 
+    const seqBeforeSecondResolve = vm.seq
     resolvers[1]()
     await Promise.resolve()
-    expect(staleFlags[1]()).toBe(false)
+    expect(vm.seq).toBe(seqBeforeSecondResolve)
     expect(vm.searching).toBe(false)
   })
 
   it('清空关键字立即作废在途请求并复位 loading', async () => {
     const resolvers: Array<() => void> = []
-    const staleFlags: Array<() => boolean> = []
-    const { vm } = mountHarness((_kw, isStale) => {
-      staleFlags.push(isStale)
-      return new Promise<void>((resolve) => { resolvers.push(resolve) })
-    })
+    const { vm } = mountHarness(() => new Promise<void>((resolve) => { resolvers.push(resolve) }))
 
     vm.schedule('a')
     vi.advanceTimersByTime(300)
+    const seqBeforeClear = vm.seq
     vm.schedule('')
     expect(vm.searching).toBe(false)
-
-    resolvers[0]()
-    await Promise.resolve()
-    expect(staleFlags[0]()).toBe(true)
+    expect(vm.seq).not.toBe(seqBeforeClear)
   })
 
   it('卸载时清理待触发定时器，不再发请求', () => {
@@ -163,5 +158,40 @@ describe('useDebouncedSearch', () => {
     vm.schedule('')
     await Promise.resolve()
     expect(vm.searching).toBe(false)
+  })
+
+  it('旧响应被丢弃不写回：页面级 seq 守卫', async () => {
+    const resolvers: Array<() => void> = []
+    const results: string[] = []
+    const capturedSeqs: number[] = []
+
+    const { vm } = mountHarness((kw) => {
+      capturedSeqs.push(vm.seq)
+      const idx = capturedSeqs.length - 1
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          // 模拟页面级守卫：仅当 seq 未变化时才写回结果
+          if (capturedSeqs[idx] === vm.seq) {
+            results.push(kw)
+          }
+          resolve()
+        })
+      })
+    })
+
+    vm.schedule('first')
+    vi.advanceTimersByTime(300)
+    vm.schedule('second')
+    vi.advanceTimersByTime(300)
+
+    // 第一个请求完成：应被丢弃
+    resolvers[0]()
+    await Promise.resolve()
+    expect(results).toEqual([])
+
+    // 第二个请求完成：应写回
+    resolvers[1]()
+    await Promise.resolve()
+    expect(results).toEqual(['second'])
   })
 })
