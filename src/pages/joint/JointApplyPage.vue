@@ -6,7 +6,8 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Users, Send, Save, CheckCircle2, Upload, FileWarning, ChevronUp, ChevronDown, X } from '@lucide/vue'
+import { ArrowLeft, Users, Send, Save, CheckCircle2, Upload, FileWarning, ChevronUp, ChevronDown, X, Archive } from '@lucide/vue'
+import { applicationStatusLabel, isEditableStatus } from '@/lib/recruitment-status'
 
 interface JointDetail {
   title: string
@@ -41,14 +42,7 @@ interface MyApplication {
   submittedAt?: string | null
 }
 
-/** 联合申请状态 → 用户可读文案（未知状态回退原始值；联合申请状态集仅 draft/submitted/archived） */
-const APPLICATION_STATUS_LABELS: Record<string, string> = {
-  draft: '草稿',
-  submitted: '等待审核',
-  archived: '已归档',
-}
-
-/** 联合报名通道状态 → 文案与色调（ChannelStatus: not_open/open/paused/closed） */
+/** 联合申请通道状态 → 文案与色调（ChannelStatus: not_open/open/paused/closed） */
 const CHANNEL_STATUS_META: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
   open: { label: '报名通道开放中', tone: 'success' },
   paused: { label: '报名通道已暂停', tone: 'warning' },
@@ -61,10 +55,6 @@ const CHANNEL_STATUS_TONE_CLASS: Record<string, string> = {
   warning: 'bg-warning-subtle text-warning',
   danger: 'bg-danger-subtle text-danger',
   neutral: 'bg-subtle text-text-secondary',
-}
-
-function statusLabel(status: string): string {
-  return APPLICATION_STATUS_LABELS[status] || status
 }
 
 function channelStatusMeta(status?: string) {
@@ -92,10 +82,10 @@ const withdrawing = ref(false)
 const confirmWithdraw = ref(false)
 let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交 */
+/** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交（可编辑性统一走共享状态机） */
 const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
 const hasArchived = computed(() => myApplication.value?.status === 'archived')
-const showApplyForm = computed(() => !hasSubmitted.value && !hasArchived.value)
+const showApplyForm = computed(() => isEditableStatus(myApplication.value))
 
 /** 部门意向仅对已选意向社团开放 */
 const volunteerClubs = computed(() => (detail.value?.clubs || []).filter((c) => volunteerClubIds.value.includes(c.id)))
@@ -444,7 +434,7 @@ async function handleWithdraw() {
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
         </div>
-        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ applicationStatusLabel(myApplication?.status ?? '') }}</p>
 
         <!-- 报名详情（提交后只读回显本人填写内容） -->
         <div class="mt-4 border-t border-border pt-3 space-y-2.5">
@@ -487,10 +477,10 @@ async function handleWithdraw() {
 
       <Card v-else-if="hasArchived" class="mb-4">
         <div class="flex items-center gap-2 text-text-secondary">
-          <CheckCircle2 :size="18" />
+          <Archive :size="18" />
           <p class="text-sm font-medium text-text-primary">您的联合报名已归档</p>
         </div>
-        <p class="text-xs text-text-secondary mt-1">当前状态：{{ statusLabel(myApplication?.status ?? '') }}</p>
+        <p class="text-xs text-text-secondary mt-1">当前状态：{{ applicationStatusLabel(myApplication?.status ?? '') }}</p>
       </Card>
 
       <div v-else-if="myApplication" class="rounded-lg bg-warning-subtle p-3 mb-4">
