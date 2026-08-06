@@ -183,7 +183,15 @@ async function loadMyApplication() {
       if (result.data.status === 'draft' || result.data.status === 'revision_requested') {
         restoreDraft(result.data)
       }
+      return
     }
+    if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
+      // 尚未创建申请：视为无申请，可正常填写提交
+      myApplication.value = null
+      return
+    }
+    // 其他拒绝/错误（如无权限）不影响表单填写
+    myApplication.value = null
   } catch {
     // 忽略：草稿恢复失败不影响表单填写
   }
