@@ -1,7 +1,9 @@
-/** 申请状态 → 用户可读文案（未知状态回退原文；普通招新与联合报名共用） */
+/** 申请状态 → 用户可读文案（未知状态回退原文；普通招新与联合报名共用）
+ * 文案与全局词表 src/components/business/stateLabels.ts 保持一致（submitted=已提交），
+ * 避免同一状态在两套映射中展示不一致。 */
 export const APPLICATION_STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
-  submitted: '等待审核',
+  submitted: '已提交',
   archived: '已归档',
   revision_requested: '需修订',
   exited: '已退出',
