@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useTheme } from '@/composables/useTheme'
+import { useUserMenu } from '@/composables/useUserMenu'
 import DegradedBanner from '@/components/business/DegradedBanner.vue'
 import { Search, Bell, User, Building2, ChevronDown, Settings, LogOut, Sun, Moon } from '@lucide/vue'
 import {
@@ -18,22 +18,7 @@ const session = useSessionViewStore()
 const notifications = useNotificationViewStore()
 const workspace = useWorkspaceContextStore()
 const { theme, toggleTheme } = useTheme()
-
-const isAdmin = computed(() => {
-  return session.hasPermission('platform:club:manage') ||
-    session.hasPermission('platform:form:design') ||
-    session.hasPermission('platform:config:manage') ||
-    session.hasPermission('platform:audit:view') ||
-    session.hasPermission('platform:export:execute') ||
-    session.hasPermission('platform:delete:execute') ||
-    session.hasPermission('platform:ops:view')
-})
-
-async function handleLogout() {
-  await session.logout()
-  workspace.clearWorkspace()
-  await router.push('/login')
-}
+const { canAccessPlatformAdmin, handleLogout } = useUserMenu()
 </script>
 
 <template>
@@ -101,6 +86,7 @@ async function handleLogout() {
           <span
             v-if="notifications.hasUnread"
             class="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-4 h-4 px-1 text-xs font-bold rounded-full bg-accent text-text-on-accent"
+            role="status"
           >
             {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
           </span>
@@ -127,7 +113,7 @@ async function handleLogout() {
             <DropdownMenuItem @click="router.push('/me/profile')" class="cursor-pointer">
               <User :size="16" class="mr-2" /> 个人资料
             </DropdownMenuItem>
-            <DropdownMenuItem v-if="isAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
+            <DropdownMenuItem v-if="canAccessPlatformAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
               <Settings :size="16" class="mr-2" /> 平台管理
             </DropdownMenuItem>
             <DropdownMenuSeparator />
