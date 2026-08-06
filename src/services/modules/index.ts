@@ -37,6 +37,7 @@ const workspaceContextSchema = z.object({
   clubName: z.string().min(1),
   role: z.enum(['super_admin', 'club_leader', 'hr', 'department_leader', 'interviewer', 'member', 'applicant']),
   permissions: z.array(z.string()),
+  memberId: z.string().nullable().optional(),
 })
 
 export const identityApi = {

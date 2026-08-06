@@ -1,5 +1,5 @@
 import type { MockMethod } from './types'
-import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, USER_MEMBER_MAP, mockUsers, type MockUser } from './auth'
+import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUsers, type MockUser } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
@@ -57,9 +57,10 @@ function effectivePermissions(user: MockUser, clubId: string): string[] {
   return hasTask ? [...base, 'club:interview:view', 'club:interview:evaluate'] : base
 }
 
-/** mock 用户 id → 成员 id 映射（成员生命周期以成员视角模拟操作者） */
-function actorMemberId(user: { id: string }): string | null {
-  return USER_MEMBER_MAP[user.id] || null
+/** mock 用户 id → 成员 id 映射（成员生命周期以成员视角模拟操作者）；
+ * 成员 id 按「用户 × 社团」在 db.MEMBER_BY_USER 中唯一解析（db.ts），不再按用户维度静态映射 */
+function actorMemberId(user: { id: string }, clubId?: string): string | null {
+  return clubId ? db.resolveMemberId(user.id, clubId) : null
 }
 
 /** mock 用户 id → 候选人 id 映射（被邀请人视角） */
@@ -79,7 +80,7 @@ function canManageMembers(user: MockUser, clubId: string): boolean {
 /** 部门负责人的数据范围：其当前任职部门名；其余角色返回 null（全社团） */
 function departmentScopeFor(user: MockUser, clubId: string): string | null {
   if (user.roles.find((r) => r.clubId === clubId)?.role !== 'department_leader') return null
-  const memberId = actorMemberId(user)
+  const memberId = actorMemberId(user, clubId)
   const member = memberId ? db.findMember(clubId, memberId) : undefined
   return member?.positions.find((p) => p.status === 'active')?.departmentName ?? null
 }
@@ -724,6 +725,7 @@ const organizationHandlers: MockMethod[] = [
       if (!membership) {
         return { statusCode: 403, body: { code: 'IFC-ERR-004', message: '工作空间不可访问' } }
       }
+      const memberId = db.resolveMemberId(user.id, membership.clubId)
       return {
         code: 0,
         data: {
@@ -731,6 +733,7 @@ const organizationHandlers: MockMethod[] = [
           clubName: membership.clubName,
           role: membership.role,
           permissions: effectivePermissions(user, membership.clubId),
+          memberId,
         },
       }
     },
@@ -1121,7 +1124,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { type: string; targetDeptId: string; reason: string } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member) return forbidden()
       const active = member.positions.find((p) => p.status === 'active')
@@ -1144,7 +1147,7 @@ const memberHandlers: MockMethod[] = [
       const app = db.departmentApplications.find((a) => a.id === query.applicationId)
       if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '申请不存在', supportId: 'MOCK' } }
       if (app.status !== 'under_review') return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '仅待审批的申请可撤回', supportId: 'MOCK' } }
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const isApplicant = actor === app.applicantId
       if (!isApplicant && !canManageMembers(user, query.clubId)) return forbidden()
       app.status = 'withdrawn'
@@ -1157,7 +1160,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { decision: string; rejectReason?: string } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       const scope = departmentScopeFor(user, query.clubId)
       if (!member || !canManageMembers(user, query.clubId)) return forbidden()
@@ -1220,7 +1223,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { candidateId: string; departmentId: string | null; expireDays?: number } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member || !canManageMembersFull(user, query.clubId)) return forbidden()
       const r = db.createMembershipInvitation(query.clubId, {
@@ -1368,7 +1371,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member || !canAppointments(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
@@ -1459,7 +1462,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { reason: string } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member) return forbidden()
       if (!body.input?.reason?.trim()) {
@@ -1484,7 +1487,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { decision: string } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member || !canApproveResignation(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
@@ -1533,7 +1536,7 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; reason?: string } } }) => {
       const user = resolveMockUser(url)
-      const actor = actorMemberId(user)
+      const actor = actorMemberId(user, query.clubId)
       if (!actor || !canManageMembers(user, query.clubId)) return forbidden()
       const memberId = body.input?.memberId
       if (!body.input?.reason?.trim()) return businessError('移除成员必须填写原因')

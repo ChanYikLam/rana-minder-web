@@ -1,5 +1,6 @@
-import { mockUsers, USER_MEMBER_MAP, USER_APPLICANT_MAP } from './auth'
+import { mockUsers, USER_APPLICANT_MAP } from './auth'
 import { applicantStudentIdOf } from './db-recruitment'
+import { MEMBER_BY_USER } from './db'
 
 /** 站内信（mock 内存态；业务操作经 push* 动态生成，已读状态真实落库） */
 export interface SysNotification {
@@ -75,8 +76,8 @@ export function userIdOfApplicant(applicantId: string): string | null {
 
 /** 成员 id（mem-xxx）→ 可接收通知的前端用户 id（原文被告知亦可能是申请人之类的非成员，若不存在返回 null） */
 export function userIdOfMember(memberId: string): string | null {
-  for (const [userId, member] of Object.entries(USER_MEMBER_MAP)) {
-    if (member === memberId) return userId
+  for (const [userId, byClub] of Object.entries(MEMBER_BY_USER)) {
+    if (Object.values(byClub).includes(memberId)) return userId
   }
   return null
 }

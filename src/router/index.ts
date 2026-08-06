@@ -1,8 +1,8 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
+import { resolveLoginTarget, ADMIN_HOME_PATH, PROFILE_GATE_PATH } from '@/pages/auth/loginTarget'
 import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
-import { ADMIN_HOME_PATH } from '@/pages/auth/loginTarget'
 
 const routes: RouteRecordRaw[] = [
   // ========== A. 公开路由（7条） ==========
@@ -515,6 +515,11 @@ router.beforeEach(async (to) => {
   const session = useSessionViewStore()
   const workspace = useWorkspaceContextStore()
 
+  // 登录身份变化时统一清空上一身份的工作空间上下文，避免缓存串身份
+  if (workspace.hasWorkspace && workspace.currentUserId !== session.user?.id) {
+    workspace.clearWorkspace()
+  }
+
   // 根路径：按会话状态跳转默认落点
   if (to.path === '/') {
     if (!session.isAuthenticated) {
@@ -523,14 +528,25 @@ router.beforeEach(async (to) => {
     if (!session.isAuthenticated) {
       return { name: 'P-IDN-01' }
     }
-    if (session.workspace?.clubId) {
-      if (session.hasPermission('club:dashboard:view')) {
-        return { path: `/org/${session.workspace.clubId}/dashboard` }
-      }
-      return { name: 'P-IDN-03' }
+    // 工作空间以最近加载的 store 上下文为准（如经 ClubSwitcher 切到 club-002 时 store 比
+    // session.workspace 新，避免按旧社团解析落点）；store 未加载或非当前身份时回落会话
+    const storeClubId = workspace.hasWorkspace && workspace.currentUserId === session.user?.id ? workspace.currentClubId : null
+    const target = resolveLoginTarget({
+      workspace: storeClubId ? { clubId: storeClubId } : session.workspace,
+      hasPermission: storeClubId
+        ? (permission) => workspace.hasPermission(permission)
+        : (permission) => session.hasPermission(permission),
+      requestedRedirect: null,
+      needsProfileGate: session.needsProfileGate,
+    })
+    if (target === ADMIN_HOME_PATH) {
+      return { name: 'P-ORG-01' }
     }
-    if (session.hasPermission('platform:club:manage')) {
-      return { path: ADMIN_HOME_PATH }
+    if (target === PROFILE_GATE_PATH) {
+      return { name: 'P-GEN-04' }
+    }
+    if (target.startsWith('/org/')) {
+      return { path: target }
     }
     return { name: 'P-IDN-03' }
   }
@@ -569,10 +585,16 @@ router.beforeEach(async (to) => {
       if (!granted) {
         return { name: 'P-GEN-02' }
       }
-    } else {
-      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载或登录身份已变化时按会话初始化，
-      // 新身份无工作空间时清空上一身份残留
-      workspace.syncWithSession(session.workspace, session.permissions, session.user?.id ?? null)
+    } else if (session.workspace && (!workspace.hasWorkspace || workspace.currentUserId !== session.user?.id)) {
+      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载或登录身份已变化时按会话初始化
+      workspace.setWorkspace(
+        session.workspace.clubId,
+        session.workspace.clubName,
+        session.workspace.role,
+        session.permissions,
+        session.user?.id ?? null,
+        session.workspace.memberId ?? null,
+      )
     }
   }
 

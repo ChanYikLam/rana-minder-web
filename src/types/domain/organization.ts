@@ -61,6 +61,8 @@ export interface ClubMembership {
   clubName: string
   role: ClubRole
   permissions: string[]
+  /** 当前用户在该社团的成员 id（成员生命周期自审/自操作判断）；无法解析时为 null */
+  memberId?: string | null
 }
 
 export type WorkspaceContext = ClubMembership

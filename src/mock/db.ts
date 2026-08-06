@@ -5,6 +5,22 @@
 
 import { assertTransition } from './state-machines/transitions'
 
+/** 登录账号 id → 其所属社团成员 id（在 db.members 中按「用户 × 社团」唯一）
+ * 原静态映射 auth.USER_MEMBER_MAP 仅按用户维度映射，无法表达多社团用户在不同社团的成员 id，
+ * 切换社团后 memberId 会沿用上一社团的值导致自审误判；改为由 members 种子推导单源解析。 */
+export const MEMBER_BY_USER: Record<string, Record<string, string>> = {
+  'user-leader-001': { 'club-001': 'mem-004', 'club-002': 'mem-101' },
+  'user-hr-001': { 'club-001': 'mem-003' },
+  'user-interviewer-001': { 'club-001': 'mem-002' },
+  'user-member-001': { 'club-001': 'mem-001' },
+  'user-deptleader-001': { 'club-001': 'mem-006' },
+}
+
+/** 按「用户 × 社团」解析成员 id；该用户在目标社团无成员身份（或数据未种子）时返回 null */
+export function resolveMemberId(userId: string, clubId: string): string | null {
+  return MEMBER_BY_USER[userId]?.[clubId] ?? null
+}
+
 export type MockRoleKey = 'club_leader' | 'hr' | 'department_leader' | 'interviewer' | 'member'
 
 export interface MockDepartment {
@@ -252,6 +268,21 @@ export const members: MockMember[] = [
     ],
     departmentHistory: [
       { id: 'dhis-007', action: 'join', departmentName: '技术部', at: '2022-09-01T10:00:00+08:00' },
+    ],
+    anomalies: [],
+  },
+  {
+    id: 'mem-101', clubId: 'club-002', studentId: '20210002',
+    name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002',
+    status: 'active', joinedAt: '2024-03-01T00:00:00+08:00', exitedAt: null,
+    positions: [
+      { id: 'pos-101', departmentId: 'dept-101', departmentName: '嵌入式组', title: '人事', startDate: '2024-03-01', endDate: null, status: 'active' },
+    ],
+    tenures: [
+      { id: 'ten-101', departmentName: '嵌入式组', title: '人事', startDate: '2024-03-01', endDate: null, endReason: null },
+    ],
+    departmentHistory: [
+      { id: 'dhis-101', action: 'join', departmentName: '嵌入式组', at: '2024-03-01T10:00:00+08:00' },
     ],
     anomalies: [],
   },
