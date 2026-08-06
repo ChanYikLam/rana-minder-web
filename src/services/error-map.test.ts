@@ -20,8 +20,8 @@ function expectKind<T extends ApiResult<unknown>['kind']>(
 }
 
 describe('ERROR_CODES completeness', () => {
-  it('has exactly 16 error codes', () => {
-    expect(ERROR_CODES).toHaveLength(16)
+  it('has exactly 17 error codes', () => {
+    expect(ERROR_CODES).toHaveLength(17)
   })
 
   it('every error code has a message, auto-retry flag and resubmit flag', () => {
@@ -55,6 +55,18 @@ describe('parseApiError', () => {
   it('parses error with fieldErrors', () => {
     const result = parseApiError({ code: 'IFC-ERR-005', fieldErrors: { name: ['不能为空'] } })
     expect(result.fieldErrors).toEqual({ name: ['不能为空'] })
+  })
+
+  it('parses IFC-ERR-017 keeping the server message (回归：017 曾被视为未知码回退 016 丢失提示)', () => {
+    const result = parseApiError({ code: 'IFC-ERR-017', message: '请求体 JSON 解析失败' })
+    expect(result.code).toBe('IFC-ERR-017')
+    expect(result.message).toBe('请求体 JSON 解析失败')
+  })
+
+  it('已知码缺 message 时用该码自身文案兜底（回归：此前回退 016 文案）', () => {
+    const result = parseApiError({ code: 'IFC-ERR-017' })
+    expect(result.code).toBe('IFC-ERR-017')
+    expect(result.message).toBe(ERROR_MESSAGES['IFC-ERR-017'])
   })
 
   it('falls back to IFC-ERR-016 for unknown codes', () => {
@@ -93,20 +105,20 @@ describe('errorToPageState', () => {
   })
 
   it('maps all remaining errors to error', () => {
-    const errorCodes = ['IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008', 'IFC-ERR-009', 'IFC-ERR-010', 'IFC-ERR-012', 'IFC-ERR-016'] as const
+    const errorCodes = ['IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008', 'IFC-ERR-009', 'IFC-ERR-010', 'IFC-ERR-012', 'IFC-ERR-016', 'IFC-ERR-017'] as const
     for (const code of errorCodes) {
       expect(errorToPageState(code)).toBe('error')
     }
   })
 
-  it('covers all 16 error codes', () => {
+  it('covers all 17 error codes', () => {
     const covered = new Set<string>()
     for (const code of ERROR_CODES) {
       const state = errorToPageState(code)
       covered.add(code)
       expect(['error', 'forbidden', 'loading']).toContain(state)
     }
-    expect(covered.size).toBe(16)
+    expect(covered.size).toBe(17)
   })
 })
 
@@ -213,14 +225,14 @@ describe('httpStatusToResult', () => {
     expect(r14.kind).not.toBe('completed')
   })
 
-  it('covers all 16 error codes through httpStatusToResult', () => {
+  it('covers all 17 error codes through httpStatusToResult', () => {
     const statuses: Record<string, number> = {
       'IFC-ERR-001': 401, 'IFC-ERR-002': 403, 'IFC-ERR-003': 403,
       'IFC-ERR-004': 403, 'IFC-ERR-005': 422, 'IFC-ERR-006': 422,
       'IFC-ERR-007': 409, 'IFC-ERR-008': 409, 'IFC-ERR-009': 409,
       'IFC-ERR-010': 409, 'IFC-ERR-011': 429, 'IFC-ERR-012': 503,
       'IFC-ERR-013': 202, 'IFC-ERR-014': 202, 'IFC-ERR-015': 404,
-      'IFC-ERR-016': 500,
+      'IFC-ERR-016': 500, 'IFC-ERR-017': 400,
     }
     const kinds = new Set<string>()
     for (const code of ERROR_CODES) {

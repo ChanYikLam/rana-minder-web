@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, afterEach } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, saveApplicationDraft, closeChannel, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews } from './db-recruitment'
 import { resetRecruitmentDB } from './reset'
 
 beforeEach(() => {
@@ -32,6 +32,48 @@ describe('申请人档案填充', () => {
     const app = recruitmentApplications.find((a) => a.applicantId === 'u-006')
     expect(app?.applicantName).toBe('林婉婷')
     expect(app?.studentId).toBe('20240006')
+  })
+})
+/** 已提交申请闸门：submitted 不再经 edit_before_deadline 折返可编辑 */
+describe('已提交申请闸门', () => {
+  it('已提交申请再次提交被拒，状态不折返 draft', () => {
+    const first = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(first.ok).toBe(true)
+    const second = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(second.ok).toBe(false)
+    expect(second.error).toContain('撤销提交')
+    const app = recruitmentApplications.find((a) => a.applicantId === 'u-006')
+    expect(app?.status).toBe('submitted')
+  })
+
+  it('已提交申请保存草稿被拒，状态不折返 draft', () => {
+    const first = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(first.ok).toBe(true)
+    const draft = saveApplicationDraft('act-001', 'u-006', { answers: { name: '改个名字' } })
+    expect(draft.ok).toBe(false)
+    expect(draft.error).toContain('撤销提交')
+    const app = recruitmentApplications.find((a) => a.applicantId === 'u-006')
+    expect(app?.status).toBe('submitted')
+    expect(app?.answers.name).toBeUndefined()
+  })
+
+  it('通道关闭时已提交用户重提仍优先命中闸门提示（前置通道校验之前）', () => {
+    const first = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(first.ok).toBe(true)
+    const closed = closeChannel('act-001', '测试关闭通道')
+    expect(closed.ok).toBe(true)
+    const second = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(second.ok).toBe(false)
+    expect(second.error).toContain('撤销提交')
+  })
+
+  it('收紧暂停通道后窗口内已提交用户重提仍可走 rule_tightening（闸门不拦截窗口内用户）', () => {
+    const first = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: false })
+    expect(first.ok).toBe(true)
+    tightenRecruitmentRules('act-001', '学院范围收紧为信息学院', 7)
+    const re = submitApplication('act-001', 'u-006', { preferences: [{ departmentId: 'dept-001' }], allowAdjustment: true })
+    expect(re.ok, re.error || '').toBe(true)
+    expect(re.data?.status).toBe('submitted')
   })
 })
 /** PRD-OPT-013：明确面试官任务硬冲突检测 */

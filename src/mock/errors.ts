@@ -3,7 +3,7 @@
  * 通过 URL 参数 ?_mock_error=IFC-ERR-001 或全局开关触发任意错误码
  */
 
-/** 16 类逻辑错误码 */
+/** 17 类逻辑错误码 */
 export const MOCK_ERROR_CODES = [
   'IFC-ERR-001', // 未认证
   'IFC-ERR-002', // 高风险操作需要重新认证
@@ -21,6 +21,7 @@ export const MOCK_ERROR_CODES = [
   'IFC-ERR-014', // 结果处理中
   'IFC-ERR-015', // 不存在或不可见
   'IFC-ERR-016', // 安全提交失败
+  'IFC-ERR-017', // 请求体解析失败
 ] as const
 
 export type MockErrorCode = (typeof MOCK_ERROR_CODES)[number]
@@ -43,6 +44,7 @@ export const MOCK_ERROR_MESSAGES: Record<MockErrorCode, string> = {
   'IFC-ERR-014': '操作正在处理中，请勿重复提交',
   'IFC-ERR-015': '请求的内容不存在或当前不可见',
   'IFC-ERR-016': '操作未能安全提交，请稍后重试',
+  'IFC-ERR-017': '请求体解析失败，请检查提交内容',
 }
 
 /** 错误码到 HTTP 状态码的映射（mock 层用） */
@@ -63,6 +65,7 @@ export const MOCK_ERROR_HTTP: Record<MockErrorCode, number> = {
   'IFC-ERR-014': 202,
   'IFC-ERR-015': 404,
   'IFC-ERR-016': 500,
+  'IFC-ERR-017': 400,
 }
 
 /** 从 URL 查询参数中解析 mock 错误注入 */
