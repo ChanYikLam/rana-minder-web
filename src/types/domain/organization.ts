@@ -38,6 +38,7 @@ export interface GroupSearchResult extends GroupNode {
 export interface ClubAccessItem {
   clubId: string
   clubName: string
+  description: string
   status: ClubAccessStatus
   groupId: string | null
   groupName: string | null

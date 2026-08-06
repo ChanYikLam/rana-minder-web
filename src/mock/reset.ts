@@ -2,6 +2,7 @@ import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, 
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
 import { correctionsDb } from './db-corrections'
+export { resetOrgDb } from './db-organization'
 
 const seed = {
   recruitmentActivities: structuredClone(recruitmentActivities),
