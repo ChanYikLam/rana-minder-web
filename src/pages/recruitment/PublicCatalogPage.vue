@@ -92,7 +92,7 @@ function switchTab(tab: 'activities' | 'clubs') {
 }
 
 function onFilterChange() {
-  // 筛选（类型/状态/截止/自定义日期）是服务端语义，跳过防抖立即查询；schedule 内部会清 timer 并作废在途请求
+  // 筛选（类型/状态/截止/自定义日期）是服务端语义，跳过防抖立即查询；schedule 内部会清 timer 并作废在途请求，无需额外 cancel
   schedule(searchKeyword.value, true)
 }
 
@@ -127,7 +127,7 @@ onMounted(() => schedule(searchKeyword.value))
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="招新公开目录" @retry="schedule(searchKeyword)">
+  <PageStateBoundary :state="state" title="招新公开目录" @retry="schedule(searchKeyword, true)">
     <div>
       <h1 class="text-2xl font-bold text-primary mb-6">发现社团与活动</h1>
 
