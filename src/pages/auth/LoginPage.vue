@@ -5,6 +5,7 @@ import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
 import { DEMO_ROLES } from '@/mock/auth'
 import type { MockRole } from '@/mock/auth'
+import { resolveLoginTarget } from './loginTarget'
 import {
   ShieldCheck, Users, UserCog, Building2, ClipboardCheck, User, GraduationCap,
   LogIn, Compass,
@@ -43,11 +44,11 @@ function getRequestedRedirect(): string | null {
 }
 
 function resolveTargetAfterLogin(): string {
-  const requested = getRequestedRedirect()
-  if (requested) return requested
-  if (session.workspace?.clubId) return `/org/${session.workspace.clubId}/dashboard`
-  if (session.hasPermission('platform:club:manage')) return '/admin/clubs'
-  return '/me'
+  return resolveLoginTarget({
+    workspace: session.workspace,
+    hasPermission: (permission) => session.hasPermission(permission),
+    requestedRedirect: getRequestedRedirect(),
+  })
 }
 
 onMounted(async () => {

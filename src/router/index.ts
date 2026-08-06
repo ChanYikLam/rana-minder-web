@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
+import { ADMIN_HOME_PATH } from '@/pages/auth/loginTarget'
 
 const routes: RouteRecordRaw[] = [
   // ========== A. 公开路由（7条） ==========
@@ -529,7 +530,7 @@ router.beforeEach(async (to) => {
       return { name: 'P-IDN-03' }
     }
     if (session.hasPermission('platform:club:manage')) {
-      return { name: 'P-ORG-01' }
+      return { path: ADMIN_HOME_PATH }
     }
     return { name: 'P-IDN-03' }
   }
@@ -568,14 +569,10 @@ router.beforeEach(async (to) => {
       if (!granted) {
         return { name: 'P-GEN-02' }
       }
-    } else if (!workspace.hasWorkspace && session.workspace) {
-      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载时按会话初始化
-      workspace.setWorkspace(
-        session.workspace.clubId,
-        session.workspace.clubName,
-        session.workspace.role,
-        session.permissions,
-      )
+    } else {
+      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载或登录身份已变化时按会话初始化，
+      // 新身份无工作空间时清空上一身份残留
+      workspace.syncWithSession(session.workspace, session.permissions, session.user?.id ?? null)
     }
   }
 

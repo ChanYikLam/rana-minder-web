@@ -2,25 +2,50 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ClubRole } from '@/types/domain'
 import { organizationApi } from '@/services'
+import { useSessionViewStore } from './sessionViewStore'
 
 export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
   const currentClubId = ref<string | null>(null)
   const currentClubName = ref<string>('')
   const currentRole = ref<ClubRole | null>(null)
   const currentPermissions = ref<string[]>([])
+  /** 上下文所属用户 id：缓存按「用户 × 社团」维度，登录身份变化后强制重拉，杜绝复用上一身份的角色/权限 */
+  const currentUserId = ref<string | null>(null)
   const loading = ref(false)
 
   const hasWorkspace = computed(() => currentClubId.value !== null)
 
-  function setWorkspace(clubId: string, clubName: string, role: ClubRole, permissions: string[]) {
+  function setWorkspace(clubId: string, clubName: string, role: ClubRole, permissions: string[], userId: string | null) {
     currentClubId.value = clubId
     currentClubName.value = clubName
     currentRole.value = role
     currentPermissions.value = permissions
+    currentUserId.value = userId
+  }
+
+  /** 会话级同步：身份变化后，新身份有工作空间则按会话初始化（侧边栏导航用）；
+   * 新身份无工作空间则清空上一身份残留的上下文；同一身份保留最近访问的社团上下文不重置。 */
+  function syncWithSession(
+    workspace: { clubId: string; clubName: string; role: ClubRole } | null,
+    permissions: string[],
+    userId: string | null,
+  ) {
+    if (workspace && (!hasWorkspace.value || currentUserId.value !== userId)) {
+      setWorkspace(workspace.clubId, workspace.clubName, workspace.role, permissions, userId)
+    } else if (!workspace && hasWorkspace.value && currentUserId.value !== userId) {
+      clearWorkspace()
+    }
   }
 
   async function loadWorkspace(clubId: string): Promise<boolean> {
-    if (currentClubId.value === clubId && currentRole.value) return true
+    const session = useSessionViewStore()
+    if (
+      currentClubId.value === clubId &&
+      currentRole.value &&
+      currentUserId.value === session.user?.id
+    ) {
+      return true
+    }
 
     loading.value = true
     const result = await organizationApi.getContext(clubId)
@@ -36,6 +61,7 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
       result.data.clubName,
       result.data.role,
       result.data.permissions,
+      session.user?.id ?? null,
     )
     return true
   }
@@ -45,6 +71,7 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     currentClubName.value = ''
     currentRole.value = null
     currentPermissions.value = []
+    currentUserId.value = null
   }
 
   function hasPermission(permission: string): boolean {
@@ -56,9 +83,11 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     currentClubName,
     currentRole,
     currentPermissions,
+    currentUserId,
     loading,
     hasWorkspace,
     setWorkspace,
+    syncWithSession,
     loadWorkspace,
     clearWorkspace,
     hasPermission,
