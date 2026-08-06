@@ -239,6 +239,7 @@ function movePreference(index: number, direction: 'up' | 'down') {
 }
 
 async function handleSubmit() {
+  if (!showApplyForm.value) return
   formErrors.value = {}
   for (const field of formFields.value) {
     if (field.required && !formData[field.id]) {
@@ -292,7 +293,7 @@ async function handleSubmit() {
 }
 
 async function handleSaveDraft() {
-  if (submitting.value) return
+  if (submitting.value || !showApplyForm.value) return
   const result = await post(`/activity/joint/${route.params.jointId}/draft`, {
     answers: { ...formData },
     volunteerClubIds: volunteerClubIds.value ?? [],
@@ -484,7 +485,7 @@ async function handleWithdraw() {
       </Card>
 
       <div v-else-if="myApplication" class="rounded-lg bg-warning-subtle p-3 mb-4">
-        <p class="text-sm text-warning font-medium">您有已保存的草稿（状态：草稿），可继续修改后提交</p>
+        <p class="text-sm text-warning font-medium">您有已保存的草稿（状态：{{ applicationStatusLabel(myApplication.status) }}），可继续修改后提交</p>
         <p class="text-xs text-text-secondary mt-1">暂存草稿会覆盖此前保存的内容</p>
       </div>
 
