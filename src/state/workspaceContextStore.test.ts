@@ -79,6 +79,22 @@ describe('workspaceContextStore 工作空间缓存（按用户身份）', () => 
     expect(store.hasPermission('club:dashboard:view')).toBe(false)
   })
 
+  it('会话未初始化（session.user 为 null）时不得命中缓存，强制重新拉取', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('member') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 会话被清空（未初始化），但缓存仍残留上一身份 → 不得命中缓存返回旧上下文
+    useSessionViewStore().user = null
+    const ok = await store.loadWorkspace('club-001')
+
+    expect(ok).toBe(true)
+    expect(mockedGetContext).toHaveBeenCalledTimes(2)
+  })
+
   it('context 请求失败时清空工作空间并返回 false', async () => {
     mockedGetContext.mockResolvedValue({
       kind: 'rejected',

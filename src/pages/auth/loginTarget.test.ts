@@ -5,12 +5,14 @@ function makeCtx(overrides: {
   workspace?: { clubId: string } | null
   permissions?: string[]
   requestedRedirect?: string | null
+  needsProfileGate?: boolean
 } = {}) {
   const permissions = overrides.permissions ?? []
   return {
     workspace: overrides.workspace ?? null,
     hasPermission: (p: string) => permissions.includes(p),
     requestedRedirect: overrides.requestedRedirect ?? null,
+    needsProfileGate: overrides.needsProfileGate ?? false,
   }
 }
 
@@ -57,5 +59,24 @@ describe('resolveLoginTarget', () => {
       }),
     )
     expect(target).toBe('/explore/activities')
+  })
+
+  it('资料未完善（needsProfileGate）时直接进入资料补全门禁页，优先于其它落点', () => {
+    const target = resolveLoginTarget(
+      makeCtx({
+        workspace: { clubId: 'club-001' },
+        permissions: ['club:dashboard:view'],
+        requestedRedirect: '/explore/activities',
+        needsProfileGate: true,
+      }),
+    )
+    expect(target).toBe('/me/profile/required')
+  })
+
+  it('资料未完善但无 workspace 时同样进入门禁页', () => {
+    const target = resolveLoginTarget(
+      makeCtx({ needsProfileGate: true }),
+    )
+    expect(target).toBe('/me/profile/required')
   })
 })

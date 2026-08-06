@@ -10,9 +10,12 @@ export interface LoginTargetContext {
   hasPermission: (permission: string) => boolean
   /** URL 携带的 redirect 参数（已校验同源），优先于默认落点 */
   requestedRedirect: string | null
+  /** 资料未完善：直接进入资料补全门禁页（P-GEN-04），避免落点闪跳 */
+  needsProfileGate?: boolean
 }
 
 export function resolveLoginTarget(ctx: LoginTargetContext): string {
+  if (ctx.needsProfileGate) return '/me/profile/required'
   if (ctx.requestedRedirect) return ctx.requestedRedirect
   if (ctx.workspace?.clubId && ctx.hasPermission('club:dashboard:view')) {
     return `/org/${ctx.workspace.clubId}/dashboard`

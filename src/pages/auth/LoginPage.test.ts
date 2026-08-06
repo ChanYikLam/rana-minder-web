@@ -81,6 +81,8 @@ describe('LoginPage 组件：mock 身份切换后会话刷新与落点', () => {
     await loginButton.trigger('click')
     await flushPromises()
     expect(pushSpy).toHaveBeenLastCalledWith('/org/club-001/dashboard')
+    // 首次登录：startLogin 使用当前选中角色与默认落点
+    expect(mockedStartLogin).toHaveBeenLastCalledWith('/me', 'leader')
 
     // 第二次登录：同一 SPA 生命周期内切换普通成员身份 → 会话刷新后按新身份解析到个人中心
     mockedStartLogin.mockResolvedValueOnce('ready')
@@ -97,8 +99,41 @@ describe('LoginPage 组件：mock 身份切换后会话刷新与落点', () => {
 
     // 落点按新身份解析：普通成员无 dashboard 权限 → 个人中心（不得沿用旧身份的 /org/.../dashboard）
     expect(pushSpy).toHaveBeenLastCalledWith('/me')
+    // 两次登录各调用一次 startLogin
+    expect(mockedStartLogin).toHaveBeenCalledTimes(2)
     // 每次登录前都重新拉取会话（onMounted 一次 + 两次 handleLogin 各一次）
     expect(mockedGetSession).toHaveBeenCalledTimes(3)
+  })
+
+  it('mock 下切换身份为资料未完善用户：会话刷新后落入资料补全门禁页', async () => {
+    mockedGetSession.mockResolvedValueOnce({
+      kind: 'rejected',
+      error: { code: 'AUTH-MOCK-NOT-SELECTED', message: 'no session' },
+    } as never)
+
+    const { wrapper, router } = await mountLoginPage()
+    const pushSpy = vi.spyOn(router, 'push')
+    const loginButton = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('使用统一身份认证登录'))!
+
+    mockedStartLogin.mockResolvedValueOnce('ready')
+    mockedGetSession.mockResolvedValueOnce({
+      kind: 'completed',
+      data: {
+        user: { id: 'u-incomplete', name: '资料未完善' },
+        profileGate: { complete: false, emailVerified: false },
+        degraded: false,
+        permissions: [],
+        workspace: null,
+      },
+    } as never)
+
+    await loginButton.trigger('click')
+    await flushPromises()
+
+    expect(mockedStartLogin).toHaveBeenCalledTimes(1)
+    expect(pushSpy).toHaveBeenLastCalledWith('/me/profile/required')
   })
 
   it('已登录用户直接访问 /login 时按会话身份解析落点', async () => {

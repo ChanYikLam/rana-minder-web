@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
+import { resolveLoginTarget } from '@/pages/auth/loginTarget'
 import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
 
 const routes: RouteRecordRaw[] = [
@@ -514,6 +515,11 @@ router.beforeEach(async (to) => {
   const session = useSessionViewStore()
   const workspace = useWorkspaceContextStore()
 
+  // 登录身份变化时统一清空上一身份的工作空间上下文，避免缓存串身份
+  if (workspace.hasWorkspace && workspace.currentUserId !== session.user?.id) {
+    workspace.clearWorkspace()
+  }
+
   // 根路径：按会话状态跳转默认落点
   if (to.path === '/') {
     if (!session.isAuthenticated) {
@@ -522,14 +528,20 @@ router.beforeEach(async (to) => {
     if (!session.isAuthenticated) {
       return { name: 'P-IDN-01' }
     }
-    if (session.workspace?.clubId) {
-      if (session.hasPermission('club:dashboard:view')) {
-        return { path: `/org/${session.workspace.clubId}/dashboard` }
-      }
-      return { name: 'P-IDN-03' }
-    }
-    if (session.hasPermission('platform:club:manage')) {
+    const target = resolveLoginTarget({
+      workspace: session.workspace,
+      hasPermission: (permission) => session.hasPermission(permission),
+      requestedRedirect: null,
+      needsProfileGate: session.needsProfileGate,
+    })
+    if (target === '/admin/clubs') {
       return { name: 'P-ORG-01' }
+    }
+    if (target === '/me/profile/required') {
+      return { name: 'P-GEN-04' }
+    }
+    if (target.startsWith('/org/')) {
+      return { path: target }
     }
     return { name: 'P-IDN-03' }
   }
@@ -575,6 +587,7 @@ router.beforeEach(async (to) => {
         session.workspace.clubName,
         session.workspace.role,
         session.permissions,
+        session.user?.id ?? null,
       )
     }
   }

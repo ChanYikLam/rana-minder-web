@@ -48,6 +48,7 @@ function resolveTargetAfterLogin(): string {
     workspace: session.workspace,
     hasPermission: (permission) => session.hasPermission(permission),
     requestedRedirect: getRequestedRedirect(),
+    needsProfileGate: session.needsProfileGate,
   })
 }
 

@@ -15,12 +15,18 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
 
   const hasWorkspace = computed(() => currentClubId.value !== null)
 
-  function setWorkspace(clubId: string, clubName: string, role: ClubRole, permissions: string[]) {
+  function setWorkspace(
+    clubId: string,
+    clubName: string,
+    role: ClubRole,
+    permissions: string[],
+    userId: string | null,
+  ) {
     currentClubId.value = clubId
     currentClubName.value = clubName
     currentRole.value = role
     currentPermissions.value = permissions
-    currentUserId.value = useSessionViewStore().user?.id ?? null
+    currentUserId.value = userId
   }
 
   async function loadWorkspace(clubId: string): Promise<boolean> {
@@ -28,6 +34,8 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     if (
       currentClubId.value === clubId &&
       currentRole.value &&
+      // 会话未初始化（session.user 为 null）时不得命中缓存，避免复用上一身份的上下文
+      currentUserId.value !== null &&
       currentUserId.value === session.user?.id
     ) {
       return true
@@ -47,6 +55,7 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
       result.data.clubName,
       result.data.role,
       result.data.permissions,
+      session.user?.id ?? null,
     )
     return true
   }
