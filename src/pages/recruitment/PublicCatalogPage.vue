@@ -88,6 +88,12 @@ function switchTab(tab: 'activities' | 'clubs') {
   customFrom.value = ''
   customTo.value = ''
   searchKeyword.value = ''
+  // 真正切换 Tab 时直接以目标 Tab 默认参数发起一次全量查询，避免 watch(activeTab) 再触发一次空关键字冗余请求；
+  // 重复点击当前 Tab 仅重置筛选与关键字，不重复发请求
+  if (activeTab.value !== tab) {
+    suppressActiveTabWatch = true
+    schedule('')
+  }
   router.push(tab === 'clubs' ? '/explore/clubs' : '/explore/activities')
 }
 
@@ -97,6 +103,7 @@ function onFilterChange() {
 }
 
 let suppressFilterWatch = false
+let suppressActiveTabWatch = false
 
 function openActivity(a: Activity) {
   router.push(a.type === 'joint' ? `/activity/joint/${a.id}` : `/activity/recruitment/${a.id}`)
@@ -121,7 +128,13 @@ watch([typeFilter, statusFilter, deadlineRange, customFrom, customTo], () => {
 })
 
 // 切换找社团/找活动模式后重新查询（同组件复用不重新挂载，需显式监听）
-watch(activeTab, () => schedule(searchKeyword.value))
+watch(activeTab, () => {
+  if (suppressActiveTabWatch) {
+    suppressActiveTabWatch = false
+    return
+  }
+  schedule(searchKeyword.value)
+})
 
 onMounted(() => schedule(searchKeyword.value))
 </script>

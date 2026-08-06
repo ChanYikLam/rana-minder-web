@@ -313,4 +313,40 @@ describe('useDebouncedSearch', () => {
     await Promise.resolve()
     expect(results).toEqual(['keyword-b'])
   })
+
+  it('切换 Tab 场景：cancel + schedule("") 只发一次查询，在途旧响应被丢弃（PublicCatalogPage switchTab 模式）', async () => {
+    const resolvers: Array<() => void> = []
+    const calls: string[] = []
+    const results: string[] = []
+    const capturedSeqs: number[] = []
+
+    const { vm } = mountHarness((kw) => {
+      calls.push(kw)
+      capturedSeqs.push(vm.seq)
+      const idx = capturedSeqs.length - 1
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          if (capturedSeqs[idx] === vm.seq) {
+            results.push(kw)
+          }
+          resolve()
+        })
+      })
+    })
+
+    // 搜索在途（防抖窗口内）时切换 Tab：cancel 作废在途，schedule('') 立即发起一次空关键字全量查询
+    vm.schedule('keyword-a')
+    expect(resolvers.length).toBe(0)
+    vm.cancel()
+    vm.schedule('')
+
+    // 只发一次查询，且为清空后的全量查询
+    expect(calls).toEqual([''])
+    expect(resolvers.length).toBe(1)
+
+    // 旧搜索请求尚未发出（timer 被 cancel），无在途旧响应可写回；空查询完成后正常写回
+    resolvers[0]()
+    await Promise.resolve()
+    expect(results).toEqual([''])
+  })
 })
