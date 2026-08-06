@@ -280,8 +280,10 @@ async function handleSubmit() {
     router.push('/me/ongoing')
   } else if (result.kind === 'rejected') {
     submitError.value = result.error.message
+    toast.error(result.error.message)
   } else {
     submitError.value = '提交失败，请稍后重试'
+    toast.error('提交失败，请稍后重试')
   }
 }
 

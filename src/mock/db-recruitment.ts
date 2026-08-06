@@ -1194,7 +1194,8 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
 /**
  * 撤销报名提交（普通招新专用，与联合版 withdrawJointApplication 同规范）：
  * 仅通道开放且未截止时可撤销；已有排期面试或形成审核结论时拒绝；
- * 撤销时清理未排期面试记录与未形成结论的部门路径，回到草稿可修改后重新提交。
+ * 撤销时清理未排期面试记录、作废待处理录取邀请、清空未形成结论的部门路径，
+ * 回到草稿可修改后重新提交。
  */
 export function withdrawApplicationSubmission(activityId: string, applicantId: string): { ok: boolean; error?: string; data?: RecApplication } {
   const a = findAnyActivity(activityId)
@@ -1213,6 +1214,11 @@ export function withdrawApplicationSubmission(activityId: string, applicantId: s
   for (let i = recruitmentInterviews.length - 1; i >= 0; i--) {
     const it = recruitmentInterviews[i]
     if (it.activityId === activityId && it.applicantId === applicantId && it.status === 'pending_selection') recruitmentInterviews.splice(i, 1)
+  }
+  for (const inv of recruitmentInvitations) {
+    if (inv.activityId === activityId && inv.applicantId === applicantId && inv.status === 'pending_acceptance') {
+      inv.status = 'expired'
+    }
   }
   app.paths = {}
   app.status = 'draft'
