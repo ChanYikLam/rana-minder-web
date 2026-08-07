@@ -3,7 +3,7 @@
  * 每个测试文件拥有独立模块实例（vitest isolate），种子数据与 db.test.ts 互不污染。
  * 各流程使用不同成员避免状态冲突：邀请→候选；任命→mem-002/003；部门申请→mem-001/003/006；辞职→mem-001。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as db from './db'
 import { getGroupDetail, syncPositionMembership, clubAccesses, groupSyncTraces } from './db-organization'
 import {
@@ -29,6 +29,7 @@ import {
   respondInvitation,
   searchCandidates,
   triggerMemberExternalChange,
+  RECONCILE_DEDUP_MS,
   withdrawInvitation,
 } from './db'
 
@@ -344,12 +345,63 @@ describe('辞职申请（create / decide）', () => {
     expect(triggerMemberExternalChange('club-001', 'mem-005')).toMatchObject({ ok: false, error: '仅活跃成员可触发外部变更检测' })
   })
 
-  it('triggerMemberExternalChange：批量触发 id 唯一（P2-017，同毫秒不再重复，MemberProfilePage 以 an.id 作 v-for key）', () => {
+  it('triggerMemberExternalChange：批量触发 id 唯一 + 幂等去重（P2-017/015，同毫秒不再重复且同类不重复登记）', () => {
     const mem = members.find((m) => m.id === 'mem-001')!
-    for (let i = 0; i < 5; i++) triggerMemberExternalChange('club-001', 'mem-001')
-    const ids = mem.anomalies.slice(0, 5).map((a) => a.id)
-    expect(ids.every((id) => id.startsWith('anm-'))).toBe(true)
-    expect(new Set(ids).size).toBe(5)
+    mem.anomalies.length = 0 // 隔离前置用例登记，保证确定性
+    // 同类 external_change 连续 5 次：去重窗口内仅登记 1 条，后续 registered=false 幂等跳过
+    let registered = 0
+    for (let i = 0; i < 5; i++) {
+      const r = triggerMemberExternalChange('club-001', 'mem-001')
+      if (r.registered) registered += 1
+      expect(r.ok).toBe(true)
+    }
+    expect(registered).toBe(1)
+    const extIds = mem.anomalies.filter((a) => a.kind === 'external_change').map((a) => a.id)
+    expect(extIds).toHaveLength(1)
+    expect(extIds[0].startsWith('anm-')).toBe(true)
+
+    // 不同 kind 不互相去重：casdoor_mismatch 仍可登记
+    const r2 = triggerMemberExternalChange('club-001', 'mem-001', 'casdoor_mismatch')
+    expect(r2.registered).toBe(true)
+
+    // 重复 casdoor_mismatch 幂等跳过
+    const r3 = triggerMemberExternalChange('club-001', 'mem-001', 'casdoor_mismatch')
+    expect(r3.registered).toBe(false)
+
+    // 同毫秒不同 kind 的 id 仍唯一（MemberProfilePage 以 an.id 作 v-for key）
+    const ids = mem.anomalies.map((a) => a.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('triggerMemberExternalChange：异常上限截断（超出 ANOMALY_MAX_KEEP 丢弃最旧，成员详情页不无限膨胀）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    mem.anomalies.length = 0
+    const kinds: ('casdoor_mismatch' | 'external_change')[] = ['casdoor_mismatch', 'external_change']
+    // 用假定时器逐次推进，使每次触发都超出 30 天去重窗口 → 连续登记 30 条
+    vi.useFakeTimers()
+    try {
+      for (let i = 0; i < 30; i++) {
+        vi.setSystemTime(new Date(Date.now() + RECONCILE_DEDUP_MS + 1))
+        triggerMemberExternalChange('club-001', 'mem-001', kinds[i % 2])
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(mem.anomalies.length).toBeLessThanOrEqual(20)
+    expect(mem.anomalies.length).toBe(20)
+    // 最旧记录被截断（unshift 保留最新）
+    expect(mem.anomalies[0].createdAt >= mem.anomalies[mem.anomalies.length - 1].createdAt).toBe(true)
+  })
+
+  it('triggerMemberExternalChange：不同成员互相隔离（异常只登记在目标成员）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    const other = members.find((m) => m.id === 'mem-002')!
+    mem.anomalies.length = 0
+    other.anomalies.length = 0
+    const r = triggerMemberExternalChange('club-001', 'mem-001')
+    expect(r.registered).toBe(true)
+    expect(mem.anomalies).toHaveLength(1)
+    expect(other.anomalies).toHaveLength(0)
   })
 })
 

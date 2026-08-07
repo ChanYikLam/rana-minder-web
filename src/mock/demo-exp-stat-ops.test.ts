@@ -308,13 +308,38 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     resolveMockUser('/api/auth/session?_mock_user=admin')
     const r = await invokeHandler('/api/admin/clubs/:clubId/reconcile', 'post', '/api/admin/clubs/club-001/reconcile')
     expect(r.statusCode).toBe(200)
-    const data = r.body.data as { registered: number; checked: number }
+    const data = r.body.data as { registered: number; checked: number; deduped: number; triggered: { memberId: string; memberName: string; registered: boolean; anomalyId: string | null }[] }
     expect(data.checked).toBeGreaterThan(0)
     expect(data.registered).toBe(data.checked)
+    expect(data.deduped).toBe(0)
+    // 返回逐成员可观测明细：含成员名与登记出的异常 id
+    expect(data.triggered.length).toBe(data.checked)
+    expect(data.triggered.every((t) => t.registered && t.anomalyId)).toBe(true)
+    expect(data.triggered[0].memberName.length).toBeGreaterThan(0)
 
     const detail = await invokeHandler('/api/org/:clubId/members/:memberId', 'get', '/api/org/club-001/members/mem-001')
     const anomalies = (detail.body.data as { anomalies: { id: string; kind: string }[] }).anomalies
     expect(anomalies.some((a) => a.kind === 'external_change')).toBe(true)
+  })
+
+  it('P2-015：对账幂等——重复对账不重复登记异常（去重窗口内 registered=false）', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const first = await invokeHandler('/api/admin/clubs/:clubId/reconcile', 'post', '/api/admin/clubs/club-001/reconcile')
+    const firstData = first.body.data as { registered: number; checked: number }
+    expect(firstData.registered).toBe(firstData.checked)
+
+    // 第二次对账：同成员同类异常已在窗口内 → 全部幂等跳过
+    const second = await invokeHandler('/api/admin/clubs/:clubId/reconcile', 'post', '/api/admin/clubs/club-001/reconcile')
+    expect(second.statusCode).toBe(200)
+    const secondData = second.body.data as { registered: number; deduped: number; checked: number; triggered: { memberId: string; registered: boolean }[] }
+    expect(secondData.registered).toBe(0)
+    expect(secondData.deduped).toBe(secondData.checked)
+    expect(secondData.triggered.every((t) => !t.registered)).toBe(true)
+
+    // 成员异常数量不再膨胀
+    const detail = await invokeHandler('/api/org/:clubId/members/:memberId', 'get', '/api/org/club-001/members/mem-001')
+    const anomalies = (detail.body.data as { anomalies: { id: string; kind: string }[] }).anomalies
+    expect(anomalies.filter((a) => a.kind === 'external_change')).toHaveLength(1)
   })
 
   it('P2-017：resetSharedState 还原导出任务/平台配置/异常序号——处理用例后不再残留', async () => {

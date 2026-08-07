@@ -2051,6 +2051,7 @@ response: ({ url }: { url: string }) => {
   // 统一身份对账（P2-015 闭环调用方）：模拟平台侧检测到成员在统一身份认证侧
   // 发生外部变更（转专业/退宿/跨部门调整等），逐成员调用 triggerMemberExternalChange
   // 登记数据异常——成员详情页「数据异常」块由此获得真实数据源，可经事实纠错处置。
+  // 幂等：去重窗口内同类异常不重复登记（registered=false）；重复调用返回已登记记录，不膨胀数据。
   {
     url: '/api/admin/clubs/:clubId/reconcile',
     method: 'post',
@@ -2058,17 +2059,36 @@ response: ({ url }: { url: string }) => {
       if (!isPlatformClubManager(url)) return forbidden()
       const members = db.listMembers(query.clubId).filter((m) => m.status === 'active')
       if (members.length === 0) return businessError('该社团暂无可对账的活跃成员')
-      const triggered: { memberId: string; kind: string; registered: boolean }[] = []
+      const now = new Date().toISOString()
+      const triggered: { memberId: string; memberName: string; kind: string; registered: boolean; anomalyId: string | null; createdAt: string | null }[] = []
       for (const m of members) {
         const r = db.triggerMemberExternalChange(query.clubId, m.id, 'external_change')
-        triggered.push({ memberId: m.id, registered: r.ok, kind: r.ok ? 'external_change' : String(r.error) })
+        triggered.push({
+          memberId: m.id,
+          memberName: m.name,
+          kind: r.ok ? 'external_change' : String(r.error),
+          registered: r.registered ?? false,
+          anomalyId: r.anomaly?.id ?? null,
+          createdAt: r.anomaly?.createdAt ?? null,
+        })
       }
+      const registered = triggered.filter((t) => t.registered).length
+      writeAuditLog({
+        actorName: resolveMockUser(url).name,
+        action: '执行成员统一身份对账',
+        targetType: '社团',
+        targetId: query.clubId,
+        detail: `检查 ${members.length} 名活跃成员，新登记外部变更异常 ${registered} 条，幂等跳过 ${triggered.length - registered} 条`,
+        scope: 'platform',
+      })
       return {
         code: 0,
         data: {
           clubId: query.clubId,
           checked: members.length,
-          registered: triggered.filter((t) => t.registered).length,
+          registered,
+          deduped: triggered.length - registered,
+          at: now,
           triggered,
         },
       }
