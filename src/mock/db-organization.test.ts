@@ -162,9 +162,26 @@ describe('syncPositionMembership 职位 Group 成员同步（ORG-001/017：Group
     expect(getGroupDetail(r2.groupId!)!.members.filter((m) => m.id === 'mem-001')).toHaveLength(1)
   })
 
-  it('免职部门职位：从既有职位 Group 移除', () => {
+  it('部门 Group 歧义消解：同后缀多 Group 时按「社团名+部门名」拼接优先命中目标，不取首个同后缀', () => {
+    // 种子含 grp-dept-001「计算机协会技术部」与 grp-dept-002「计算机协会信息技术部」同以「技术部」结尾
+    const exact = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    expect(exact.ok).toBe(true)
+    expect(getGroupDetail(exact.groupId!)!.path).toBe('/学校学生组织/计算机协会/技术部/干事')
+
+    const it = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '信息技术部', title: '干事', active: true })
+    expect(it.ok).toBe(true)
+    expect(getGroupDetail(it.groupId!)!.path).toBe('/学校学生组织/计算机协会/信息技术部/干事')
+  })
+
+  it('免职部门职位：从既有职位 Group 移除（自带前置入组，不依赖前序用例）', () => {
+    // 前置：先任命入组，再免职移除——独立可运行，不依赖「任命部门职位」用例副作用建组
+    const appointed = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    expect(appointed.ok).toBe(true)
+    expect(getGroupDetail(appointed.groupId!)!.members.some((m) => m.id === 'mem-001')).toBe(true)
+
     const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: false })
     expect(r.ok).toBe(true)
+    expect(r.groupId).toBe(appointed.groupId)
     expect(getGroupDetail(r.groupId!)!.members.some((m) => m.id === 'mem-001')).toBe(false)
   })
 

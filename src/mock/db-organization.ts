@@ -97,6 +97,11 @@ const groups: GroupSeed[] = [
     id: 'grp-dept-001', name: '计算机协会技术部', stableId: 'G-COMP-DEPT-001', path: '/学校学生组织/计算机协会/技术部',
     parentId: 'grp-001', purpose: 'department', boundClubId: 'club-001', leaderGroupId: null, members: [],
   },
+  // 同名后缀种子（与 grp-dept-001 以「技术部」结尾）：用于验证 suffix 匹配在「社团名+部门名」约定下的精确解析优先级
+  {
+    id: 'grp-dept-002', name: '计算机协会信息技术部', stableId: 'G-COMP-DEPT-002', path: '/学校学生组织/计算机协会/信息技术部',
+    parentId: 'grp-001', purpose: 'department', boundClubId: 'club-001', leaderGroupId: null, members: [],
+  },
 ]
 
 const memberNames: Record<string, string> = {
@@ -240,10 +245,17 @@ export function searchGroups(keyword: string): GroupSearchResult[] {
 /** Group 详情：基本信息 + 已有成员 + 可用负责人职位 Group（向导步骤 1/2 使用） */
 let positionGroupSeq = 0
 
-/** 部门 Group 解析：社团 Group 下 purpose=department 的 Group，按完整名或名称后缀匹配部门名（种子命名为「社团+部门」，如 计算机协会技术部） */
+/** 部门 Group 解析：社团 Group 下 purpose=department 的 Group。解析优先级——①精确名；②「社团名+部门名」拼接（种子命名约定，如 计算机协会技术部）；
+ * ③名称后缀匹配（同后缀多候选时取命名最短者，最贴近部门名），避免同后缀歧义时 find 取到首个非目标 Group */
 function findDepartmentGroup(clubGroup: GroupSeed, departmentName: string | null): GroupSeed | null {
   if (!departmentName) return null
-  return groups.find((g) => g.parentId === clubGroup.id && g.purpose === 'department' && (g.name === departmentName || g.name.endsWith(departmentName))) ?? null
+  const candidates = groups.filter((g) => g.parentId === clubGroup.id && g.purpose === 'department')
+  return (
+    candidates.find((g) => g.name === departmentName) ??
+    candidates.find((g) => g.name === clubGroup.name + departmentName) ??
+    candidates.filter((g) => g.name.endsWith(departmentName)).sort((a, b) => a.name.length - b.name.length)[0] ??
+    null
+  )
 }
 
 /** 职位 Group 定位/建立：部门职位挂在部门 Group 下（部门 Group 缺失时挂社团 Group 下），同名职位 Group 已存在则复用 */

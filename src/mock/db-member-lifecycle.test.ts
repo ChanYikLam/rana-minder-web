@@ -406,4 +406,28 @@ describe('职位 Group 成员同步（ORG-001/017）', () => {
       access.leaderGroupId = prevLeader
     }
   })
+
+  it('辞职批准同步失败：req.syncWarning 与「职位已写入、Group 未移除」留痕一致（与任命路径同源）', () => {
+    const access = clubAccesses.find((c) => c.clubId === 'club-001')!
+    const prevLeader = access.leaderGroupId
+    access.leaderGroupId = 'grp-lead-ghost'
+    try {
+      // 前置：就 mem-003 建立唯一活动职位「主席处/负责人」（避免与前序用例残留的 active 部门职位冲突）
+      const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-003', memberName: '李思颖', departmentId: 'dept-004', departmentName: '主席办', title: '负责人', scheduledAt: null, actorName: '系统' })
+      executeAppointmentCommand(appointed.command!.id)
+      expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
+      const appointedPos = findMember('club-001', 'mem-003')!.positions.find((p) => p.departmentName === '主席办')!
+      expect(appointedPos).toMatchObject({ title: '负责人', status: 'active' })
+
+      // 辞职批准：清除对应职位 + 尝试移出职位 Group（leaderGroupId 悬空 → 留痕）
+      const req = createResignationRequest('club-001', 'mem-003', '李思颖', '主席办', '负责人', '毕业离校')
+      expect(decideResignationRequest(req.id, 'approve', '系统').ok).toBe(true)
+      const approved = db.resignationRequests.find((r) => r.id === req.id)!
+      expect(approved.status).toBe('approved')
+      expect(approved.syncWarning).toBe('负责人职位 Group 不存在或已失效')
+      expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-001', memberId: 'mem-003', title: '负责人', active: false, error: '负责人职位 Group 不存在或已失效' })
+    } finally {
+      access.leaderGroupId = prevLeader
+    }
+  })
 })

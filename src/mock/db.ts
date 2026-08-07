@@ -152,6 +152,8 @@ export interface MockResignationRequest {
   submittedAt: string
   decidedAt: string | null
   decidedBy: string | null
+  /** ORG-001/017：辞职批准同步移除职位 Group 失败留痕（与 AppointmentCommand.syncWarning 一致的可观测提示） */
+  syncWarning?: string
 }
 
 export interface MockCandidateUser {
@@ -389,6 +391,8 @@ export const transitionState = {
   failOn: 'none' as 'none' | 'partial',
   executedAt: null as string | null,
   results: [] as { memberId: string; name: string; action: string; targetTitle: string; success: boolean; message: string }[],
+  /** ORG-001/017：换届执行时负责人 Group 成员同步失败留痕（position 已写入但 Group 未同步时可观测） */
+  syncFailures: [] as { memberId: string; memberName: string; title: string; active: boolean; error: string }[],
 }
 
 // ================= 业务规则校验与操作 =================
@@ -741,7 +745,8 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
         pos.status = 'ended'
       }
       // ORG-001/017：辞职批准同步移除职位 Group 成员
-      syncPositionMembership({ clubId: req.clubId, memberId: member.id, memberName: member.name, departmentName: pos.departmentName, title: pos.title, active: false })
+      const sync = syncPositionMembership({ clubId: req.clubId, memberId: member.id, memberName: member.name, departmentName: pos.departmentName, title: pos.title, active: false })
+      if (!sync.ok && sync.error) req.syncWarning = sync.error
     }
     member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: req.departmentName, title: req.title, startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), endReason: '辞职' })
     member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: req.departmentName, at: now })
