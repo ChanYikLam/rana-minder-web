@@ -24,8 +24,10 @@ import {
   isLastLeader,
   listInvitations,
   listMembers,
+  members,
   respondInvitation,
   searchCandidates,
+  triggerMemberExternalChange,
   withdrawInvitation,
 } from './db'
 
@@ -320,5 +322,24 @@ describe('辞职申请（create / decide）', () => {
     // 已处理不可重复操作
     expect(decideResignationRequest(created.id, 'approve', '系统')).toMatchObject({ ok: false, error: '该申请已处理' })
     expect(decideResignationRequest('res-ghost', 'approve', '系统')).toMatchObject({ ok: false, error: '申请不存在' })
+  })
+
+  it('triggerMemberExternalChange：成员级外部变更触发点留痕（P2-015，与社团级 triggerGroupLost 对称）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    const before = mem.anomalies.length
+
+    const r = triggerMemberExternalChange('club-001', 'mem-001')
+    expect(r.ok).toBe(true)
+    expect(r.data?.anomalies[0]).toMatchObject({ kind: 'external_change' })
+    expect(members.find((m) => m.id === 'mem-001')!.anomalies.length).toBe(before + 1)
+
+    // casdoor_mismatch 变体
+    const r2 = triggerMemberExternalChange('club-001', 'mem-001', 'casdoor_mismatch')
+    expect(r2.ok).toBe(true)
+    expect(r2.data?.anomalies[0].kind).toBe('casdoor_mismatch')
+
+    // 守卫：成员不存在 / 非活跃成员
+    expect(triggerMemberExternalChange('club-001', 'mem-zzz')).toMatchObject({ ok: false, error: '未找到该成员' })
+    expect(triggerMemberExternalChange('club-001', 'mem-005')).toMatchObject({ ok: false, error: '仅活跃成员可触发外部变更检测' })
   })
 })

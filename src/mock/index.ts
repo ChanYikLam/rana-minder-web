@@ -174,12 +174,39 @@ function canApproveResignation(user: MockUser, clubId: string): boolean {
   return getPermissions(user, clubId).includes('club:resignation:approve')
 }
 
-/** 导出任务（内存态；POST 创建后模拟异步完成） */
+/** 导出任务（内存态；创建后经 settleExportTask 按时间惰性流转，替代 setTimeout 硬改） */
 interface ExportTask { id: string; clubId: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number; scope: string; includeContact: boolean; includeFiles: boolean }
 const exportTasks: ExportTask[] = [
   { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576, scope: '全社团', includeContact: true, includeFiles: false },
+  // 种子任务：远早于生成窗口的 generating 任务，首次读取即按状态机判为超时失败（EXP 失败态可观测）
   { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0, scope: '全社团', includeContact: false, includeFiles: false },
 ]
+
+/** 平台级导出任务（/api/admin/exports，与社团级同状态机） */
+const adminExportTasks: ExportTask[] = [
+  { id: 'exp-003', clubId: '', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', expiredAt: '2025-08-02T10:00:00+08:00', downloadUrl: '#', fileSize: 32768, scope: '全社团', includeContact: true, includeFiles: false },
+]
+
+const EXPORT_GENERATE_MS = 3000
+const EXPORT_EXPIRY_MS = 24 * 3600 * 1000
+const EXPORT_STALE_FAIL_MS = 24 * 3600 * 1000
+
+/** 导出任务读取时惰性结算（替代 setTimeout 硬改 completed，可确定性 + 失败态可观测）：
+ * generating 满 3s → completed（附下载链接/大小，24h 失效）；超 24h 仍未完成 → failed（自愈，不永久卡生成中） */
+function settleExportTask(task: ExportTask): void {
+  if (task.status !== 'generating') return
+  const elapsed = Date.now() - new Date(task.createdAt).getTime()
+  if (elapsed >= EXPORT_STALE_FAIL_MS) {
+    task.status = 'failed'
+    return
+  }
+  if (elapsed < EXPORT_GENERATE_MS) return
+  task.status = 'completed'
+  task.completedAt = new Date().toISOString()
+  task.expiredAt = new Date(Date.now() + EXPORT_EXPIRY_MS).toISOString()
+  task.downloadUrl = `#exp-${task.id}`
+  task.fileSize = 1024 * (16 + Math.floor(Math.random() * 48))
+}
 
 /** 当前用户可导出数据作用域：部门负责人仅本部门，其余全社团（EXP-001） */
 function exportScopeFor(user: MockUser, clubId: string): string {
@@ -1614,6 +1641,17 @@ const memberHandlers: MockMethod[] = [
       }
     },
   },
+  // 演示触发：成员级外部变更（P2-015，与社团级 triggerGroupLost 对称；供演示/测试调用）
+  {
+    url: '/api/org/:clubId/members/:memberId/trigger-external-change',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input?: { kind?: string } } }) => {
+      const kind = body.input?.kind === 'casdoor_mismatch' ? 'casdoor_mismatch' : 'external_change'
+      const r = db.triggerMemberExternalChange(query.clubId, query.memberId, kind)
+      if (!r.ok) return businessError(r.error || '外部变更触发失败')
+      return { code: 0, data: r.data }
+    },
+  },
 ]
 
 /** 支撑与平台处理器 */
@@ -2324,36 +2362,42 @@ policies: retentionPolicies,
       }
     },
   },
-  // 统计数据（部门负责人按本部门范围过滤，summary 同步按部门口径）
+// 统计数据（部门负责人按本部门范围过滤；来源=成员职位聚合 + 招新内存库，取代硬编码）
   {
     url: '/api/org/:clubId/stats',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const user = resolveMockUser(url)
-      const scope = departmentScopeFor(user, query.clubId)
-      const distribution = [
-        { name: '技术部', count: 45 },
-        { name: '运营部', count: 32 },
-        { name: '设计部', count: 28 },
-        { name: '人事部', count: 23 },
-      ]
-      const deptSummary: Record<string, { monthlyNew: number; pending: number }> = {
-        技术部: { monthlyNew: 3, pending: 4 },
-        运营部: { monthlyNew: 2, pending: 3 },
-        设计部: { monthlyNew: 2, pending: 2 },
-        人事部: { monthlyNew: 1, pending: 3 },
+      const clubId = query.clubId
+      const scope = departmentScopeFor(user, clubId)
+      const activeMembers = db.listMembers(clubId).filter((m) => m.status === 'active')
+      const distMap: Record<string, number> = {}
+      for (const m of activeMembers) {
+        const dept = m.positions.find((p) => p.status === 'active')?.departmentName
+        if (!dept) continue
+        distMap[dept] = (distMap[dept] || 0) + 1
       }
-      const dept = scope ? deptSummary[scope] : undefined
+      const distribution = Object.entries(distMap)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+      const now = new Date()
+      const joinedThisMonth = activeMembers.filter((m) => {
+        const d = new Date(m.joinedAt)
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+      }).length
+      const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === clubId && a.status === 'in_progress').length
+      const pending = rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted').length
+      const dept = scope ? distribution.find((d) => d.name === scope) : undefined
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: dept ? (distribution.find((d) => d.name === scope)?.count ?? 0) : 128, trend: 'up', trendValue: dept ? 2 : 12 },
-            { label: '本月新增', value: dept?.monthlyNew ?? 8, trend: 'up', trendValue: dept ? 1 : 3 },
-            { label: '活跃招新', value: 1, trend: 'flat', trendValue: 0 },
-            { label: '待处理申请', value: dept?.pending ?? 12, trend: 'down', trendValue: dept ? 1 : 5 },
+            { label: '总成员数', value: dept ? dept.count : activeMembers.length, trend: 'flat', trendValue: 0 },
+            { label: '本月新增', value: scope ? 0 : joinedThisMonth, trend: 'flat', trendValue: 0 },
+            { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
+            { label: '待处理申请', value: pending, trend: 'flat', trendValue: 0 },
           ],
-          departmentDistribution: scope ? distribution.filter((d) => d.name === scope) : distribution,
+          departmentDistribution: scope ? (dept ? [dept] : []) : distribution,
         },
       }
     },
@@ -2367,6 +2411,7 @@ policies: retentionPolicies,
       const clubId = query.clubId
       if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
       const scope = exportScopeFor(user, clubId)
+      exportTasks.forEach(settleExportTask)
       return {
         code: 0,
         data: {
@@ -2395,13 +2440,6 @@ policies: retentionPolicies,
         scope, includeContact: !!body.input?.includeContact, includeFiles: !!body.input?.includeFiles,
       }
       exportTasks.push(task)
-      setTimeout(() => {
-        task.status = 'completed'
-        task.completedAt = new Date().toISOString()
-        task.expiredAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
-        task.downloadUrl = `#exp-${task.id}`
-        task.fileSize = 1024 * (16 + Math.floor(Math.random() * 48))
-      }, 3000)
       return { code: 0, data: task }
     },
   },
@@ -2541,12 +2579,19 @@ policies: retentionPolicies,
       return { code: 0, data: { id: result.data.clubId, status: result.data.status, wizardStep: result.data.wizardStep, createdAt: result.data.createdAt } }
     },
   },
-  // 运维状态
+  // 运维状态（统计口径取自真实内存态：社团同步健康 + 导出任务队列）
   {
     url: '/api/admin/ops-status',
     method: 'get',
     response: ({ url }: { url: string }) => {
       if (!isPlatformAdmin(url)) return forbidden()
+      const clubs = orgdb.listClubAccesses()
+      const abnormalClubs = clubs.filter((c) => c.status === 'sync_abnormal_ro').length
+      const recentEvents = clubs
+        .flatMap((c) => c.syncEvents.map((e) => ({ id: e.id, kind: e.kind, clubId: c.clubId, clubName: c.clubName, at: e.at, note: e.note })))
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, 6)
+      const allExportTasks = [...exportTasks, ...adminExportTasks]
       return {
         code: 0,
         data: {
@@ -2558,7 +2603,16 @@ policies: retentionPolicies,
             { name: '对象存储', status: 'healthy', latency: 8 },
             { name: '邮件服务', status: 'degraded', latency: 450 },
           ],
-          taskQueue: { pending: 2, processing: 1, failed: 0 },
+          taskQueue: {
+            pending: allExportTasks.filter((t) => t.status === 'generating').length,
+            processing: 0,
+            failed: allExportTasks.filter((t) => t.status === 'failed').length,
+          },
+          syncHealth: {
+            abnormalClubs,
+            pendingCorrections: correctionsDb.filter((c) => c.status === 'submitted').length,
+            recentEvents,
+          },
           lastCheckAt: new Date().toISOString(),
         },
       }
@@ -2575,6 +2629,8 @@ policies: retentionPolicies,
           clubName: 'RanaMinder 平台', clubDescription: '社团招新管理平台',
           requireEmailVerification: true, requireProfileComplete: true,
           maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
+          // CFG 学年/届次（P2-016：平台配置含当前学年与届次口径）
+          academicYear: '2026—2027', cohort: '2026级',
         },
       }
     },
@@ -2616,12 +2672,11 @@ policies: retentionPolicies,
     url: '/api/admin/exports',
     method: 'get',
     response: () => {
+      adminExportTasks.forEach(settleExportTask)
       return {
         code: 0,
         data: {
-          items: [
-            { id: 'exp-003', clubId: 'club-001', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', expiredAt: '2025-08-02T10:00:00+08:00', downloadUrl: '#', fileSize: 32768 },
-          ],
+          items: adminExportTasks,
           nextCursor: null,
         },
       }
@@ -2633,14 +2688,14 @@ policies: retentionPolicies,
     response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:export:execute')) return forbidden()
-      return {
-        code: 0,
-        data: {
-          id: 'exp-' + Date.now(), clubId: '', type: '全平台导出',
-          status: 'generating', createdAt: new Date().toISOString(),
-          completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
-        },
+      const task: ExportTask = {
+        id: 'exp-' + Date.now(), clubId: '', type: '全平台导出',
+        status: 'generating', createdAt: new Date().toISOString(),
+        completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
+        scope: '全社团', includeContact: false, includeFiles: false,
       }
+      adminExportTasks.push(task)
+      return { code: 0, data: task }
     },
   },
   {
@@ -2662,10 +2717,11 @@ policies: retentionPolicies,
     url: '/api/admin/exports/:id/status',
     method: 'get',
     response: ({ query }: { query: Record<string, string> }) => {
-      const task = exportTasks.find((t) => t.id === query.id)
+      const task = adminExportTasks.find((t) => t.id === query.id)
       if (!task) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '导出任务不存在', supportId: 'MOCK' } }
       }
+      settleExportTask(task)
       return {
         code: 0,
         data: {
@@ -2926,6 +2982,8 @@ policies: retentionPolicies,
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '导出任务不存在', supportId: 'MOCK' } }
       }
       if (task.scope !== '全社团' && exportScopeFor(user, query.clubId) !== task.scope) return forbidden()
+      // 状态机在读取时结算：轮询稳定收敛到 completed/failed，失败路径可观测
+      settleExportTask(task)
       return {
         code: 0,
         data: {
@@ -2939,7 +2997,7 @@ policies: retentionPolicies,
       }
     },
   },
-  // 工作空间：邮件密钥轮换
+  // 工作区间：邮件密钥轮换
   {
     url: '/api/org/:clubId/notifications/email-config/rotate-key',
     method: 'post',
