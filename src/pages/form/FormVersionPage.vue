@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
+import type { FormField } from '@/types/domain/form'
+import type { DynamicFormValue } from '@/components/form/DynamicForm.vue'
+import DynamicForm from '@/components/form/DynamicForm.vue'
 import { toast } from 'vue-sonner'
-import { Save, Send, Upload, FileWarning } from '@lucide/vue'
+import { Save, Send, FileWarning } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
-interface FormField { id: string; type: string; label: string; description: string | null; required: boolean; readonly: boolean; permission: string; options: string[] | null }
 interface FormVersion { version: number; status: string; publishedAt: string | null; fields: FormField[] }
 
 const route = useRoute()
@@ -16,7 +18,7 @@ const state = ref<PageState>('loading')
 const formTitle = ref('')
 const versions = ref<FormVersion[]>([])
 const currentVersion = ref<FormVersion | null>(null)
-const formData = reactive<Record<string, string>>({})
+const formData = ref<DynamicFormValue>({})
 const submitting = ref(false)
 const saving = ref(false)
 
@@ -30,6 +32,7 @@ async function loadForm() {
     formTitle.value = result.data.title
     versions.value = result.data.versions
     currentVersion.value = versions.value[0] || null
+    formData.value = {}
     state.value = 'normal'
   } else {
     state.value = 'error'
@@ -48,13 +51,21 @@ async function handleSaveDraft() {
     return
   }
 
+  const nextVersion = (currentVersion.value?.version || 1) + 1
   const result = await post(`${apiScope.prefix}/forms/designer/${formId}/save`, {
     fields: currentVersion.value?.fields || [],
-    version: currentVersion.value?.version || 1,
+    version: nextVersion,
+    expectedVersion: currentVersion.value?.version || 1,
   })
   saving.value = false
   if (result.kind === 'completed') {
-    toast.success('草稿已保存')
+    const data = result.data as { version?: number }
+    toast.success(`草稿已保存（v${data?.version ?? nextVersion}）`)
+  } else if (result.kind === 'concurrency_conflict') {
+    // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
+    toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
   } else {
     toast.error('保存失败，请稍后重试')
   }
@@ -77,11 +88,11 @@ async function handleSubmit() {
   if (!apiScope) { submitting.value = false; return }
 
   // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键
-  const dataFingerprint = stableHash(JSON.stringify(formData))
+  const dataFingerprint = stableHash(JSON.stringify(formData.value))
   const idempotencyKey = `${formId}-v${currentVersion.value?.version || 1}-${dataFingerprint}`
 
   const result = await post(`${apiScope.prefix}/forms/versions/${formId}/submit`, {
-    formData,
+    formData: formData.value,
     version: currentVersion.value?.version || 1,
     idempotencyKey,
   })
@@ -105,54 +116,7 @@ onMounted(loadForm)
       <p class="text-sm text-text-secondary mb-6">版本 v{{ currentVersion.version }} · {{ currentVersion.publishedAt ? '已发布' : '草稿' }}</p>
 
       <Card class="mb-4">
-        <div class="space-y-4">
-          <div v-for="field in currentVersion.fields" :key="field.id">
-            <label :for="field.id" class="block text-sm font-medium text-text-primary mb-1">
-              {{ field.label }}
-              <span v-if="field.required" class="text-danger">*</span>
-              <span v-if="field.readonly" class="text-xs text-text-secondary ml-1">（只读）</span>
-            </label>
-            <p v-if="field.description" class="text-xs text-text-secondary mb-1.5">{{ field.description }}</p>
-
-            <input
-              v-if="field.type === 'text'"
-              :id="field.id"
-              :value="formData[field.id] || ''"
-              type="text"
-              :readonly="field.readonly"
-              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-              @input="formData[field.id] = ($event.target as HTMLInputElement).value"
-            />
-
-            <textarea
-              v-else-if="field.type === 'textarea'"
-              :id="field.id"
-              :value="formData[field.id] || ''"
-              rows="4"
-              class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-              @input="formData[field.id] = ($event.target as HTMLTextAreaElement).value"
-            />
-
-            <select
-              v-else-if="field.type === 'select'"
-              :id="field.id"
-              :value="formData[field.id] || ''"
-              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-              @change="formData[field.id] = ($event.target as HTMLSelectElement).value"
-            >
-              <option value="">请选择</option>
-              <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-            </select>
-
-            <button
-              v-else-if="field.type === 'file'"
-              class="w-full h-24 rounded-md border border-dashed border-border flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
-            >
-              <Upload :size="20" />
-              <span class="text-xs">点击上传文件</span>
-            </button>
-          </div>
-        </div>
+        <DynamicForm v-model="formData" :fields="currentVersion.fields" />
       </Card>
 
       <!-- FORM-007: 文件检查状态提示 -->
