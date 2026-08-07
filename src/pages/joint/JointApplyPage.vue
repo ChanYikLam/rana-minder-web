@@ -1,21 +1,25 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Users, Send, Save, CheckCircle2, Upload, FileWarning, ChevronUp, ChevronDown, X, Archive } from '@lucide/vue'
+import { ArrowLeft, Users, Send, Save, CheckCircle2, Archive } from '@lucide/vue'
 import { applicationStatusLabel, isEditableStatus } from '@/lib/recruitment-status'
+import DynamicForm from '@/components/form/DynamicForm.vue'
+import ObjectPicker from '@/components/form/ObjectPicker.vue'
+import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
+import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
+import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
+import type { FormField, FileMeta } from '@/types/domain/form'
 import {
   buildSubmitPayload,
   channelStatusMeta,
   clubNamesOf as jointClubNamesOf,
-  movePreference as jointMovePreference,
   renderAnswerValue as renderAnswer,
   restoreDraftState,
-  togglePreference as jointTogglePreference,
   toggleVolunteer as jointToggleVolunteer,
   validateJointForm,
 } from '@/lib/jointApplyLogic'
@@ -29,17 +33,6 @@ interface JointDetail {
   channelStatus?: string
   deadline?: string
   sharedAgreement?: { version: number; text: string }
-}
-
-interface FormField {
-  id: string
-  type: string
-  label: string
-  description: string | null
-  required: boolean
-  readonly: boolean
-  permission: string
-  options: string[] | null
 }
 
 interface MyApplication {
@@ -67,9 +60,7 @@ const detail = ref<JointDetail | null>(null)
 const myApplication = ref<MyApplication | null>(null)
 const formFields = ref<FormField[]>([])
 
-const formData = reactive<Record<string, string>>({})
-interface FormFile { fileId: string; name: string; size: number; checking: boolean; error: boolean }
-const formFiles = reactive<Record<string, FormFile | null>>({})
+const formData = ref<Record<string, unknown>>({})
 const formErrors = ref<Record<string, string>>({})
 const consented = ref(false)
 const allowJointAdjustment = ref(false)
@@ -88,55 +79,19 @@ const showApplyForm = computed(() => isEditableStatus(myApplication.value))
 /** 部门意向仅对已选意向社团开放 */
 const volunteerClubs = computed(() => (detail.value?.clubs || []).filter((c) => volunteerClubIds.value.includes(c.id)))
 
-async function uploadFile(fieldId: string, file: File): Promise<void> {
-  formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: true, error: false }
-  const uploadForm = new FormData()
-  uploadForm.append('file', file)
-  uploadForm.append('purpose', 'application')
-  try {
-    const result = await post<{ fileId: string; status: string }>('/files/upload', uploadForm)
-    if (result.kind === 'completed') {
-      const data = result.data as { fileId: string; status?: string }
-      if (data.status === 'failed') {
-        formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
-        toast.error('文件安全检查未通过，请重新上传')
-        return
-      }
-      formFiles[fieldId] = { fileId: data.fileId, name: file.name, size: file.size, checking: false, error: false }
-      formData[fieldId] = data.fileId
-    } else {
-      formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
-      toast.error('文件上传失败，请重试')
-    }
-  } catch {
-    formFiles[fieldId] = { fileId: '', name: file.name, size: file.size, checking: false, error: true }
-    toast.error('文件上传失败，请重试')
+/** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[] */
+function restoredFileMeta(value: unknown): FileMeta[] {
+  if (Array.isArray(value)) {
+    return value.map((v): FileMeta => (typeof v === 'object' && v !== null ? (v as FileMeta) : restoredFileMeta(v)[0])).filter(Boolean)
   }
+  if (typeof value !== 'string' || value === '') return []
+  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }]
 }
 
-async function handleFileChange(e: Event, fieldId: string) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  await uploadFile(fieldId, file)
-  input.value = ''
-}
-
-function getFieldDescriptionId(fieldId: string): string {
-  return `field-${fieldId}-description`
-}
-
-function getFieldErrorId(fieldId: string): string {
-  return `field-${fieldId}-error`
-}
-
-function getFieldDescribedBy(field: FormField): string | undefined {
-  const ids = [
-    field.description ? getFieldDescriptionId(field.id) : undefined,
-    formErrors.value[field.id] ? getFieldErrorId(field.id) : undefined,
-  ].filter((id): id is string => Boolean(id))
-  return ids.length > 0 ? ids.join(' ') : undefined
-}
+/** validateJointForm 返回单错误串，DynamicForm 的 fieldErrors 需要 string[] */
+const formErrorGroups = computed<Record<string, string[]>>(() =>
+  Object.fromEntries(Object.entries(formErrors.value).map(([k, v]) => [k, [v]])),
+)
 
 async function loadData() {
   state.value = 'loading'
@@ -185,9 +140,9 @@ async function loadMyApplication(): Promise<boolean> {
 /** 已有草稿时回填表单内容，支持继续修改 */
 function restoreDraft(app: MyApplication) {
   const restored = restoreDraftState(app, formFields.value)
-  Object.assign(formData, restored.answers)
-  for (const [fieldId, fileId] of Object.entries(restored.fileIds)) {
-    formFiles[fieldId] = { fileId, name: '已上传附件', size: 0, checking: false, error: false }
+  for (const [fieldId, value] of Object.entries(restored.answers)) {
+    const field = formFields.value.find((f) => f.id === fieldId)
+    formData.value[fieldId] = field?.type === 'file' || field?.type === 'image' ? restoredFileMeta(value) : value
   }
   volunteerClubIds.value = restored.volunteerClubIds
   preferences.value = restored.preferences
@@ -201,17 +156,44 @@ function toggleVolunteer(clubId: string) {
   preferences.value = next.preferences
 }
 
-function togglePreference(dept: { id: string; name: string }) {
-  preferences.value = jointTogglePreference(preferences.value, { departmentId: dept.id, departmentName: dept.name })
-}
+/** 部门意向：PreferenceSorter 排序条目（保持部门 id → 名称映射） */
+const preferenceEntries = computed<PreferenceEntry[]>({
+  get: () => preferences.value.map((p) => ({ id: p.departmentId, label: p.departmentName })),
+  set: (entries) => {
+    preferences.value = entries.map((e) => {
+      const dept = volunteerClubs.value.flatMap((c) => c.departments).find((d) => d.id === e.id)
+      return { departmentId: e.id, departmentName: dept?.name ?? e.label }
+    })
+  },
+})
 
-function movePreference(index: number, direction: 'up' | 'down') {
-  preferences.value = jointMovePreference(preferences.value, index, direction)
+/** ObjectPicker 分组：每个已选意向社团一组部门，多选切换已选/未选 */
+const deptPickerGroups = computed<PickerGroup[]>(() =>
+  volunteerClubs.value.map((club) => ({
+    type: 'department',
+    label: club.name,
+    items: club.departments.map((d) => ({ id: d.id, label: d.name })),
+  })),
+)
+
+const selectedDeptIds = computed<string[]>(() => preferences.value.map((p) => p.departmentId))
+
+function onPickDepartments(ids: string[]) {
+  const selected = new Set(ids)
+  const kept = preferences.value.filter((p) => selected.has(p.departmentId))
+  const existing = new Set(preferences.value.map((p) => p.departmentId))
+  const added: { departmentId: string; departmentName: string }[] = []
+  for (const club of volunteerClubs.value) {
+    for (const d of club.departments) {
+      if (selected.has(d.id) && !existing.has(d.id)) added.push({ departmentId: d.id, departmentName: d.name })
+    }
+  }
+  preferences.value = [...kept, ...added]
 }
 
 async function handleSubmit() {
   if (!showApplyForm.value) return
-  formErrors.value = validateJointForm(formFields.value, formData, formFiles)
+  formErrors.value = validateJointForm(formFields.value, formData.value)
   if (Object.keys(formErrors.value).length > 0) return
 
   submitting.value = true
@@ -232,7 +214,7 @@ async function handleSubmit() {
       allowJointAdjustment: allowJointAdjustment.value,
       volunteerClubIds: volunteerClubIds.value ?? [],
       preferences: preferences.value,
-      answers: { ...formData },
+      answers: { ...formData.value },
     })
     const result = await post(`/activity/joint/${route.params.jointId}/apply`, payload)
     if (result.kind === 'completed') {
@@ -251,7 +233,7 @@ async function handleSubmit() {
 async function handleSaveDraft() {
   if (submitting.value || !showApplyForm.value) return
   const result = await post(`/activity/joint/${route.params.jointId}/draft`, {
-    answers: { ...formData },
+    answers: { ...formData.value },
     volunteerClubIds: volunteerClubIds.value ?? [],
     preferences: preferences.value,
     allowJointAdjustment: allowJointAdjustment.value,
@@ -260,7 +242,7 @@ async function handleSaveDraft() {
   if (result.kind === 'completed') {
     myApplication.value = {
       status: 'draft',
-      answers: { ...formData },
+      answers: { ...formData.value },
       volunteerClubIds: volunteerClubIds.value,
       preferences: preferences.value,
       allowJointAdjustment: allowJointAdjustment.value,
@@ -440,92 +422,7 @@ async function handleWithdraw() {
       <!-- 共享报名表（未提交且未归档时展示，草稿用户仍可编辑） -->
       <Card v-if="showApplyForm" class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-3">共享报名表</p>
-        <div class="space-y-4">
-          <div v-for="field in formFields" :key="field.id">
-            <label :for="field.id" class="block text-sm font-medium text-text-primary mb-1">
-              {{ field.label }}
-              <span v-if="field.required" class="text-danger">*</span>
-            </label>
-            <p v-if="field.description" :id="getFieldDescriptionId(field.id)" class="text-xs text-text-secondary mb-1.5">
-              {{ field.description }}
-            </p>
-
-            <input
-              v-if="field.type === 'text'"
-              :id="field.id"
-              :value="formData[field.id] || ''"
-              type="text"
-              class="w-full h-10 px-3 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
-              :aria-invalid="Boolean(formErrors[field.id])"
-              :aria-describedby="getFieldDescribedBy(field)"
-              @input="formData[field.id] = ($event.target as HTMLInputElement).value"
-            />
-
-            <textarea
-              v-else-if="field.type === 'textarea'"
-              :id="field.id"
-              :value="formData[field.id] || ''"
-              rows="4"
-              class="w-full px-3 py-2 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
-              :aria-invalid="Boolean(formErrors[field.id])"
-              :aria-describedby="getFieldDescribedBy(field)"
-              @input="formData[field.id] = ($event.target as HTMLTextAreaElement).value"
-            />
-
-            <select
-              v-else-if="field.type === 'select'"
-              :id="field.id"
-              :value="formData[field.id] || ''"
-              class="w-full h-10 px-3 rounded-md border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-              :class="formErrors[field.id] ? 'border-danger' : 'border-border'"
-              :aria-invalid="Boolean(formErrors[field.id])"
-              :aria-describedby="getFieldDescribedBy(field)"
-              @change="formData[field.id] = ($event.target as HTMLSelectElement).value"
-            >
-              <option value="">请选择</option>
-              <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-            </select>
-
-            <div
-              v-else-if="field.type === 'file'"
-              :id="field.id"
-              :class="[formErrors[field.id] || formFiles[field.id]?.error ? 'border-danger' : 'border-border']"
-              class="w-full rounded-md border border-dashed flex flex-col items-center justify-center gap-1 text-text-secondary hover:border-primary hover:text-primary transition-colors"
-              :aria-invalid="Boolean(formErrors[field.id])"
-              :aria-describedby="getFieldDescribedBy(field)"
-            >
-              <template v-if="formFiles[field.id]">
-                <div class="flex items-center gap-2 p-3">
-                  <FileWarning v-if="formFiles[field.id]!.checking" :size="16" class="text-warning" />
-                  <Upload v-else-if="!formFiles[field.id]!.error" :size="16" class="text-success" />
-                  <FileWarning v-else :size="16" class="text-danger" />
-                  <span class="text-xs text-text-primary">{{ formFiles[field.id]!.name }}</span>
-                  <span v-if="formFiles[field.id]!.size > 0" class="text-xs text-text-secondary">({{ (formFiles[field.id]!.size / 1024).toFixed(1) }} KB)</span>
-                  <span v-if="formFiles[field.id]!.checking" class="text-xs text-warning">检查中...</span>
-                  <span v-else-if="formFiles[field.id]!.error" class="text-xs text-danger">上传失败</span>
-                  <span v-else class="text-xs text-success">已上传</span>
-                  <button type="button" class="text-xs text-danger hover:underline" :disabled="formFiles[field.id]!.checking" @click="formFiles[field.id] = null; formData[field.id] = ''">移除</button>
-                </div>
-              </template>
-              <label v-else class="flex flex-col items-center justify-center gap-1 py-6 cursor-pointer w-full h-full">
-                <Upload :size="20" />
-                <span class="text-xs">点击上传文件</span>
-                <input
-                  type="file"
-                  class="hidden"
-                  :aria-label="`上传${field.label}`"
-                  @change="(e) => handleFileChange(e as Event, field.id)"
-                />
-              </label>
-            </div>
-
-            <p v-if="formErrors[field.id]" :id="getFieldErrorId(field.id)" class="mt-1 text-xs text-danger" role="alert">
-              {{ formErrors[field.id] }}
-            </p>
-          </div>
-        </div>
+        <DynamicForm :fields="formFields" v-model="formData" :field-errors="formErrorGroups" />
       </Card>
 
       <!-- 意向社团（未提交且未归档时展示；草稿用户仍可编辑） -->
@@ -547,43 +444,13 @@ async function handleWithdraw() {
       <!-- 部门意向（未提交且未归档时展示；草稿用户仍可编辑） -->
       <Card v-if="showApplyForm" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-2">部门意向</h2>
-        <p class="text-xs text-text-secondary mb-3">仅可为已选的意向社团添加部门，点击添加意向部门，可调整优先级顺序（1 为最优先）</p>
+        <p class="text-xs text-text-secondary mb-3">仅可为已选的意向社团添加部门，搜索并点击添加；已选部门按优先级排序，可用按钮或键盘（上/下/Delete）调整（1 为最优先）</p>
 
-        <div v-if="preferences.length > 0" class="space-y-2 mb-3">
-          <div
-            v-for="(pref, index) in preferences"
-            :key="pref.departmentId"
-            class="flex items-center gap-2 rounded-lg border border-border p-3"
-          >
-            <span class="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-text-on-primary text-xs font-bold">{{ index + 1 }}</span>
-            <span class="flex-1 text-sm text-text-primary">{{ pref.departmentName }}</span>
-            <div class="flex items-center gap-1">
-              <button class="p-1 rounded hover:bg-subtle text-text-secondary" :disabled="index === 0" aria-label="上移" @click="movePreference(index, 'up')">
-                <ChevronUp :size="14" />
-              </button>
-              <button class="p-1 rounded hover:bg-subtle text-text-secondary" :disabled="index === preferences.length - 1" aria-label="下移" @click="movePreference(index, 'down')">
-                <ChevronDown :size="14" />
-              </button>
-              <button class="p-1 rounded hover:bg-subtle text-danger" aria-label="移除" @click="preferences.splice(index, 1)">
-                <X :size="14" />
-              </button>
-            </div>
-          </div>
-        </div>
+        <ObjectPicker :groups="deptPickerGroups" multiple :model-value="selectedDeptIds" @update:model-value="onPickDepartments" />
+        <p v-if="volunteerClubs.length === 0" class="text-xs text-warning mt-3">请先在上方选择意向社团，再添加部门意向</p>
 
-        <p v-if="volunteerClubs.length === 0" class="text-xs text-warning">请先在上方选择意向社团，再添加部门意向</p>
-        <div v-for="club in volunteerClubs" :key="club.id" class="mb-3 last:mb-0">
-          <p class="text-xs text-text-secondary mb-1.5">{{ club.name }}</p>
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="dept in club.departments" :key="dept.id" type="button"
-              class="px-3 py-1.5 rounded-md border text-sm transition-colors"
-              :class="preferences.some((p) => p.departmentId === dept.id) ? 'border-primary bg-primary-subtle text-primary' : 'border-border text-text-secondary hover:bg-subtle'"
-              @click="togglePreference(dept)"
-            >
-              {{ dept.name }}
-            </button>
-          </div>
+        <div class="mt-3">
+          <PreferenceSorter v-model="preferenceEntries" />
         </div>
       </Card>
 

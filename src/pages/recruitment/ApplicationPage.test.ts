@@ -25,6 +25,7 @@ vi.mock('vue-sonner', () => ({
 }))
 
 import { toast } from 'vue-sonner'
+import type { FileMeta } from '@/types/domain/form'
 
 import ApplicationPage from './ApplicationPage.vue'
 
@@ -420,83 +421,93 @@ describe('ApplicationPage 交互流程', () => {
     wrapper.unmount()
   })
 
-  it('文件上传成功：fileId 写入表单并在提交 payload 中携带', async () => {
-    setupGetMocks('draft', {}, [...mockFormFields, fileField])
-    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
-    await flushPromises()
-    await nextTick()
+  it('文件上传成功：本地 mock 安全检查通过后提交，payload 携带附件元数据', async () => {
+    vi.useFakeTimers()
+    try {
+      setupGetMocks('draft', {}, [...mockFormFields, fileField])
+      const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+      await flushPromises()
+      await nextTick()
 
-    mockPost.mockResolvedValue({ kind: 'completed', data: { fileId: 'file-001', status: 'clean' } })
-    const fileInput = wrapper.find('input[type="file"]')
-    Object.defineProperty(fileInput.element, 'files', { value: [new File(['x'], 'resume.pdf', { type: 'application/pdf' })], configurable: true })
-    await fileInput.trigger('change')
-    await flushPromises()
-    await nextTick()
+      const fileInput = wrapper.find('input[type="file"]')
+      Object.defineProperty(fileInput.element, 'files', { value: [new File(['x'], 'resume.pdf', { type: 'application/pdf' })], configurable: true })
+      await fileInput.trigger('change')
+      await nextTick()
+      expect(wrapper.text()).toContain('resume.pdf')
+      expect(wrapper.text()).toContain('安全检查中')
 
-    expect(wrapper.text()).toContain('resume.pdf')
-    expect(wrapper.text()).toContain('已上传')
-    expect(mockPost).toHaveBeenCalledWith('/files/upload', expect.any(FormData))
+      await vi.advanceTimersByTimeAsync(1500)
+      await nextTick()
+      expect(wrapper.text()).toContain('已通过安全检测')
 
-    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
-    await fillFormAndPreference(wrapper)
-    await buttonWithText(wrapper, '提交报名').trigger('click')
-    await flushPromises()
-    await nextTick()
+      mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+      await fillFormAndPreference(wrapper)
+      await buttonWithText(wrapper, '提交报名').trigger('click')
+      await flushPromises()
+      await nextTick()
 
-    expect(mockPost).toHaveBeenLastCalledWith('/activity/recruitment/act-001/apply', {
-      answers: { f1: '张三', f2: 'file-001' },
-      preferences: [{ departmentId: 'dept-1', departmentName: '技术部' }],
-      allowAdjustment: true,
-    })
+      // 附件走 AttachmentUpload 本地状态机，不再调用 /files/upload
+      expect(mockPost).toHaveBeenCalledTimes(1)
+      const [url, body] = mockPost.mock.calls[0] as [string, { answers: Record<string, unknown> }]
+      expect(url).toBe('/activity/recruitment/act-001/apply')
+      const f2 = body.answers.f2 as FileMeta[]
+      expect(f2).toHaveLength(1)
+      expect(f2[0].name).toBe('resume.pdf')
+      expect(f2[0].status).toBe('approved')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('文件安全检查中提交：校验拦截，不发提交请求', async () => {
-    setupGetMocks('draft', {}, [...mockFormFields, fileField])
-    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
-    await flushPromises()
-    await nextTick()
+    vi.useFakeTimers()
+    try {
+      setupGetMocks('draft', {}, [...mockFormFields, fileField])
+      const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+      await flushPromises()
+      await nextTick()
 
-    // 上传挂起：保持"检查中"状态
-    mockPost.mockReturnValue(new Promise(() => {}))
-    const fileInput = wrapper.find('input[type="file"]')
-    Object.defineProperty(fileInput.element, 'files', { value: [new File(['x'], 'a.pdf')], configurable: true })
-    await fileInput.trigger('change')
-    await nextTick()
-    expect(wrapper.text()).toContain('检查中...')
+      // 不推进时间：mock 安全检查保持"检查中"状态
+      const fileInput = wrapper.find('input[type="file"]')
+      Object.defineProperty(fileInput.element, 'files', { value: [new File(['x'], 'a.pdf', { type: 'application/pdf' })], configurable: true })
+      await fileInput.trigger('change')
+      await nextTick()
+      expect(wrapper.text()).toContain('a.pdf')
+      expect(wrapper.text()).toContain('安全检查中')
 
-    await buttonWithText(wrapper, '技术部').trigger('click')
-    await buttonWithText(wrapper, '提交报名').trigger('click')
-    await nextTick()
+      await buttonWithText(wrapper, '技术部').trigger('click')
+      await buttonWithText(wrapper, '提交报名').trigger('click')
+      await nextTick()
 
-    expect(wrapper.text()).toContain('文件安全检查中，请稍候再提交')
-    // 只发生了上传调用，未发送提交
-    expect(mockPost).toHaveBeenCalledTimes(1)
-    wrapper.unmount()
+      expect(wrapper.text()).toContain('文件安全检查中，请稍候再提交')
+      expect(mockPost).not.toHaveBeenCalled()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('文件上传被拒绝：标记上传失败并提示，提交被校验拦截', async () => {
+  it('文件类型不符合要求：标记已拒绝并提示，提交被校验拦截', async () => {
     setupGetMocks('draft', {}, [...mockFormFields, fileField])
     const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
     await flushPromises()
     await nextTick()
 
-    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'X', message: 'x' } })
     const fileInput = wrapper.find('input[type="file"]')
-    Object.defineProperty(fileInput.element, 'files', { value: [new File(['x'], 'a.pdf')], configurable: true })
+    Object.defineProperty(fileInput.element, 'files', { value: [new File(['x'], 'a.exe', { type: 'application/x-msdownload' })], configurable: true })
     await fileInput.trigger('change')
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.text()).toContain('上传失败')
-    expect(toast.error).toHaveBeenCalledWith('文件上传失败，请重试')
+    expect(wrapper.text()).toContain('a.exe')
+    expect(wrapper.text()).toContain('已拒绝')
 
     await buttonWithText(wrapper, '技术部').trigger('click')
     await buttonWithText(wrapper, '提交报名').trigger('click')
     await nextTick()
 
     expect(wrapper.text()).toContain('文件上传失败，请重新上传')
-    // 仅上传调用一次，提交被拦截
-    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect(mockPost).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

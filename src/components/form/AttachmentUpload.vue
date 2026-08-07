@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted } from 'vue'
 import { CheckCircle2, LoaderCircle, ShieldAlert } from '@lucide/vue'
 import type { FileMeta, FileStatus } from '@/types/domain/form'
 
-const props = defineProps<{
+const CHECK_DELAY_MS = 1200
+
+const props = withDefaults(defineProps<{
   modelValue?: FileMeta[]
   accept?: string
   hint?: string
-}>()
+  /** mock 安全检查：模拟服务端扫描完成后自动转为 approved（默认开启） */
+  autoApprove?: boolean
+}>(), { autoApprove: true })
 const emit = defineEmits<{
   'update:modelValue': [files: FileMeta[]]
 }>()
@@ -28,6 +32,31 @@ const allowedTypes = computed(() => {
 })
 
 const files = computed(() => props.modelValue ?? [])
+
+const timers = new Set<ReturnType<typeof setTimeout>>()
+
+onUnmounted(() => {
+  for (const t of timers) clearTimeout(t)
+  timers.clear()
+})
+
+/** 全部文件通过安全检查后回写 approved；status 变更由父组件经 modelValue 驱动 */
+function scheduleAutoApprove(nextFiles: FileMeta[]) {
+  if (props.autoApprove === false) return
+  const target = nextFiles.filter((f) => f.status === 'checking')
+  if (target.length === 0) return
+  const timer = setTimeout(() => {
+    timers.delete(timer)
+    const approvedIds = new Set(target.map((f) => f.id))
+    const updated = files.value.map((f) =>
+      approvedIds.has(f.id) && f.status === 'checking'
+        ? { ...f, status: 'approved' as const, checkedAt: new Date().toISOString(), downloadUrl: `/api/files/${f.id}` }
+        : f,
+    )
+    emit('update:modelValue', updated)
+  }, CHECK_DELAY_MS)
+  timers.add(timer)
+}
 
 function statusPreview(status: FileStatus): { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' } {
   switch (status) {
@@ -64,6 +93,7 @@ function onSelect(event: Event) {
     nextFiles.push({ ...base, id: `mock-file-${Date.now()}`, name: f.name, size: f.size, mimeType: f.type, status: 'checking' })
   })
   emit('update:modelValue', nextFiles)
+  scheduleAutoApprove(nextFiles)
   input.value = ''
 }
 </script>

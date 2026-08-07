@@ -113,19 +113,29 @@ describe('validateJointForm 表单校验', () => {
     { id: 'f1', type: 'text', label: '姓名', required: true },
     { id: 'f2', type: 'file', label: '简历', required: false },
   ]
+  const baseFile = { name: 'a.pdf', size: 1, mimeType: 'application/pdf', uploadedAt: '', checkedAt: null as string | null, downloadUrl: null as string | null }
+  const checking = [{ ...baseFile, id: 'x', status: 'checking' as const }]
+  const rejected = [{ ...baseFile, id: 'y', status: 'rejected' as const }]
+  const approved = [{ ...baseFile, id: 'z', status: 'approved' as const }]
 
   it('必填缺失与文件检查中/失败分别报错', () => {
-    expect(validateJointForm(fields, {}, {})).toEqual({ f1: '姓名为必填项' })
-    expect(validateJointForm(fields, { f1: 'x' }, { f2: { checking: true, error: false } })).toEqual({
+    expect(validateJointForm(fields, {})).toEqual({ f1: '姓名为必填项' })
+    expect(validateJointForm(fields, { f1: 'x', f2: checking })).toEqual({
       f2: '文件安全检查中，请稍候再提交',
     })
-    expect(validateJointForm(fields, { f1: 'x' }, { f2: { checking: false, error: true } })).toEqual({
+    expect(validateJointForm(fields, { f1: 'x', f2: rejected })).toEqual({
       f2: '文件上传失败，请重新上传',
     })
   })
 
+  it('必填 file 字段以附件数组非空为准', () => {
+    const fileRequired = [{ id: 'f2', type: 'file', label: '简历', required: true }]
+    expect(validateJointForm(fileRequired, {})).toEqual({ f2: '简历为必填项' })
+    expect(validateJointForm(fileRequired, { f2: approved })).toEqual({})
+  })
+
   it('通过时无错误', () => {
-    expect(validateJointForm(fields, { f1: 'x' }, { f2: { checking: false, error: false } })).toEqual({})
+    expect(validateJointForm(fields, { f1: 'x', f2: approved })).toEqual({})
   })
 })
 
@@ -185,6 +195,16 @@ describe('restoreDraftState 草稿回填', () => {
     expect(restored.preferences).toEqual([{ departmentId: 'd1', departmentName: '技术部' }])
     expect(restored.consented).toBe(true)
     expect(restored.allowJointAdjustment).toBe(true)
+  })
+
+  it('draft 态：FileMeta[] 附件值原样保留', () => {
+    const fileMeta = [{ id: 'm1', name: 'a.pdf', size: 1, mimeType: 'application/pdf', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }]
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { f2: fileMeta } },
+      [{ id: 'f2', type: 'file' }],
+    )
+    expect(restored.answers).toEqual({ f2: fileMeta })
+    expect(restored.fileIds).toEqual({})
   })
 
   it('缺省字段使用默认值', () => {
