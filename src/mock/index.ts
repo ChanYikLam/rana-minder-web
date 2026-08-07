@@ -3335,11 +3335,13 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: alert }
     },
   },
-  // GOV-002 真实数据开关：查询（GET 公开给配置读取方）
+  // GOV-002 真实数据开关：查询（与 OIDC GET 同口径，需 platform:config:manage）
   {
     url: '/api/admin/governance/real-data',
     method: 'get',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden(url, 'get')
       return { code: 0, data: getRealDataSwitch() }
     },
   },

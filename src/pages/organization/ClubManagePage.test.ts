@@ -189,7 +189,7 @@ describe('ClubManagePage 社团管理', () => {
 
     await wrapper.findAll('button').find((b) => b.text().includes('普通停用'))!.trigger('click')
     // 停用原因输入框出现 + 高危确认打开
-    const reasonInput = wrapper.find('input[placeholder="请输入停用原因"]')
+    const reasonInput = wrapper.find('input[placeholder="请输入操作原因（解除接入至少 5 字）"]')
     expect(reasonInput.exists(), '停用原因输入').toBe(true)
     await reasonInput.setValue('业务调整')
     await wrapper.find('.hrc-confirm').trigger('click')
@@ -229,7 +229,7 @@ describe('ClubManagePage 社团管理', () => {
     const hrc = wrapper.find('.hrc')
     expect(hrc.exists(), '高危确认弹窗').toBe(true)
     // 填原因后确认：携带 reauthProof
-    const reasonInput = wrapper.find('input[placeholder="请输入停用原因"]')
+    const reasonInput = wrapper.find('input[placeholder="请输入操作原因（解除接入至少 5 字）"]')
     expect(reasonInput.exists(), '停用原因输入').toBe(true)
     await reasonInput.setValue('紧急安全事件处置')
     await hrc.find('.hrc-confirm').trigger('click')
@@ -255,9 +255,13 @@ describe('ClubManagePage 社团管理', () => {
 
     const hrc = wrapper.find('.hrc')
     expect(hrc.exists(), '高危确认弹窗').toBe(true)
+    const reasonInput = wrapper.find('input[placeholder="请输入操作原因（解除接入至少 5 字）"]')
+    expect(reasonInput.exists(), '解除接入原因输入').toBe(true)
+    await reasonInput.setValue('社团长期未运营需解除接入')
     await hrc.find('.hrc-confirm').trigger('click')
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/admin/clubs/club-001/disconnect', {
+      reason: '社团长期未运营需解除接入',
       reauthProof: 'mock-reauth-proof',
     })
     wrapper.unmount()

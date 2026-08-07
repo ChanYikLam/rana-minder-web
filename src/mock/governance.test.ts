@@ -184,6 +184,21 @@ describe('P1-011 治理安全机制', () => {
       expect(shortReason.statusCode).toBe(422)
     })
 
+    it('原因不足 5 字时不消费 proof（proof 仍可复用）', async () => {
+      resolveMockUser('/api/auth/session?_mock_user=leader')
+      const proof = await reauthAs('leader')
+      // 第一次：原因不足 5 字 → 422，但 proof 未被消费
+      const shortReason = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit?_mock_user=leader', {
+        input: { memberId: 'mem-001', reason: '违规', reauthProof: proof },
+      })
+      expect(shortReason.statusCode).toBe(422)
+      // 第二次：同一 proof + 合规原因 → 成功（证明 proof 未被前面 422 消费）
+      const ok = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit?_mock_user=leader', {
+        input: { memberId: 'mem-001', reason: '违规移除该成员', reauthProof: proof },
+      })
+      expect(ok.statusCode, JSON.stringify(ok.body)).toBe(200)
+    })
+
     it('换届执行缺 proof 被 401 拒绝', async () => {
       resolveMockUser('/api/auth/session?_mock_user=leader')
       const out = await invokeHandler('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {
@@ -210,15 +225,23 @@ describe('P1-011 治理安全机制', () => {
       expect(auditLogsDb.some((l) => l.action === '异常访问检测')).toBe(true)
     })
 
-    it('10 分钟内 3 次 403 触发 rate_burst 汇总告警', async () => {
+    it('10 分钟内 3 次 403 触发 rate_burst；同窗口去重不重复告警', async () => {
       for (let i = 0; i < 3; i++) {
         await invokeHandler('/api/admin/governance/high-risk-commands', 'get', '/api/admin/governance/high-risk-commands?_mock_user=leader')
       }
       resolveMockUser('/api/auth/session?_mock_user=admin')
-      const alerts = await invokeHandler('/api/admin/governance/anomaly-access', 'get', '/api/admin/governance/anomaly-access?_mock_user=admin')
-      const data = alerts.body.data as { items: { kind: string }[] }
-      expect(data.items.some((a) => a.kind === 'rate_burst')).toBe(true)
+      const alerts1 = await invokeHandler('/api/admin/governance/anomaly-access', 'get', '/api/admin/governance/anomaly-access?_mock_user=admin')
+      const data1 = alerts1.body.data as { items: { kind: string }[] }
+      const bursts1 = data1.items.filter((a) => a.kind === 'rate_burst')
+      expect(bursts1.length).toBe(1)
       expect(auditLogsDb.some((l) => l.action === '异常访问告警')).toBe(true)
+
+      // 同窗口第 4 次 403（≥ 阈值）不重复触发 rate_burst（去重）
+      await invokeHandler('/api/admin/governance/high-risk-commands', 'get', '/api/admin/governance/high-risk-commands?_mock_user=leader')
+      const alerts2 = await invokeHandler('/api/admin/governance/anomaly-access', 'get', '/api/admin/governance/anomaly-access?_mock_user=admin')
+      const data2 = alerts2.body.data as { items: { kind: string }[] }
+      const bursts2 = data2.items.filter((a) => a.kind === 'rate_burst')
+      expect(bursts2.length).toBe(1)
     })
 
     it('告警可确认（ack）并写审计日志', async () => {
@@ -234,8 +257,13 @@ describe('P1-011 治理安全机制', () => {
   })
 
   describe('GOV-002 真实数据开关', () => {
-    it('默认演示数据（useRealData=false）', async () => {
-      const out = await invokeHandler('/api/admin/governance/real-data', 'get', '/api/admin/governance/real-data')
+    it('默认演示数据（useRealData=false，需 platform:config:manage）', async () => {
+      // 无权限用户（默认 leader）读取被 403
+      const forbiddenOut = await invokeHandler('/api/admin/governance/real-data', 'get', '/api/admin/governance/real-data')
+      expect(forbiddenOut.statusCode).toBe(403)
+
+      resolveMockUser('/api/auth/session?_mock_user=admin')
+      const out = await invokeHandler('/api/admin/governance/real-data', 'get', '/api/admin/governance/real-data?_mock_user=admin')
       expect(out.statusCode).toBe(200)
       expect((out.body.data as { useRealData: boolean }).useRealData).toBe(false)
     })

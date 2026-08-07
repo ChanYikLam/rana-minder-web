@@ -48,11 +48,12 @@ export function assertHighRisk(
 ): { statusCode: number; body: Record<string, unknown> } | null {
   const cmd = findHighRiskCommand(commandKey)
   if (!cmd.enforced) return null // 灰度：停用门禁时仅放行（调用方仍应写审计日志）
-  if (!consumeReauthProof(input?.reauthProof, operatorId)) {
-    return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
-  }
+  // 先校验原因（避免 proof 被无效请求白白消费），再校验 proof 并一次性消费
   if (!input?.reason || input.reason.trim().length < 5) {
     return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '高风险操作必须填写原因（至少 5 字）' } }
+  }
+  if (!consumeReauthProof(input?.reauthProof, operatorId)) {
+    return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
   }
   return null
 }
@@ -167,7 +168,8 @@ export interface OidcSecurityConfig {
   enforceStateNonce: boolean
   /** 敏感操作会话提级（重认证）有效期（分钟） */
   stepUpTtlMinutes: number
-  updatedAt: string
+  /** 最近更新时间（null=从未更新） */
+  updatedAt: string | null
 }
 
 const oidcConfig: OidcSecurityConfig = {
@@ -179,7 +181,7 @@ const oidcConfig: OidcSecurityConfig = {
   clockSkewSeconds: 60,
   enforceStateNonce: true,
   stepUpTtlMinutes: 10,
-  updatedAt: new Date().toISOString(),
+  updatedAt: null,
 }
 
 export function getOidcConfig(): OidcSecurityConfig {
@@ -226,6 +228,8 @@ const FORBIDDEN_THRESHOLD = 3
 
 const anomalyAlerts: AnomalyAlert[] = []
 let anomalySeq = 0
+/** actor → 最近一次 rate_burst 触发时间（用于同一 10 分钟窗口内去重） */
+const rateBurstAt = new Map<string, number>()
 
 /** 采集访问事件并即时检测（GOV-006）。
  * 403 触发 forbidden_attempt；同 actor 窗口内 403 次数达到阈值触发 rate_burst 汇总告警。 */
@@ -256,12 +260,14 @@ export function trackAccessEvent(event: AccessEvent): AnomalyAlert | null {
     scope: 'platform',
   })
 
-  // 窗口内同 actor 403 聚合成 rate_burst（≥ 阈值时告警一次）
+  // 窗口内同 actor 403 聚合成 rate_burst（≥ 阈值时触发，同一窗口去重只告警一次）
   const windowStart = event.at - ANOMALY_WINDOW_MS
   const recent403 = accessEvents.filter(
     (e) => e.actorId === event.actorId && e.outcome === 'forbidden' && e.at >= windowStart,
   )
-  if (recent403.length === FORBIDDEN_THRESHOLD) {
+  const lastBurstAt = rateBurstAt.get(event.actorId) ?? 0
+  if (recent403.length >= FORBIDDEN_THRESHOLD && lastBurstAt < windowStart) {
+    rateBurstAt.set(event.actorId, event.at)
     anomalySeq += 1
     const burst: AnomalyAlert = {
       id: 'anomaly-' + anomalySeq,
@@ -310,6 +316,7 @@ export function resetGovernanceState(): void {
   accessEvents.length = 0
   anomalyAlerts.length = 0
   anomalySeq = 0
+  rateBurstAt.clear()
   reauthProofs.clear()
   realDataSwitch.useRealData = false
   realDataSwitch.updatedAt = null

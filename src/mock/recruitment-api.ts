@@ -111,13 +111,13 @@ function businessError(message: string) {
 }
 
 /** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
-function forbidden(url?: string) {
+function forbidden(url?: string, method: string = 'post') {
   if (url) {
     const user = resolveMockUser(url)
     trackAccessEvent({
       actorId: user.id,
       actorName: user.name,
-      method: 'post',
+      method,
       path: (url.split('?')[0] || url),
       outcome: 'forbidden',
       at: Date.now(),
