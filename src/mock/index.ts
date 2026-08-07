@@ -1882,6 +1882,15 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
+  // Group→权限模板映射查询（P1-005：按社团查询已建立的映射关系）
+  {
+    url: '/api/admin/clubs/:clubId/template-mappings',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      return { code: 0, data: { items: orgdb.getTemplateMappings(query.clubId) } }
+    },
+  },
   // Group 目录（接入向导候选：SM-ORG-001 唯一 Group 数据源，仅暴露社团级候选，不泄露内部职位/部门层级）
   {
     url: '/api/admin/groups',
