@@ -36,6 +36,8 @@ export function isFieldFilled(value: unknown, type: string): boolean {
 /**
  * 草稿/已提交 answers 非附件值归一回填（按字段类型）：
  * number 归一为数字、multi_select/checkbox/array 归一为数组、字符串类型原样保留；
+ * checkbox 布尔历史值（true，即无选项的布尔勾选）归一为 [true] 保留，避免与
+ * isFieldFilled 判定（true 视为已填）矛盾而被清空；
  * 无法解析的值返回 undefined（调用方忽略），避免「草稿重开静默清空」与非法类型漂移。
  */
 export function restoredFieldValue(value: unknown, type: string): unknown {
@@ -46,6 +48,7 @@ export function restoredFieldValue(value: unknown, type: string): unknown {
   }
   if (type === 'multi_select' || type === 'checkbox') {
     if (Array.isArray(value)) return value
+    if (value === true) return [true]
     return typeof value === 'string' && value !== '' ? [value] : []
   }
   if (type === 'array') return Array.isArray(value) ? value : []

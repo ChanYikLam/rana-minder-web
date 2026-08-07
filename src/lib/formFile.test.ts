@@ -89,7 +89,8 @@ describe('restoredFieldValue 非附件值归一', () => {
     expect(restoredFieldValue(['a', 'b'], 'multi_select')).toEqual(['a', 'b'])
     expect(restoredFieldValue('a', 'multi_select')).toEqual(['a'])
     expect(restoredFieldValue('', 'multi_select')).toEqual([])
-    expect(restoredFieldValue(true, 'checkbox')).toEqual([])
+    // checkbox 布尔历史值（无选项布尔勾选）保留为 [true]，与 isFieldFilled(true) 判定对齐，不再被清空
+    expect(restoredFieldValue(true, 'checkbox')).toEqual([true])
   })
 
   it('array：数组原样、非数组回空数组', () => {
