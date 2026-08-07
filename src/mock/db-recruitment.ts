@@ -2126,11 +2126,12 @@ export function confirmJointInvitationSync(invitationId: string): { ok: boolean;
     const ja = findJoint(inv.jointId)
     const clubDepts = ja?.clubs.find((c) => c.clubId === inv.clubId)?.departments ?? []
     const pref = app?.preferences.find((p) => clubDepts.some((d) => d.id === p.departmentId))
+    if (!pref) return err('报名意向中未匹配到该社团开设部门，无法确认生效，请先指定部门或调整意向')
     const admitted = createMemberFromAdmission(inv.clubId, {
       studentId: app?.studentId ?? applicantStudentIdOf(inv.applicantId),
       name: app?.applicantName ?? applicantNameOf(inv.applicantId),
-      departmentId: pref?.departmentId ?? null,
-      departmentName: pref?.departmentName ?? null,
+      departmentId: pref.departmentId,
+      departmentName: pref.departmentName,
       acceptedAt: inv.acceptedAt || now(),
     })
     if (!admitted.ok) return err(admitted.error || '成员创建失败')
