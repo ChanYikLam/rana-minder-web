@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import * as db from './db'
+import { getGroupDetail, searchGroups } from './db-organization'
 import {
   cancelAppointmentCommand,
   confirmInvitationSync,
@@ -320,5 +321,53 @@ describe('辞职申请（create / decide）', () => {
     // 已处理不可重复操作
     expect(decideResignationRequest(created.id, 'approve', '系统')).toMatchObject({ ok: false, error: '该申请已处理' })
     expect(decideResignationRequest('res-ghost', 'approve', '系统')).toMatchObject({ ok: false, error: '申请不存在' })
+  })
+})
+
+/**
+ * ORG-001/017 审计：任命/免职/调岗/辞职执行后必须同步职位 Group 成员（Group 为关系权威，positions 不得独立于 Group 变动）。
+ * mem-005（已退出，无 active 职位，未被其他流程使用）作为干净对象验证完整闭环。
+ */
+describe('职位 Group 成员同步（ORG-001/017）', () => {
+  it('任命负责人写入负责人职位 Group；免职后移除', () => {
+    const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(appointed.command!.id)
+    expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
+    expect(getGroupDetail('grp-lead-001')!.members.some((m) => m.id === 'mem-005')).toBe(true)
+
+    const dismissed = createAppointmentCommand('club-001', { action: 'dismiss', memberId: 'mem-005', memberName: '刘子豪', departmentId: null, departmentName: null, title: null, scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(dismissed.command!.id)
+    expect(executeAppointmentCommand(dismissed.command!.id).ok).toBe(true)
+    expect(getGroupDetail('grp-lead-001')!.members.some((m) => m.id === 'mem-005')).toBe(false)
+  })
+
+  it('任命部门职位：部门 Group 下自动建职位 Group 并写入成员', () => {
+    const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(appointed.command!.id)
+    expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
+    const posGroup = searchGroups('干事').find((g) => g.purpose === 'position')
+    expect(posGroup).toBeTruthy()
+    expect(getGroupDetail(posGroup!.id)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+  })
+
+  it('调岗：移出原职位 Group、写入新职位 Group', () => {
+    const transferred = createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-004', departmentName: '人事部', title: '部长', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(transferred.command!.id)
+    expect(executeAppointmentCommand(transferred.command!.id).ok).toBe(true)
+    const oldGroup = searchGroups('干事').find((g) => g.purpose === 'position')!
+    expect(getGroupDetail(oldGroup.id)!.members.some((m) => m.id === 'mem-005')).toBe(false)
+    // 人事部无部门 Group → 部长职位 Group 挂社团 Group 下
+    const newGroup = searchGroups('部长').find((g) => g.purpose === 'position')!
+    expect(getGroupDetail(newGroup.id)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+  })
+
+  it('辞职批准：同步移除职位 Group 成员', () => {
+    // mem-006（active，运营部部长）此前经调岗用例同步进入「部长」职位 Group
+    const req = createResignationRequest('club-001', 'mem-006', '林晓薇', '运营部', '部长', '毕业离校')
+    expect(decideResignationRequest(req.id, 'approve', '系统').ok).toBe(true)
+    const group = searchGroups('部长').find((g) => g.purpose === 'position')!
+    const detail = getGroupDetail(group.id)!
+    expect(detail.members.some((m) => m.id === 'mem-006')).toBe(false)
+    expect(detail.members.some((m) => m.id === 'mem-005')).toBe(true)
   })
 })

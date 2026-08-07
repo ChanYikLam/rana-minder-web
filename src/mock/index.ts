@@ -1618,8 +1618,11 @@ const memberHandlers: MockMethod[] = [
           if (pos) { pos.endDate = new Date().toISOString().slice(0, 10); pos.status = 'ended' }
           old.status = 'exited'
           old.exitedAt = new Date().toISOString()
+          // ORG-001/017：换届同步——旧任退出负责人职位 Group，新任加入
+          orgdb.syncPositionMembership({ clubId: query.clubId, memberId: old.id, memberName: old.name, departmentName: pos?.departmentName ?? null, title: '负责人', active: false })
           t.currentLeader = { id: leaderCandidate.memberId, name: leaderCandidate.name, title: leaderCandidate.targetTitle }
         }
+        orgdb.syncPositionMembership({ clubId: query.clubId, memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, departmentName: null, title: '负责人', active: true })
       }
       return { code: 0, data: { executedAt: t.executedAt, results, finishedAt: null } }
     },
