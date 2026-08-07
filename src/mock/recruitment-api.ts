@@ -1437,6 +1437,7 @@ function jointConclusionRows(jointId: string, clubId?: string) {
         rating: extra?.rating || null, comment: extra?.comment || '',
         concludedAt: extra?.concludedAt || null, version: extra?.version || con?.version || 1,
         authorName: extra?.authorName || null, authorRole: extra?.authorRole || null,
+        history: extra?.history ?? [],
         versions: con?.versions ?? [],
         myClub: clubId ? c.clubId === clubId : true,
       })
@@ -2019,6 +2020,7 @@ const jointHandlers: MockMethod[] = [
         id: query.conclusionId, status: 'concluded',
         rating: extra.rating, comment: extra.comment, concludedAt: extra.concludedAt,
         author: extra.authorName, authorRole: extra.authorRole, version: extra.version,
+        history: extra.history,
       })
     },
   },

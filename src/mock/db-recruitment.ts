@@ -339,8 +339,8 @@ export interface JointReviewExtra {
   authorName: string
   authorRole: string
   version: number
-  /** JNT-012：修改时保留旧值、新值、时间 */
-  history?: { rating: number | null; comment: string; concludedAt: string | null; version: number }[]
+  /** JNT-012：修改时保留旧值、新值、时间（与 RecReview.history 契约一致，updatedAt 供跨社互见展示修改时间） */
+  history: { rating: number | null; comment: string; concludedAt: string | null; version: number; updatedAt: string }[]
 }
 
 // ================= 种子数据 =================
@@ -632,10 +632,10 @@ export function findJointReviewExtra(jointId: string, applicantId: string, clubI
 export function upsertJointReviewExtra(jointId: string, applicantId: string, clubId: string, input: { rating: number; comment: string; authorName: string; authorRole: string }): JointReviewExtra {
   const existing = findJointReviewExtra(jointId, applicantId, clubId)
   if (existing) {
-    // JNT-012：保留旧值、新值、时间 → 写入 history
+    // JNT-012：修改时保留旧值、新值、时间 → 写入 history
     existing.history = [
       ...(existing.history || []),
-      { rating: existing.rating, comment: existing.comment, concludedAt: existing.concludedAt, version: existing.version },
+      { rating: existing.rating, comment: existing.comment, concludedAt: existing.concludedAt, version: existing.version, updatedAt: existing.concludedAt || new Date().toISOString() },
     ]
     existing.rating = input.rating
     existing.comment = input.comment
