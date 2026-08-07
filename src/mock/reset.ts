@@ -5,6 +5,9 @@ import { correctionsDb } from './db-corrections'
 import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
 export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
+// P2-017：平台共享状态（导出任务含 processing / platformConfig 版本 / 异常序号）纳入统一重置；
+// 函数定义在 index.ts（持有导出任务与配置内存态），此处仅透传，避免用例间串扰。
+export { resetSharedState } from './index'
 
 const seed = {
   recruitmentActivities: structuredClone(recruitmentActivities),

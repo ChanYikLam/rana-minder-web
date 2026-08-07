@@ -25,6 +25,11 @@ export function resolveMemberId(userId: string, clubId: string): string | null {
 /** 成员级异常 id 单调序列：同毫秒批量触发时保证唯一（MemberProfilePage 以 an.id 作 v-for key） */
 let anomalySeq = 0
 
+/** 仅供测试重置异常序号（reset.ts 调用，保证跨用例触发号不膨胀） */
+export function resetAnomalySeq(): void {
+  anomalySeq = 0
+}
+
 /**
  * 成员级外部变更触发点（P2-015：与社团级 triggerGroupLost 对称）：
  * 模拟对账检测到成员在统一身份认证侧的信息变更，向该成员登记数据异常

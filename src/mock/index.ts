@@ -219,6 +219,9 @@ const CONFIG_FIELD_TYPES: Record<keyof PlatformConfig, 'string' | 'boolean' | 'n
 }
 let platformConfigVersion = 1
 
+/** 平台侧内存态（导出任务/平台配置）种子快照与重置；评审补漏：共享状态纳入 reset 流程，
+ * 避免用例间 exportTasks/platformConfig 串扰（ESP 之前仅成员/招新等库被重置）。 */
+
 /** 保留策略（US-AUD-04：不可变版本发布；缩短期限对已有数据 ≥7 天缓冲） */
 interface RetentionPolicy {
   id: string
@@ -364,6 +367,27 @@ const adminExportTasks: ExportTask[] = [
   { id: 'exp-003', clubId: '', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', expiredAt: '2025-08-02T10:00:00+08:00', downloadUrl: '#', fileSize: 32768, scope: '全社团', includeContact: true, includeFiles: false },
 ]
 
+/** 共享状态种子快照（reset.ts 复用，保证用例间确定性） */
+const sharedStateSeed = {
+  exportTasks: structuredClone(exportTasks),
+  adminExportTasks: structuredClone(adminExportTasks),
+  platformConfig: structuredClone(platformConfig),
+  platformConfigVersion,
+  templatePreviewVersion,
+} as const
+
+/** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号。
+ * 与 reset.ts 的 resetDb/resetRecruitmentDB 等并列，供测试与演示环境一键还原。 */
+export function resetSharedState(): void {
+  exportTasks.splice(0, exportTasks.length, ...structuredClone(sharedStateSeed.exportTasks))
+  adminExportTasks.splice(0, adminExportTasks.length, ...structuredClone(sharedStateSeed.adminExportTasks))
+  Object.assign(platformConfig, structuredClone(sharedStateSeed.platformConfig))
+  platformConfigVersion = sharedStateSeed.platformConfigVersion
+  templatePreviewVersion = sharedStateSeed.templatePreviewVersion
+  db.resetAnomalySeq()
+}
+
+const EXPORT_START_MS = 500
 const EXPORT_GENERATE_MS = 3000
 const EXPORT_EXPIRY_MS = 24 * 3600 * 1000
 const EXPORT_STALE_FAIL_MS = 24 * 3600 * 1000
@@ -377,20 +401,28 @@ function trendOf(current: number, previous: number): { trend: 'up' | 'down' | 'f
 }
 
 /** 导出任务读取时惰性结算（替代 setTimeout 硬改 completed，可确定性 + 失败态可观测）：
- * generating 满 3s → completed（附下载链接/大小，24h 失效）；超 24h 仍未完成 → failed（自愈，不永久卡生成中） */
+ * 状态机补真实中间态：generating（排队待调度）--满 EXPORT_START_MS--> processing（生成中）
+ * --满 EXPORT_GENERATE_MS--> completed（附下载链接/大小，24h 失效）；
+ * 任一排队节点超 24h 仍未完成 → failed（自愈，不永久卡生成中）。
+ * 补中间态前原恒为 0 的 processing 有了真实数据源（页面对应「处理中」卡片）。 */
 function settleExportTask(task: ExportTask): void {
-  if (task.status !== 'generating') return
+  if (task.status !== 'generating' && task.status !== 'processing') return
   const elapsed = Date.now() - new Date(task.createdAt).getTime()
   if (elapsed >= EXPORT_STALE_FAIL_MS) {
     task.status = 'failed'
     return
   }
-  if (elapsed < EXPORT_GENERATE_MS) return
-  task.status = 'completed'
-  task.completedAt = new Date().toISOString()
-  task.expiredAt = new Date(Date.now() + EXPORT_EXPIRY_MS).toISOString()
-  task.downloadUrl = `#exp-${task.id}`
-  task.fileSize = 1024 * (16 + Math.floor(Math.random() * 48))
+  if (task.status === 'processing') {
+    if (elapsed >= EXPORT_GENERATE_MS) {
+      task.status = 'completed'
+      task.completedAt = new Date().toISOString()
+      task.expiredAt = new Date(Date.now() + EXPORT_EXPIRY_MS).toISOString()
+      task.downloadUrl = `#exp-${task.id}`
+      task.fileSize = 1024 * (16 + Math.floor(Math.random() * 48))
+    }
+    return
+  }
+  if (elapsed >= EXPORT_START_MS) task.status = 'processing'
 }
 
 /** 当前用户可导出数据作用域：部门负责人仅本部门，其余全社团（EXP-001） */
@@ -2016,6 +2048,32 @@ response: ({ url }: { url: string }) => {
 
     },
   },
+  // 统一身份对账（P2-015 闭环调用方）：模拟平台侧检测到成员在统一身份认证侧
+  // 发生外部变更（转专业/退宿/跨部门调整等），逐成员调用 triggerMemberExternalChange
+  // 登记数据异常——成员详情页「数据异常」块由此获得真实数据源，可经事实纠错处置。
+  {
+    url: '/api/admin/clubs/:clubId/reconcile',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      const members = db.listMembers(query.clubId).filter((m) => m.status === 'active')
+      if (members.length === 0) return businessError('该社团暂无可对账的活跃成员')
+      const triggered: { memberId: string; kind: string; registered: boolean }[] = []
+      for (const m of members) {
+        const r = db.triggerMemberExternalChange(query.clubId, m.id, 'external_change')
+        triggered.push({ memberId: m.id, registered: r.ok, kind: r.ok ? 'external_change' : String(r.error) })
+      }
+      return {
+        code: 0,
+        data: {
+          clubId: query.clubId,
+          checked: members.length,
+          registered: triggered.filter((t) => t.registered).length,
+          triggered,
+        },
+      }
+    },
+  },
   // 表单设计器（SM-FORM-001：编辑态取最新草稿，无草稿回退最新已发布版本）
   {
     url: '/api/org/:clubId/forms/designer/:formId',
@@ -2673,6 +2731,15 @@ response: ({ url }: { url: string }) => {
       const monthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`
       const joinedThisMonth = scopedMembers.filter((m) => monthKey(new Date(m.joinedAt)) === monthKey(now)).length
       const joinedLastMonth = scopedMembers.filter((m) => monthKey(new Date(m.joinedAt)) === monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))).length
+      // P2-017 补漏：总成员数趋势口径不再用「当前 − 本月入社」近似——若本月有成员退出，
+      // 上期基线会偏低而误报 down。改为纳入本月退出（月初已在册、本月离社）成员；
+      // 本月入社又退出的成员两期都不在册，净变化为 0，不重复计入。
+      const allScoped = db.listMembers(clubId).filter((m) => !scope || m.positions.some((p) => p.departmentName === scope))
+      const exitedThisMonth = allScoped.filter((m) =>
+        m.status !== 'active' && m.exitedAt !== null
+        && monthKey(new Date(m.exitedAt)) === monthKey(now)
+        && monthKey(new Date(m.joinedAt)) !== monthKey(now),
+      ).length
       const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === clubId && a.status === 'in_progress' && (!scope || a.departments.some((d) => d.name === scope))).length
       const pending = rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted' && (!scope || a.preferences[0]?.departmentName === scope)).length
       // P2-017：趋势按周期对比真实计算（此前四项 trend 全硬编码 flat/0，趋势信息退化）：
@@ -2686,7 +2753,7 @@ response: ({ url }: { url: string }) => {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: scopedMembers.length, ...trendOf(scopedMembers.length, scopedMembers.length - joinedThisMonth) },
+            { label: '总成员数', value: scopedMembers.length, ...trendOf(scopedMembers.length, scopedMembers.length - joinedThisMonth + exitedThisMonth) },
             { label: '本月新增', value: joinedThisMonth, ...trendOf(joinedThisMonth, joinedLastMonth) },
             { label: '活跃招新', value: activeRec, ...trendOf(activeRec, completedRecent) },
             { label: '待处理申请', value: pending, ...trendOf(pending, pendingPrev) },
@@ -2903,7 +2970,8 @@ response: ({ url }: { url: string }) => {
           ],
           taskQueue: {
             pending: allExportTasks.filter((t) => t.status === 'generating').length,
-            processing: 0,
+            // P2-017：processing 取自真实中间态（generating→processing→completed 状态机），不再恒为 0
+            processing: allExportTasks.filter((t) => t.status === 'processing').length,
             failed: allExportTasks.filter((t) => t.status === 'failed').length,
           },
           syncHealth: {
@@ -2942,6 +3010,10 @@ response: ({ url }: { url: string }) => {
         if (expected === 'number' ? typeof value !== 'number' : typeof value !== expected) {
           return businessError(`配置字段 ${key} 需为 ${expected} 类型`)
         }
+      }
+      // P2-017 补漏：maxMembers 数值范围校验——必须为 ≥1 的整数（0/负数/小数均拒绝，防容量配置损坏）
+      if (typeof input.maxMembers === 'number' && (!Number.isInteger(input.maxMembers) || input.maxMembers < 1)) {
+        return businessError('配置字段 maxMembers 需为 1 以上整数')
       }
       Object.assign(platformConfig, input)
       platformConfigVersion += 1
