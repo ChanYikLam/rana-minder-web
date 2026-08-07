@@ -330,7 +330,7 @@ onMounted(loadInitial)
         <div class="mt-4 rounded-md border border-border p-3">
           <p class="text-xs font-medium text-text-secondary mb-2 flex items-center gap-1.5"><Users :size="14" /> 成员关系预览</p>
           <p class="text-xs text-text-secondary">
-            接入后 {{ selectedGroup?.members.length ?? 0 }} 名现有成员成为社团成员关系：
+            该 Group 现有 {{ selectedGroup?.members.length ?? 0 }} 名成员，接入后可在「社团接入管理」导入（仅记录已导入历史，不生成新成员关系）：
           </p>
           <ul class="mt-2 space-y-1">
             <li v-for="m in previewMembers" :key="m.id" class="text-sm text-text-secondary flex items-center gap-2">

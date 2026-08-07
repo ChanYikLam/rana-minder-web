@@ -49,6 +49,15 @@ export interface ClubAccessItem {
   createdAt: string
   boundAt: string | null
   importedCount: number
+  /** 向导草稿（管理页向导回显已选 Group/负责人用）；未开始向导时为 null */
+  wizard: {
+    selectedGroupId: string | null
+    leaderGroupId: string | null
+    email: string
+    deptGroups: string[]
+    roleGroups: string[]
+    leaderRoleGroup: string
+  } | null
   /** 冻结时长累计顺延（毫秒），恢复时一次性并入 */
   freezeExtensionMs: number
   /** 异常/紧急停用期间空间只读 */

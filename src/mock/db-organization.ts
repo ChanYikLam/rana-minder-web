@@ -204,6 +204,29 @@ export function validateGroupForBinding(groupId: string, clubId: string): { ok: 
   return { ok: true }
 }
 
+/** 向导步骤 3 引用校验：部门/职位/负责人职位 Group 必须位于所选社团层级之下且用途匹配（CFG-006；供后续权限映射写入前复检） */
+function validateSubGroups(
+  groupId: string | null,
+  deptGroups: string[] | undefined,
+  roleGroups: string[] | undefined,
+  leaderRoleGroup: string | undefined,
+): { ok: boolean; error?: string } {
+  const underGroup = (id: string, purpose: 'department' | 'position'): boolean => {
+    const g = findGroup(id)
+    return !!g && g.purpose === purpose && !!groupId && g.parentId === groupId
+  }
+  if (deptGroups && deptGroups.length > 0 && deptGroups.some((id) => !underGroup(id, 'department'))) {
+    return { ok: false, error: '部门 Group 必须位于所选社团层级下且为部门级 Group' }
+  }
+  if (roleGroups && roleGroups.length > 0 && roleGroups.some((id) => !underGroup(id, 'position'))) {
+    return { ok: false, error: '职位 Group 必须位于所选社团层级下且为职位级 Group' }
+  }
+  if (leaderRoleGroup && !underGroup(leaderRoleGroup, 'position')) {
+    return { ok: false, error: '负责人职位 Group 必须位于所选社团层级下且为职位 Group' }
+  }
+  return { ok: true }
+}
+
 // ================= 分层搜索（PRD US-ORG-01 / SRS 7.3） =================
 
 const CJK_LATIN_RE = /[\u4e00-\u9fa5a-zA-Z0-9]/g
@@ -272,6 +295,7 @@ export function getGroupDetail(groupId: string): {
   name: string
   stableId: string
   path: string
+  parentId: string | null
   purpose: GroupNode['purpose']
   boundClubId: string | null
   members: { id: string; name: string }[]
@@ -286,6 +310,7 @@ export function getGroupDetail(groupId: string): {
     name: group.name,
     stableId: group.stableId,
     path: group.path,
+    parentId: group.parentId,
     purpose: group.purpose,
     boundClubId: group.boundClubId,
     members: group.members.map((id) => ({ id, name: memberNames[id] ?? id })),
@@ -318,6 +343,16 @@ export function listClubAccesses(): ClubAccessItem[] {
       createdAt: c.createdAt,
       boundAt: c.boundAt,
       importedCount: c.importedCount,
+      wizard: c.wizard
+        ? {
+            selectedGroupId: c.wizard.selectedGroupId,
+            leaderGroupId: c.wizard.leaderGroupId,
+            email: c.wizard.email,
+            deptGroups: c.wizard.deptGroups,
+            roleGroups: c.wizard.roleGroups,
+            leaderRoleGroup: c.wizard.leaderRoleGroup,
+          }
+        : null,
       freezeExtensionMs: c.freezeIntervals.reduce((sum, f) => sum + (f.recoveredAt ? new Date(f.recoveredAt).getTime() - new Date(f.suspendedAt).getTime() : 0), 0),
       readonly: c.readonly,
       hasActiveBusiness: false,
@@ -349,6 +384,8 @@ export function createClubAccess(input: { groupId: string; name: string; descrip
   if (!leader) return { ok: false, error: '负责人职位 Group 不存在' }
   if (leader.parentId !== group.id || leader.purpose !== 'position') return { ok: false, error: '负责人职位 Group 必须在所选社团层级下且为职位 Group' }
   if (leader.members.length === 0) return { ok: false, error: '负责人职位 Group 内没有有效负责人，接入不可创建' }
+  const sub = validateSubGroups(input.groupId, input.deptGroups, input.roleGroups, input.leaderRoleGroup)
+  if (!sub.ok) return { ok: false, error: sub.error }
   const seq = Math.max(0, ...clubAccesses.map((c) => Number(c.clubId.replace('club-', '')) || 0)) + 1
   const club: MockClubAccess = {
     clubId: `club-${String(seq).padStart(3, '0')}`,
@@ -384,14 +421,22 @@ export function saveWizardStep(clubId: string, input: { step: number; selectedGr
     if (!leader) return { ok: false, error: '负责人职位 Group 不存在' }
     if (selectedGroupId && (leader.parentId !== selectedGroupId || leader.purpose !== 'position')) return { ok: false, error: '负责人职位 Group 必须在所选社团层级下且为职位 Group' }
   }
+  const deptGroups = input.deptGroups !== undefined ? input.deptGroups : club.wizard?.deptGroups ?? []
+  const roleGroups = input.roleGroups !== undefined ? input.roleGroups : club.wizard?.roleGroups ?? []
+  const leaderRoleGroup = input.leaderRoleGroup !== undefined ? input.leaderRoleGroup : club.wizard?.leaderRoleGroup ?? ''
+  if ((deptGroups.length > 0 || roleGroups.length > 0 || leaderRoleGroup) && !selectedGroupId) {
+    return { ok: false, error: '请先选择要接入的 Group' }
+  }
+  const sub = validateSubGroups(selectedGroupId, deptGroups, roleGroups, leaderRoleGroup)
+  if (!sub.ok) return { ok: false, error: sub.error }
   club.wizardStep = Math.max(0, Math.min(4, input.step))
   club.wizard = {
     selectedGroupId,
     leaderGroupId,
     email: input.email !== undefined ? input.email.trim() : club.wizard?.email ?? '',
-    deptGroups: input.deptGroups !== undefined ? input.deptGroups : club.wizard?.deptGroups ?? [],
-    roleGroups: input.roleGroups !== undefined ? input.roleGroups : club.wizard?.roleGroups ?? [],
-    leaderRoleGroup: input.leaderRoleGroup !== undefined ? input.leaderRoleGroup : club.wizard?.leaderRoleGroup ?? '',
+    deptGroups,
+    roleGroups,
+    leaderRoleGroup,
   }
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }

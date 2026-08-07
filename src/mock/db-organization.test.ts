@@ -3,9 +3,10 @@
  * 注意：模块持有内存单例（groups / clubAccesses），本文件用例按线性顺序执行，
  * 每个用例使用的社团互不冲突（club-004 向导 / club-001 停用-恢复-失权-重接 / club-005 修复 / club-002/003 兜底）。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeEach } from 'vitest'
 import {
   completeWizard,
+  createClubAccess,
   disconnectClub,
   effectiveChars,
   getClubAccess,
@@ -351,5 +352,73 @@ describe('停用体系：普通/紧急停用、恢复、失权、修复、重绑
     expect(r.ok).toBe(true)
     const extension = listClubAccesses().find((c) => c.clubId === 'club-003')!.freezeExtensionMs
     expect(extension).toBeGreaterThan(8 * 24 * 60 * 60 * 1000)
+  })
+})
+
+/** 审计修复：部门/职位/负责人职位 Group 引用写入校验（此前仅存储未校验，后续权限映射依赖该约束） */
+describe('审计修复：部门/职位/负责人引用校验（createClubAccess / saveWizardStep）', () => {
+  beforeEach(() => {
+    resetOrgDb()
+  })
+
+  it('createClubAccess：部门 Group 必须位于所选社团层级下且为部门级', () => {
+    const crossLevel = createClubAccess({ groupId: 'grp-004', name: '跨级部门社', description: '', leaderGroupId: 'grp-lead-004', deptGroups: ['grp-dept-001'] })
+    expect(crossLevel.ok).toBe(false)
+    expect(crossLevel.error).toContain('部门 Group 必须位于所选社团层级下')
+
+    const wrongPurpose = createClubAccess({ groupId: 'grp-004', name: '错用途部门社', description: '', leaderGroupId: 'grp-lead-004', deptGroups: ['grp-lead-004'] })
+    expect(wrongPurpose.ok).toBe(false)
+    expect(wrongPurpose.error).toContain('部门 Group 必须位于所选社团层级下')
+  })
+
+  it('createClubAccess：职位 Group 必须位于所选社团层级下且为职位级', () => {
+    const crossLevel = createClubAccess({ groupId: 'grp-004', name: '跨级职位社', description: '', leaderGroupId: 'grp-lead-004', roleGroups: ['grp-lead-001'] })
+    expect(crossLevel.ok).toBe(false)
+    expect(crossLevel.error).toContain('职位 Group 必须位于所选社团层级下')
+
+    const wrongPurpose = createClubAccess({ groupId: 'grp-004', name: '错用途职位社', description: '', leaderGroupId: 'grp-lead-004', roleGroups: ['grp-dept-001'] })
+    expect(wrongPurpose.ok).toBe(false)
+    expect(wrongPurpose.error).toContain('职位 Group 必须位于所选社团层级下')
+  })
+
+  it('createClubAccess：leaderRoleGroup 引用必须为所选社团层级下的职位 Group', () => {
+    const bad = createClubAccess({ groupId: 'grp-004', name: '错负责人引用社', description: '', leaderGroupId: 'grp-lead-004', leaderRoleGroup: 'grp-dept-001' })
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('负责人职位 Group 必须位于所选社团层级下')
+  })
+
+  it('createClubAccess：合法部门/职位/负责人引用通过并落库', () => {
+    const good = createClubAccess({
+      groupId: 'grp-004', name: '合法引用社', description: '',
+      leaderGroupId: 'grp-lead-004', deptGroups: [], roleGroups: ['grp-lead-004'], leaderRoleGroup: 'grp-lead-004',
+    })
+    expect(good.ok).toBe(true)
+    const stored = getClubAccess(good.data!.clubId)!
+    expect(stored.wizard?.roleGroups).toEqual(['grp-lead-004'])
+    expect(stored.wizard?.leaderRoleGroup).toBe('grp-lead-004')
+  })
+
+  it('saveWizardStep：写入部门/职位/负责人引用时同样校验层级与用途', () => {
+    const created = createClubAccess({ groupId: 'grp-004', name: '回显校验社', description: '', leaderGroupId: 'grp-lead-004' })
+    const id = created.data!.clubId
+
+    const badDept = saveWizardStep(id, { step: 3, selectedGroupId: 'grp-004', deptGroups: ['grp-dept-001'] })
+    expect(badDept.ok).toBe(false)
+    expect(badDept.error).toContain('部门 Group 必须位于所选社团层级下')
+
+    const badRole = saveWizardStep(id, { step: 3, selectedGroupId: 'grp-004', roleGroups: ['grp-dept-001'] })
+    expect(badRole.ok).toBe(false)
+    expect(badRole.error).toContain('职位 Group 必须位于所选社团层级下')
+
+    // 未选 Group 时携带引用被拒，且非法写入不落库
+    const noGroup = saveWizardStep(id, { step: 3, selectedGroupId: null, roleGroups: ['grp-lead-004'] })
+    expect(noGroup.ok).toBe(false)
+    expect(noGroup.error).toBe('请先选择要接入的 Group')
+    expect(getClubAccess(id)?.wizard?.roleGroups).toEqual([])
+
+    const good = saveWizardStep(id, { step: 3, selectedGroupId: 'grp-004', roleGroups: ['grp-lead-004'], leaderRoleGroup: 'grp-lead-004' })
+    expect(good.ok).toBe(true)
+    expect(getClubAccess(id)?.wizard?.roleGroups).toEqual(['grp-lead-004'])
+    expect(getClubAccess(id)?.wizard?.leaderRoleGroup).toBe('grp-lead-004')
   })
 })
