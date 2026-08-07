@@ -34,17 +34,37 @@ describe('AdminJointListPage 平台联合活动列表', () => {
     expect(wrapper.text()).not.toContain('联合招新')
   })
 
-  it('切换参与社团挂起/恢复：请求对应端点', async () => {
+  it('切换参与社团停用/恢复：请求对应端点', async () => {
+    mockGet.mockReset()
+    mockPost.mockReset()
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [joint] } })
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })
     const wrapper = mount(AdminJointListPage, { global: { stubs: pageStubs } })
     await flushPromises()
-    // 挂起：点击 "挂起" 按钮
-    const suspendBtn = wrapper.findAll('button').find((b) => b.text().includes('挂起') || b.text().includes('暂停'))
-    if (suspendBtn) {
-      await suspendBtn.trigger('click')
-      await flushPromises()
-      expect(mockPost).toHaveBeenCalledWith('/admin/joint/jnt-1/clubs/club-001/force-suspend', {})
-    }
+
+    // 停用未挂起社团
+    const suspendBtn = wrapper.findAll('button').find((b) => b.text().includes('停用'))
+    expect(suspendBtn, '停用按钮应渲染').toBeTruthy()
+    await suspendBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/joint/jnt-1/clubs/club-001/force-suspend', {})
+  })
+
+  it('恢复已挂起社团：请求 re-enable 端点', async () => {
+    mockGet.mockReset()
+    mockPost.mockReset()
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { items: [{ ...joint, clubs: [{ clubId: 'club-001', clubName: '计算机协会', suspended: true }] }] },
+    })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(AdminJointListPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    const restoreBtn = wrapper.findAll('button').find((b) => b.text().includes('恢复'))
+    expect(restoreBtn, '恢复按钮应渲染').toBeTruthy()
+    await restoreBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/joint/jnt-1/clubs/club-001/re-enable', {})
   })
 })

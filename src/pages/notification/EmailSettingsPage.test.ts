@@ -43,12 +43,11 @@ describe('EmailSettingsPage 邮件设置', () => {
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: '连接超时' } })
     const wrapper = mount(EmailSettingsPage, { global: { stubs: pageStubs } })
     await flushPromises()
-    const testBtn = wrapper.findAll('button').find((b) => b.text().includes('测试'))
-    if (testBtn) {
-      await testBtn.trigger('click')
-      await flushPromises()
-      expect(wrapper.text()).toContain('测试邮件发送失败，请稍后重试')
-    }
+    const testBtn = wrapper.findAll('button').find((b) => b.text().includes('发送测试邮件'))
+    expect(testBtn, '发信配置态应渲染发送测试按钮').toBeTruthy()
+    await testBtn!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('测试邮件发送失败，请稍后重试')
   })
 
   it('加载失败：不渲染配置', async () => {

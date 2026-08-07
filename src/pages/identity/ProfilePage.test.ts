@@ -41,11 +41,12 @@ describe('ProfilePage 个人资料', () => {
     expect(wrapper.text()).toContain('个人资料')
   })
 
-  it('加载失败：不渲染', async () => {
+  it('加载失败：不渲染资料字段', async () => {
     mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     const wrapper = mount(ProfilePage, { global: { stubs: pageStubs } })
     await flushPromises()
-    expect(wrapper.exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('手机号')
+    expect(wrapper.text()).not.toContain('身份信息')
     wrapper.unmount()
   })
 })

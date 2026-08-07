@@ -50,11 +50,10 @@ describe('ApplicationsPage 报名申请管理', () => {
     const wrapper = mount(ApplicationsPage, { global: { stubs: pageStubs } })
     await flushPromises()
     const tab = wrapper.findAll('button').find((b) => b.text().includes('已接受'))
-    if (tab) {
-      await tab.trigger('click')
-      await flushPromises()
-      expect(mockGet).toHaveBeenLastCalledWith('/org/club-001/recruitment/act-1/applications?status=accepted')
-    }
+    expect(tab, '状态标签应渲染').toBeTruthy()
+    await tab!.trigger('click')
+    await flushPromises()
+    expect(mockGet).toHaveBeenLastCalledWith('/org/club-001/recruitment/act-1/applications?status=accepted')
   })
 
   it('加载失败：不渲染列表', async () => {

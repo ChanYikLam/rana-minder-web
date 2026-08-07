@@ -32,11 +32,11 @@ describe('InterviewManagePage 面试管理', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
-  it('参数缺失：进入错误态且不发起请求', async () => {
+  it('加载失败：进入错误态不渲染面试记录', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
-    // 路由 mock 恒有参数，此用例仅验证无崩溃
-    expect(wrapper.exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('张三')
     wrapper.unmount()
   })
 })

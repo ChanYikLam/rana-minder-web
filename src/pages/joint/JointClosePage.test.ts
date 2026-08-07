@@ -24,6 +24,8 @@ const detail = {
   totalApplicants: 10, totalConcluded: 3, totalInvited: 2, canClose: false,
 }
 
+const closableDetail = { ...detail, canClose: true }
+
 describe('JointClosePage 联合活动关闭', () => {
   beforeEach(() => {
     mockGet.mockReset()
@@ -41,19 +43,18 @@ describe('JointClosePage 联合活动关闭', () => {
   })
 
   it('进入结束确认阶段成功：提示并刷新', async () => {
-    mockGet.mockResolvedValueOnce({ kind: 'completed', data: detail })
-    mockGet.mockResolvedValueOnce({ kind: 'completed', data: detail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: closableDetail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: closableDetail })
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })
     const wrapper = mount(JointClosePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
-    const startBtn = wrapper.findAll('button').find((b) => b.text().includes('结束'))
-    if (startBtn) {
-      await startBtn.trigger('click')
-      await flushPromises()
-      expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/close/start', {})
-      expect(toast.success).toHaveBeenCalledWith('已进入结束确认阶段')
-    }
+    const startBtn = wrapper.findAll('button').find((b) => b.text().includes('进入结束确认'))
+    expect(startBtn, '可关闭状态下应渲染"进入结束确认"按钮').toBeTruthy()
+    await startBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/close/start', {})
+    expect(toast.success).toHaveBeenCalledWith('已进入结束确认阶段')
   })
 
   it('加载失败：不渲染详情', async () => {
