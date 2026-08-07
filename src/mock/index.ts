@@ -1,5 +1,17 @@
 import type { MockMethod } from './types'
-import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUsers, type MockUser } from './auth'
+import {
+  resolveMockUser,
+  getPermissions,
+  getWorkspace,
+  clearMockSession,
+  mockUsers,
+  getMockDegraded,
+  setMockDegraded,
+  resetMockDegraded,
+  markProfileComplete,
+  markEmailVerified,
+  type MockUser,
+} from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
@@ -370,6 +382,18 @@ function mergePathParams(handler: MockMethod): MockMethod {
 }
 
 /** 会话处理器 */
+
+/** 资料最新版本（乐观锁）：PUT /api/auth/profile 每次成功保存 +1，初始视为 1 */
+const profileLatestVersion: Record<string, number> = {}
+
+/** 重置身份域 mock 状态（测试隔离；会话锚定由 clearMockSession 负责） */
+export function resetIdentityMockState(): void {
+  for (const key of Object.keys(profileLatestVersion)) {
+    delete profileLatestVersion[key]
+  }
+  resetMockDegraded()
+}
+
 const identityHandlers: MockMethod[] = [
   {
     url: '/api/auth/session',
@@ -380,6 +404,19 @@ const identityHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const user = resolveMockUser(url)
+      // 账号禁用（IDN 域）：会话拒绝建立，登录失败
+      if (user.disabled) {
+        return {
+          statusCode: 403,
+          body: {
+            code: 'IFC-ERR-011',
+            message: '账号已被禁用，请联系平台管理员',
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          },
+        }
+      }
+      // SRS-FAIL-001 降级模式：Casdoor 故障时由演示开关置位，输出 15 分钟白名单窗口起点
+      const degraded = getMockDegraded()
       return {
         code: 0,
         data: {
@@ -397,7 +434,8 @@ const identityHandlers: MockMethod[] = [
             complete: user.profileComplete,
             emailVerified: user.emailVerified,
           },
-          degraded: false,
+          degraded: degraded.enabled,
+          degradedSince: degraded.enabled ? new Date(degraded.since).toISOString() : null,
           permissions: effectivePermissions(user, user.currentClubId || ''),
           workspace: getWorkspace(user),
         },
@@ -447,6 +485,8 @@ const identityHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
+          // 返回当前版本号：页面乐观锁以响应版本为准（P2-3：资料门翻转与版本号联动）
+          version: profileLatestVersion[user.id] ?? 1,
           studentId: user.studentId,
           name: user.name,
           email: user.email,
@@ -470,29 +510,38 @@ const identityHandlers: MockMethod[] = [
       if (error) {
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
-      // 模拟版本冲突
-      if (body.expectedVersion !== undefined && body.expectedVersion < 1) {
+      const user = resolveMockUser(url)
+      // 乐观锁：expectedVersion 与 mock 侧最新版本比对（与 saveFormDraft 语义一致），取代原先 expectedVersion<1 的死条件
+      const currentVersion = profileLatestVersion[user.id] ?? 1
+      if (body.expectedVersion !== undefined && body.expectedVersion !== currentVersion) {
         return {
           statusCode: 409,
           body: {
-            code: 'IFC-ERR-005',
-            message: '数据已被他人修改，请刷新后重试',
+            code: 'IFC-ERR-008',
+            message: '数据版本已变化，请刷新后重试',
             supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
-            currentData: { email: 'updated@example.edu.cn', phone: '13900000000' },
+            currentData: { email: user.email, phone: user.phone },
           },
         }
       }
-      const user = resolveMockUser(url)
+      // 版本登记先于保存生效：比对一旦通过即占用新版本号，后续同版本提交必然 409，
+      // 保证「保存生效与版本登记」原子一致（连续两次 expectedVersion=1 时第二次不会重复落库）
+      profileLatestVersion[user.id] = currentVersion + 1
       const input = body.input || {}
+      // 保存生效：白名单字段更新 + 资料补齐（资料门联动 profileComplete）
+      if (typeof input.email === 'string' && input.email) user.email = input.email
+      if (typeof input.phone === 'string' && input.phone) user.phone = input.phone
+      markProfileComplete(user.id)
       return {
         code: 0,
         data: {
+          version: currentVersion + 1,
           studentId: user.studentId,
           name: user.name,
-          email: (input.email as string) || user.email,
-          phone: (input.phone as string) || user.phone,
+          email: user.email,
+          phone: user.phone,
           emailVerified: user.emailVerified,
-          profileComplete: true,
+          profileComplete: user.profileComplete,
           // 保存后同步启动：白名单字段进入「同步中」
           syncStatus: {
             email: 'synced',
@@ -531,6 +580,9 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      // 验证通过：邮箱验证态落库（资料门联动 emailVerified → 会话 profileGate 翻转）
+      const user = resolveMockUser(url)
+      markEmailVerified(user.id)
       return { code: 0, data: { emailVerified: true } }
     },
   },
@@ -604,6 +656,36 @@ const identityHandlers: MockMethod[] = [
         code: 0,
         data: {
           loginUrl: `/?_mock_user=${user}&_mock_login=success`,
+        },
+      }
+    },
+  },
+  /** 演示专用（非 API 契约）：降级模式开关，供演示脚本/DevTools 触发 SRS-FAIL-001 白名单窗口 */
+  {
+    url: '/api/mock/degraded',
+    method: 'post',
+    response: ({ body }: { body: { enabled?: boolean } }) => {
+      setMockDegraded(body?.enabled !== false)
+      const s = getMockDegraded()
+      return {
+        code: 0,
+        data: {
+          degraded: s.enabled,
+          degradedSince: s.enabled ? new Date(s.since).toISOString() : null,
+        },
+      }
+    },
+  },
+  {
+    url: '/api/mock/degraded',
+    method: 'get',
+    response: () => {
+      const s = getMockDegraded()
+      return {
+        code: 0,
+        data: {
+          degraded: s.enabled,
+          degradedSince: s.enabled ? new Date(s.since).toISOString() : null,
         },
       }
     },
