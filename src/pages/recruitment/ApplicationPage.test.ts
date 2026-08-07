@@ -34,7 +34,7 @@ const mockActivity = { id: 'act-001', title: '测试活动', clubName: '测试�
 const mockFormFields = [{ id: 'f1', type: 'text', label: '姓名', description: null, required: true, readonly: false, permission: 'read_write', options: null }]
 const fileField = { id: 'f2', type: 'file', label: '简历', description: null, required: false, readonly: false, permission: 'read_write', options: null }
 
-/** 文件上传接口（/api/files/upload）的成功响应 */
+/** 文件上传接口（/files/upload，client 拼 BASE_URL 后为 /api/files/upload）的成功响应 */
 function uploadOk(fileId: string) {
   return { kind: 'completed' as const, data: { fileId, name: 'resume.pdf', size: 1024, mimeType: 'application/pdf', status: 'clean', uploadedAt: '2026-08-07T00:00:00Z' } }
 }
@@ -453,9 +453,9 @@ describe('ApplicationPage 交互流程', () => {
       await flushPromises()
       await nextTick()
 
-      // 附件先经 /api/files/upload 换取真实 fileId，提交时 payload 携带该元数据
+      // 附件先经 /files/upload 换取真实 fileId（不带 /api 前缀，client 会统一包 input），提交时 payload 携带该元数据
       expect(mockPost).toHaveBeenCalledTimes(2)
-      expect(mockPost).toHaveBeenNthCalledWith(1, '/api/files/upload', { purpose: 'form-attachment', name: 'resume.pdf' })
+      expect(mockPost).toHaveBeenNthCalledWith(1, '/files/upload', { purpose: 'form-attachment', name: 'resume.pdf' })
       const [url, body] = mockPost.mock.calls[1] as [string, { answers: Record<string, unknown> }]
       expect(url).toBe('/activity/recruitment/act-001/apply')
       const f2 = body.answers.f2 as FileMeta[]

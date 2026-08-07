@@ -122,7 +122,7 @@ describe('AttachmentUpload 上传与安全检查', () => {
     const wrapper = mount(AttachmentUpload, { props: { modelValue: [] } })
 
     await selectFile(wrapper)
-    expect(mockPost).toHaveBeenCalledWith('/api/files/upload', { purpose: 'form-attachment', name: 'resume.pdf' })
+    expect(mockPost).toHaveBeenCalledWith('/files/upload', { purpose: 'form-attachment', name: 'resume.pdf' })
 
     // 上传中阶段：本地临时 id 仅为占位，不产出 mock 伪造 id
     await wrapper.setProps({ modelValue: lastFiles(wrapper) })
@@ -143,7 +143,7 @@ describe('AttachmentUpload 上传与安全检查', () => {
 
     expect(wrapper.text()).toContain('已通过安全检测')
     expect(lastFiles(wrapper)[0].status).toBe('approved')
-    expect(lastFiles(wrapper)[0].downloadUrl).toBe('/api/files/file-upload-001')
+    expect(lastFiles(wrapper)[0].downloadUrl).toBe('/files/file-upload-001')
   })
 
   it('定时器触发前文件已被移除：不复活为 approved', async () => {
@@ -208,5 +208,34 @@ describe('AttachmentUpload 上传与安全检查', () => {
     expect(mockPost).not.toHaveBeenCalled()
     await wrapper.setProps({ modelValue: lastFiles(wrapper) })
     expect(wrapper.text()).toContain('已拒绝')
+  })
+})
+
+/** P1 回归：附件路径不得带 /api 前缀。client.buildUrl = BASE_URL + path（BASE_URL='/api'），
+ * 带前缀会打成 /api/api/files/upload，mock 端点永不命中、上传恒失败。
+ * 此用例走真实 client（不 mock），断言最终 fetch URL 契约 */
+describe('AttachmentUpload × client.buildUrl 契约', () => {
+  it('post 相对路径 /files/upload 后，最终请求 URL 为 /api/files/upload', async () => {
+    vi.resetModules()
+    vi.doUnmock('@/services/client')
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 0, data: { fileId: 'file-contract-001', status: 'clean', uploadedAt: '2026-08-07T00:00:00Z' } }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { default: RealAttachmentUpload } = await import('./AttachmentUpload.vue')
+    const wrapper = mount(RealAttachmentUpload, { props: { modelValue: [] } })
+    await selectFile(wrapper)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/files/upload')
+    expect(JSON.parse(init.body as string).input).toEqual({ purpose: 'form-attachment', name: 'resume.pdf' })
+
+    wrapper.unmount()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 })

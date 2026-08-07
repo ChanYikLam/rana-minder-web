@@ -57,16 +57,17 @@ function scheduleAutoApprove(nextFiles: FileMeta[]) {
     const updated = files.value.map((f) => {
       if (!approvedIds.has(f.id) || f.status !== 'checking') return f
       changed = true
-      return { ...f, status: 'approved' as const, checkedAt: new Date().toISOString(), downloadUrl: `/api/files/${f.id}` }
+      return { ...f, status: 'approved' as const, checkedAt: new Date().toISOString(), downloadUrl: `/files/${f.id}` }
     })
     if (changed) emit('update:modelValue', updated)
   }, CHECK_DELAY_MS)
   timers.add(timer)
 }
 
-/** 经真实上传接口换取 fileId（file- 前缀，可被 /api/files/:fileId 正常访问）；条目若已被移除则静默放弃 */
+/** 经真实上传接口换取 fileId（file- 前缀，可被 /api/files/:fileId 正常访问）；条目若已被移除则静默放弃。
+ * 路径不带 /api 前缀（client.buildUrl 会拼 BASE_URL）且 payload 不预包 input（client 会统一包装） */
 async function resolveUpload(tempId: string, file: File) {
-  const result = await post<{ fileId: string; uploadedAt?: string }>('/api/files/upload', {
+  const result = await post<{ fileId: string; uploadedAt?: string }>('/files/upload', {
     purpose: 'form-attachment',
     name: file.name,
   })
