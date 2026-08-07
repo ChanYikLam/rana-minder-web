@@ -44,13 +44,8 @@ const fieldTypes = [
   { type: 'array', label: '子表单', icon: Rows3 },
 ]
 
-// 历史类型标签兜底（rating 等旧数据仍可渲染）
-const legacyTypeLabels: Record<string, string> = {
-  select: '下拉选择', checkbox: '勾选', datetime: '日期时间', array: '子表单',
-}
-
 function labelOf(type: string): string {
-  return fieldTypes.find((ft) => ft.type === type)?.label || legacyTypeLabels[type] || type
+  return fieldTypes.find((ft) => ft.type === type)?.label || type
 }
 
 const optionableTypes = ['radio', 'multi_select', 'select', 'checkbox']
@@ -114,6 +109,9 @@ async function handleSave() {
     if (typeof data?.version === 'number') currentVersion.value = data.version
     else currentVersion.value = nextVersion
     toast.success(`表单已保存（v${currentVersion.value}）`)
+  } else if (result.kind === 'concurrency_conflict') {
+    // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
+    toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
   } else {
@@ -123,6 +121,11 @@ async function handleSave() {
 
 // SM-FORM-001：draft --publish--> published（发布当前草稿版本）
 async function handlePublish() {
+  // 前置防呆：仅 draft 态可发布（published/deprecated 应隐藏按钮，这里兜底）
+  if (formStatus.value !== 'draft') {
+    toast.error('仅草稿状态可发布')
+    return
+  }
   publishing.value = true
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
@@ -225,6 +228,7 @@ onMounted(loadData)
             <Save :size="16" /> {{ saving ? '保存中...' : '保存' }}
           </button>
           <button
+            v-if="formStatus === 'draft'"
             class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
             :disabled="publishing"
             @click="handlePublish"

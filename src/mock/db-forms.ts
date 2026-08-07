@@ -288,17 +288,30 @@ export function deprecateForm(formId: string): Result<{ id: string; status: 'dep
   return ok({ id: f.id, status: 'deprecated', deprecatedAt: now() })
 }
 
-/** SM-FORM-001 deprecated --reuse--> draft：复用后最新版本回到可编辑草稿 */
-export function reuseForm(formId: string): Result<{ id: string; status: 'draft' }> {
+/**
+ * SM-FORM-001 deprecated --reuse--> draft：复用后回到可编辑草稿。
+ * 已发布/已停用版本保留历史标记（版本审计轨迹不丢失），
+ * 仅在最新版本已是草稿时直接复用；否则新建草稿版本承载编辑（已发布版本不可覆盖）。
+ */
+export function reuseForm(formId: string): Result<{ id: string; status: 'draft'; version: number }> {
   const found = findForm(formId)
   if (!found.ok) return found
   const f = found.data
   const t = assertTransition('SM-FORM-001', f.status, 'draft', 'reuse')
   if (!t.ok) return err(t.reason || '当前状态不可复用')
   const latest = latestVersionOf(f)
-  if (latest.status !== 'draft') latest.status = 'draft'
+  let draft = latest.status === 'draft' ? latest : null
+  if (!draft) {
+    draft = {
+      version: latest.version + 1,
+      status: 'draft',
+      publishedAt: null,
+      fields: structuredClone(latest.fields),
+    }
+    f.versions.push(draft)
+  }
   f.status = 'draft'
-  return ok({ id: f.id, status: 'draft' })
+  return ok({ id: f.id, status: 'draft', version: draft.version })
 }
 
 let formSeq = 0

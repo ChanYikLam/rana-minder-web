@@ -64,7 +64,7 @@ describe('P0-003 动态表单引擎（SM-FORM-001 / SM-FORM-002）', () => {
     expect(republish.ok).toBe(false)
   })
 
-  it('SM-FORM-001 停用/复用：published → deprecated（历史版本保留）→ draft', () => {
+  it('SM-FORM-001 停用/复用：published → deprecated（历史版本保留）→ draft，复用新建草稿版本不覆盖历史', () => {
     const dep = deprecateForm('form-001')
     expect(dep.ok).toBe(true)
     expect(dep.ok && dep.data.status).toBe('deprecated')
@@ -78,8 +78,16 @@ describe('P0-003 动态表单引擎（SM-FORM-001 / SM-FORM-002）', () => {
     const reuse = reuseForm('form-001')
     expect(reuse.ok).toBe(true)
     expect(reuse.ok && reuse.data.status).toBe('draft')
+    expect(reuse.ok && reuse.data.version).toBe(2)
     const reused = getFormDetail('form-001')
-    expect(reused.ok && reused.data.versions[0].status).toBe('draft')
+    // P3-3：历史版本保留 deprecated 标记（版本审计轨迹不丢失），新建 v2 草稿承载编辑
+    expect(reused.ok && reused.data.status).toBe('draft')
+    expect(reused.ok && reused.data.versions.map((v) => v.version)).toEqual([1, 2])
+    expect(reused.ok && reused.data.versions[0].status).toBe('deprecated')
+    expect(reused.ok && reused.data.versions[1].status).toBe('draft')
+    // 设计器态：编辑最新草稿 v2
+    const designer = getDesignerState('form-001')
+    expect(designer.ok && designer.data.version).toBe(2)
   })
 
   it('SM-FORM-001 克隆：published/deprecated → 独立草稿（字段同源、数据不携带）', () => {

@@ -61,6 +61,9 @@ async function handleSaveDraft() {
   if (result.kind === 'completed') {
     const data = result.data as { version?: number }
     toast.success(`草稿已保存（v${data?.version ?? nextVersion}）`)
+  } else if (result.kind === 'concurrency_conflict') {
+    // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
+    toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
   } else {

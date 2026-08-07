@@ -1992,7 +1992,7 @@ response: ({ url }: { url: string }) => {
       })
       if (!result.ok) {
         if (result.error.includes('冲突')) {
-          return { statusCode: 409, body: { code: 'FORM-CONFLICT', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+          return { statusCode: 409, body: { code: 'IFC-ERR-008', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
         }
         return businessError(result.error)
       }
@@ -3006,7 +3006,7 @@ policies: retentionPolicies,
       })
       if (!result.ok) {
         if (result.error.includes('冲突')) {
-          return { statusCode: 409, body: { code: 'FORM-CONFLICT', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+          return { statusCode: 409, body: { code: 'IFC-ERR-008', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
         }
         return businessError(result.error)
       }
