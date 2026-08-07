@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { Card } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { BatchActionBar, type BatchItem } from '@/components/operation'
 import { PartialSuccess, type PartialResult } from '@/components/operation'
@@ -31,6 +32,10 @@ const loadFailed = ref(false)
 const candidatesError = ref(false)
 const interviewers = ref<{ id: string; name: string }[]>([])
 const interviewerId = ref('')
+const confirmOpen = ref(false)
+const confirmError = ref('')
+const confirmReason = ref('')
+const pendingProof = ref<string | undefined>(undefined)
 
 const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'assign_interviewer', label: '批量分配面试官', desc: '为多个申请人分配同一面试官' },
@@ -112,7 +117,7 @@ function applyResults(list: { memberId: string; success: boolean; message: strin
   }
 }
 
-async function runBatch(memberIds: string[]) {
+async function runBatch(memberIds: string[], reason: string, proof?: string) {
   if (!clubId.value) {
     toast.error('工作空间参数无效')
     return false
@@ -121,6 +126,8 @@ async function runBatch(memberIds: string[]) {
     action: selectedType.value,
     memberIds,
     interviewerId: selectedType.value === 'assign_interviewer' ? interviewerId.value : undefined,
+    reason: reason || undefined,
+    reauthProof: proof,
   })
   if (result.kind === 'completed') {
     applyResults(result.data.results)
@@ -132,10 +139,25 @@ async function runBatch(memberIds: string[]) {
 }
 
 async function execute() {
+  confirmError.value = ''
+  if (!confirmReason.value.trim() || confirmReason.value.trim().length < 5) {
+    confirmError.value = '请填写批量执行原因（至少 5 字）'
+  }
+  confirmOpen.value = true
+}
+
+async function confirmExecute(proof?: string) {
+  const reason = confirmReason.value.trim()
+  if (!reason || reason.length < 5) {
+    confirmError.value = '请填写批量执行原因（至少 5 字）'
+    return
+  }
+  pendingProof.value = proof
+  confirmOpen.value = false
   step.value = 'execute'
   executing.value = true
   results.value = []
-  const ok = await runBatch(selectedItems.value)
+  const ok = await runBatch(selectedItems.value, reason, proof)
   executing.value = false
   if (ok) step.value = 'result'
   else step.value = 'preview'
@@ -144,8 +166,12 @@ async function execute() {
 async function retryFailed() {
   retrying.value = true
   const failed = results.value.filter((r) => !r.success).map((r) => r.id)
-  await runBatch(failed)
+  await runBatch(failed, confirmReason.value.trim() || '批量操作失败重试', pendingProof.value)
   retrying.value = false
+}
+
+function cancelConfirm() {
+  confirmError.value = ''
 }
 
 function reset() {
@@ -307,5 +333,28 @@ const batchResults = computed<PartialResult[]>(() =>
         </button>
       </div>
     </div>
+
+    <HighRiskConfirm
+      v-model:open="confirmOpen"
+      :title="`批量${batchTypes.find((b) => b.type === selectedType)?.label || '执行'}`"
+      :description="`将对 ${selectedItems.length} 名对象执行批量操作，提交后请勿关闭页面。`"
+      :targets="batchSelected"
+      impact-summary="批量执行会立即影响所选对象，触发状态变更与通知；执行后可在结果页查看失败项并单独重试。"
+      confirm-label="确认执行"
+      reauth-required
+      :executing="executing"
+      :error-message="confirmError"
+      @confirm="confirmExecute"
+      @cancel="cancelConfirm"
+    >
+      <template #extra>
+        <label class="block text-sm font-medium text-text-primary mb-1.5">执行原因（必填，至少 5 字，用于审计）</label>
+        <input
+          v-model="confirmReason"
+          class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+          placeholder="执行原因：例如社团开放日集中发送邀请"
+        />
+      </template>
+    </HighRiskConfirm>
   </div>
 </template>

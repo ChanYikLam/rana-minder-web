@@ -264,15 +264,20 @@ const riskImpact = computed(() => {
 
 const riskReauth = computed<boolean>(() => risk.value?.op === 'force_suspend' || risk.value?.op === 'disconnect' || risk.value?.op === 'recover')
 
-async function riskExec() {
+async function riskExec(proof?: string) {
   const t = risk.value
   if (!t) return
   riskExecuting.value = true
   let result: Awaited<ReturnType<typeof post>>
-  if (t.op === 'normal_suspend') result = await post(`/admin/clubs/${t.club.clubId}/normal-suspend`, { reason: reasonDraft.value || '常规业务调整' })
-  else if (t.op === 'force_suspend') result = await post(`/admin/clubs/${t.club.clubId}/force-suspend`, { reason: reasonDraft.value })
-  else if (t.op === 'recover') result = await post(`/admin/clubs/${t.club.clubId}/recover`)
-  else result = await post(`/admin/clubs/${t.club.clubId}/disconnect`)
+  if (t.op === 'normal_suspend') {
+    result = await post(`/admin/clubs/${t.club.clubId}/normal-suspend`, { reason: reasonDraft.value || '常规业务调整' })
+  } else if (t.op === 'force_suspend') {
+    result = await post(`/admin/clubs/${t.club.clubId}/force-suspend`, { reason: reasonDraft.value, reauthProof: proof })
+  } else if (t.op === 'recover') {
+    result = await post(`/admin/clubs/${t.club.clubId}/recover`, { reauthProof: proof })
+  } else {
+    result = await post(`/admin/clubs/${t.club.clubId}/disconnect`, { reauthProof: proof })
+  }
   riskExecuting.value = false
   if (result.kind === 'completed') {
     toast.success('操作已执行')
