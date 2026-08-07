@@ -4,6 +4,7 @@
  */
 import { assertTransition } from './state-machines/transitions'
 import { mockUsers } from './auth'
+import { createMemberFromAdmission } from './db'
 
 /** 申请人档案（applicantId → 姓名/学号）：申请人 id 为 u-xxx 域内编号，
  * 与 auth.mockUsers 的 user-applicant-xxx 键不同，按申请人域自维护；
@@ -1572,7 +1573,17 @@ export function confirmRecInvitationSync(invitationId: string): { ok: boolean; e
   if (!inv) return err('邀请不存在')
   if (inv.status !== 'accepted') return err('仅已接受的邀请可执行成员同步确认')
   if (inv.casdoorSync === 'processing') {
+    // 先创建成员再翻转同步状态：成员创建失败时保持 processing，可重试，避免卡在「已确认但无成员」中间态
+    const admitted = createMemberFromAdmission(inv.clubId, {
+      studentId: applicantStudentIdOf(inv.applicantId),
+      name: inv.applicantName,
+      departmentId: inv.departmentId,
+      departmentName: inv.departmentName,
+      acceptedAt: inv.acceptedAt || now(),
+    })
+    if (!admitted.ok) return err(admitted.error || '成员创建失败')
     inv.casdoorSync = 'confirmed'
+    inv.version += 1
     return ok(inv)
   }
   return err('成员同步已完成或已失败')
@@ -2110,7 +2121,22 @@ export function confirmJointInvitationSync(invitationId: string): { ok: boolean;
   const inv = findJointInvitation(invitationId)
   if (!inv) return err('邀请不存在')
   if (inv.status === 'accepted' && inv.casdoorSync === 'processing') {
+    // 先创建成员再翻转同步状态：成员创建失败时保持 processing，可重试，避免「已确认但无成员」中间态
+    const app = findJointApplication(inv.jointId, inv.applicantId)
+    const ja = findJoint(inv.jointId)
+    const clubDepts = ja?.clubs.find((c) => c.clubId === inv.clubId)?.departments ?? []
+    const pref = app?.preferences.find((p) => clubDepts.some((d) => d.id === p.departmentId))
+    if (!pref) return err('报名意向中未匹配到该社团开设部门，无法确认生效，请先指定部门或调整意向')
+    const admitted = createMemberFromAdmission(inv.clubId, {
+      studentId: app?.studentId ?? applicantStudentIdOf(inv.applicantId),
+      name: app?.applicantName ?? applicantNameOf(inv.applicantId),
+      departmentId: pref.departmentId,
+      departmentName: pref.departmentName,
+      acceptedAt: inv.acceptedAt || now(),
+    })
+    if (!admitted.ok) return err(admitted.error || '成员创建失败')
     inv.casdoorSync = 'confirmed'
+    inv.version += 1
     return ok()
   }
   return err('仅接受待同步的联合邀请可确认生效')
