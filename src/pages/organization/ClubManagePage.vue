@@ -27,6 +27,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = result.data.items
     state.value = 'normal'
+    void echoWizardSelection()
   } else {
     state.value = 'error'
   }
@@ -42,7 +43,41 @@ const rawResults = ref<GroupSearchResult[]>([])
 const selectedGroup = ref<GroupSearchResult | null>(null)
 const selectedLeaderId = ref<string | null>(null)
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
+const groupDetailSeq = ref(0)
 const wizardError = ref('')
+
+interface GroupDetailData {
+  id: string
+  name: string
+  stableId: string
+  path: string
+  parentId: string | null
+  purpose: GroupSearchResult['purpose']
+  boundClubId: string | null
+  members: { id: string; name: string }[]
+  leaderGroups: { id: string; name: string; memberCount: number }[]
+}
+
+/** 向导回显：从创建向导跳转而来时按已存 wizard 状态自动回填已选 Group 与负责人（免重复搜索选择）；用户重新选择后以新选择为准 */
+async function echoWizardSelection() {
+  const club = wizardClub.value
+  const savedGroupId = club?.wizard?.selectedGroupId
+  if (!club || !savedGroupId) return
+  if (selectedGroup.value?.id === savedGroupId && selectedLeaderId.value === club.wizard?.leaderGroupId) return
+  const seq = ++groupDetailSeq.value
+  const detail = await get<GroupDetailData>(`/admin/groups/${savedGroupId}`)
+  if (seq !== groupDetailSeq.value) return
+  if (detail.kind !== 'completed') return
+  const d = detail.data
+  selectedGroup.value = {
+    id: d.id, name: d.name, stableId: d.stableId, path: d.path, parentId: d.parentId,
+    purpose: d.purpose, boundClubId: d.boundClubId, memberCount: d.members.length, match: 'exact', score: 0,
+  }
+  groupDetail.value = d
+  const savedLeader = club.wizard?.leaderGroupId
+  selectedLeaderId.value = savedLeader && d.leaderGroups.some((g) => g.id === savedLeader) ? savedLeader : null
+  wizardError.value = ''
+}
 
 function toSearchResult(g: GroupSearchResult): SearchResult {
   return { id: g.id, name: g.name, subtitle: `${g.stableId} · ${g.memberCount} 名成员`, group: g.path || g.purpose, match: g.match, score: g.score }
@@ -86,8 +121,10 @@ async function onGroupSelect(result: SearchResult) {
   selectedLeaderId.value = null
   groupDetail.value = null
   wizardError.value = ''
-  await saveWizardStep({ step: 1, selectedGroupId: result.id })
+  await saveWizardStep({ step: 1, selectedGroupId: result.id, leaderGroupId: null })
+  const seq = ++groupDetailSeq.value
   const detail = await get<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] }>(`/admin/groups/${result.id}`)
+  if (seq !== groupDetailSeq.value) return
   if (detail.kind === 'completed') groupDetail.value = detail.data
 }
 
@@ -108,15 +145,25 @@ async function saveWizardStep(patch: { step: number; selectedGroupId?: string | 
   const res = await post(`/admin/clubs/wizard/save-step`, {
     clubId: wizardClub.value.clubId,
     step: patch.step,
-    selectedGroupId: patch.selectedGroupId ?? selectedGroup.value?.id ?? null,
-    leaderGroupId: patch.leaderGroupId ?? selectedLeaderId.value ?? null,
+    selectedGroupId: patch.selectedGroupId !== undefined ? patch.selectedGroupId : selectedGroup.value?.id ?? null,
+    leaderGroupId: patch.leaderGroupId !== undefined ? patch.leaderGroupId : selectedLeaderId.value,
   })
-  if (res.kind === 'completed') await loadData()
+  if (res.kind === 'completed') {
+    await loadData()
+  } else {
+    wizardError.value = 'error' in res && res.error ? (res.error as { message?: string }).message || '保存失败，请重试' : '保存失败，请重试'
+  }
 }
 
 async function selectLeader(groupId: string) {
+  if (!selectedGroup.value) return
+  const leaders = groupDetail.value?.leaderGroups ?? []
+  if (!leaders.some((g) => g.id === groupId)) {
+    wizardError.value = '负责人职位 Group 不属于当前所选社团，请重新选择'
+    return
+  }
   selectedLeaderId.value = groupId
-  await saveWizardStep({ step: 2 })
+  await saveWizardStep({ step: 2, leaderGroupId: groupId })
 }
 
 const importingBusy = ref(false)
@@ -128,7 +175,7 @@ async function handleImport() {
   })
   importingBusy.value = false
   if (res.kind === 'completed') {
-    toast.success('已有成员已导入成为当前关系')
+    toast.success('成员导入历史已记录')
     await loadData()
   } else {
     toast.error('成员导入失败，请重试')
@@ -339,7 +386,7 @@ onMounted(loadData)
                 {{ importingBusy ? '导入中...' : `导入 ${groupDetail?.members.length ?? 0} 名成员` }}
               </button>
             </div>
-            <p v-if="wizardClub.importedCount > 0" class="text-xs text-success mt-1.5">已并入 {{ wizardClub.importedCount }} 名成员（来自 Group 既有成员，不做历史日期伪造）</p>
+            <p v-if="wizardClub.importedCount > 0" class="text-xs text-success mt-1.5">已导入 {{ wizardClub.importedCount }} 名成员（历史记录；仅记录导入数量，不生成新成员关系）{{ wizardClub.importedAt ? `· ${wizardClub.importedAt.slice(0, 10)} 导入` : '' }}</p>
           </div>
 
           <!-- 步骤4：完成 -->
@@ -367,7 +414,7 @@ onMounted(loadData)
                 <div class="flex items-center justify-center w-10 h-10 rounded-full bg-primary-subtle text-primary"><Building2 :size="20" /></div>
                 <div>
                   <p class="text-sm font-medium text-text-primary">{{ club.clubName }}</p>
-                  <p class="text-xs text-text-secondary">{{ club.memberCount }} 名成员 · 创建于 {{ club.createdAt.slice(0, 7) }}</p>
+                  <p class="text-xs text-text-secondary">当前成员 {{ club.memberCount }} 名 · 创建于 {{ club.createdAt.slice(0, 7) }}</p>
                 </div>
               </div>
               <div class="flex items-center gap-2">
@@ -411,7 +458,7 @@ onMounted(loadData)
               </template>
 
               <div class="ml-auto flex items-center gap-3">
-                <span v-if="club.importedCount > 0" class="text-xs text-text-secondary">已并入 {{ club.importedCount }} 名成员</span>
+                <span v-if="club.importedCount > 0" class="text-xs text-text-secondary">曾导入 {{ club.importedCount }} 名成员（历史记录，与当前成员数口径不同）{{ club.importedAt ? `· ${club.importedAt.slice(0, 10)} 导入` : '' }}</span>
                 <button v-if="club.syncEvents.length > 0" class="text-xs text-text-secondary hover:text-primary" title="查看同步记录">
                   <span class="flex items-center gap-1"><Info :size="14" /> {{ club.syncEvents.length }} 条</span>
                 </button>

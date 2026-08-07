@@ -39,13 +39,13 @@ export default defineConfig({
         'src/router/index.ts',
         'src/components/ui/**',
       ],
-      // 基线防倒退门槛（2026-08-07 实测 lines 56.1/stmts 52.4/funcs 53.5/branches 44.5）。
+      // 基线防倒退门槛（2026-08-07 实测 lines 73.7/stmts 68.5/funcs 76.9/branches 60.4）。
       // CI 已改为 test:coverage，此门槛在 PR 上强制拦截。
       thresholds: {
-        statements: 48,
-        functions: 49,
-        branches: 40,
-        lines: 51,
+        statements: 64,
+        functions: 72,
+        branches: 56,
+        lines: 69,
       },
     },
   },

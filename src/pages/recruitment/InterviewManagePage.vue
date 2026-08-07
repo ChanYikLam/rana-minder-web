@@ -244,8 +244,9 @@ async function loadInterviewers() {
     get<{ items: CandidateItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/candidates`),
   ])
   if (t.kind === 'completed') {
-    defaultReviewers.value = t.data.defaultReviewers
-    tasks.value = t.data.tasks
+    // 防御：后端缺省字段时回落空数组，避免模板 .map 崩溃
+    defaultReviewers.value = t.data.defaultReviewers ?? []
+    tasks.value = t.data.tasks ?? []
   }
   if (c.kind === 'completed') candidates.value = c.data.items
 }
