@@ -116,6 +116,7 @@ describe('validateJointForm 表单校验', () => {
   const baseFile = { name: 'a.pdf', size: 1, mimeType: 'application/pdf', uploadedAt: '', checkedAt: null as string | null, downloadUrl: null as string | null }
   const checking = [{ ...baseFile, id: 'x', status: 'checking' as const }]
   const rejected = [{ ...baseFile, id: 'y', status: 'rejected' as const }]
+  const deleted = [{ ...baseFile, id: 'd', status: 'deleted' as const }]
   const approved = [{ ...baseFile, id: 'z', status: 'approved' as const }]
 
   it('必填缺失与文件检查中/失败分别报错', () => {
@@ -128,10 +129,30 @@ describe('validateJointForm 表单校验', () => {
     })
   })
 
+  it('deleted 文件视为需重新处理', () => {
+    expect(validateJointForm(fields, { f1: 'x', f2: deleted })).toEqual({
+      f2: '文件已移除，请重新上传',
+    })
+  })
+
   it('必填 file 字段以附件数组非空为准', () => {
     const fileRequired = [{ id: 'f2', type: 'file', label: '简历', required: true }]
     expect(validateJointForm(fileRequired, {})).toEqual({ f2: '简历为必填项' })
     expect(validateJointForm(fileRequired, { f2: approved })).toEqual({})
+  })
+
+  it('必填缺失优先且不叠加附件错误，同一轮多字段错误全部报出', () => {
+    expect(validateJointForm([{ id: 'f2', type: 'file', label: '简历', required: true }], { f2: [] })).toEqual({ f2: '简历为必填项' })
+    const two = [
+      { id: 'f1', type: 'text', label: '姓名', required: true },
+      { id: 'f3', type: 'text', label: '学号', required: true },
+    ]
+    expect(validateJointForm(two, {})).toEqual({ f1: '姓名为必填项', f3: '学号为必填项' })
+  })
+
+  it('image 字段同样受附件状态拦截', () => {
+    const image = [{ id: 'f4', type: 'image', label: '证件照', required: false }]
+    expect(validateJointForm(image, { f4: checking })).toEqual({ f4: '文件安全检查中，请稍候再提交' })
   })
 
   it('通过时无错误', () => {

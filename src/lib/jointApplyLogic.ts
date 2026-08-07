@@ -95,18 +95,19 @@ export function movePreference(preferences: JointDeptPref[], index: number, dire
   return next
 }
 
-/** 附件状态拦截：检查中/上传中不可提交，被拒绝或隔离需重新处理 */
+/** 附件状态拦截：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
 function fileBlockingError(value: unknown): string | null {
   if (!Array.isArray(value)) return null
   for (const f of value as FileMeta[]) {
     if (f.status === 'checking' || f.status === 'uploading') return '文件安全检查中，请稍候再提交'
     if (f.status === 'rejected') return '文件上传失败，请重新上传'
     if (f.status === 'quarantined') return '附件疑似恶意内容已隔离，请联系管理员处理'
+    if (f.status === 'deleted') return '文件已移除，请重新上传'
   }
   return null
 }
 
-/** 表单校验：必填缺失（按字段类型取值）、文件检查中/被拒绝/被隔离 */
+/** 表单校验：必填缺失（按字段类型取值）、文件检查中/被拒绝/被隔离/被删除；同字段首个错误优先 */
 export function validateJointForm(
   fields: JointFormField[],
   formData: Record<string, unknown>,
@@ -118,9 +119,13 @@ export function validateJointForm(
       const filled = field.type === 'file' || field.type === 'image'
         ? Array.isArray(value) && value.length > 0
         : typeof value === 'string' && value.trim() !== ''
-      if (!filled) errors[field.id] = `${field.label}为必填项`
+      if (!filled) {
+        // 必填缺失直接收口该字段，避免后续附件错误覆盖必填错误
+        errors[field.id] = `${field.label}为必填项`
+        continue
+      }
     }
-    if (field.type === 'file') {
+    if ((field.type === 'file' || field.type === 'image') && errors[field.id] === undefined) {
       const msg = fileBlockingError(value)
       if (msg) errors[field.id] = msg
     }

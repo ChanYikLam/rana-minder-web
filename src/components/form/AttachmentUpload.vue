@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted } from 'vue'
 import { CheckCircle2, LoaderCircle, ShieldAlert } from '@lucide/vue'
+import { post } from '@/services/client'
 import type { FileMeta, FileStatus } from '@/types/domain/form'
 
 const CHECK_DELAY_MS = 1200
@@ -9,7 +10,7 @@ const props = withDefaults(defineProps<{
   modelValue?: FileMeta[]
   accept?: string
   hint?: string
-  /** mock 安全检查：模拟服务端扫描完成后自动转为 approved（默认开启） */
+  /** mock 安全检查：附件经真实上传接口取得 fileId 后，模拟服务端扫描完成自动转为 approved（默认开启）；关闭时仅置为已上传待检查 */
   autoApprove?: boolean
 }>(), { autoApprove: true })
 const emit = defineEmits<{
@@ -35,6 +36,8 @@ const files = computed(() => props.modelValue ?? [])
 
 const timers = new Set<ReturnType<typeof setTimeout>>()
 
+let localSeq = 0
+
 onUnmounted(() => {
   for (const t of timers) clearTimeout(t)
   timers.clear()
@@ -48,14 +51,42 @@ function scheduleAutoApprove(nextFiles: FileMeta[]) {
   const timer = setTimeout(() => {
     timers.delete(timer)
     const approvedIds = new Set(target.map((f) => f.id))
-    const updated = files.value.map((f) =>
-      approvedIds.has(f.id) && f.status === 'checking'
-        ? { ...f, status: 'approved' as const, checkedAt: new Date().toISOString(), downloadUrl: `/api/files/${f.id}` }
-        : f,
-    )
-    emit('update:modelValue', updated)
+    let changed = false
+    // 仅批准"定时器触发时仍存在且仍处于 checking"的文件：已移除/已变更的条目不会被复活
+    const updated = files.value.map((f) => {
+      if (!approvedIds.has(f.id) || f.status !== 'checking') return f
+      changed = true
+      return { ...f, status: 'approved' as const, checkedAt: new Date().toISOString(), downloadUrl: `/api/files/${f.id}` }
+    })
+    if (changed) emit('update:modelValue', updated)
   }, CHECK_DELAY_MS)
   timers.add(timer)
+}
+
+/** 经真实上传接口换取 fileId（file- 前缀，可被 /api/files/:fileId 正常访问）；条目若已被移除则静默放弃 */
+async function resolveUpload(tempId: string, file: File) {
+  const result = await post<{ fileId: string; uploadedAt?: string }>('/api/files/upload', {
+    input: { purpose: 'form-attachment', name: file.name },
+  })
+  const current = files.value
+  const idx = current.findIndex((f) => f.id === tempId)
+  if (idx < 0) return
+  const updated = [...current]
+  if (result.kind === 'completed') {
+    const status: FileStatus = props.autoApprove === false ? 'uploaded' : 'checking'
+    const real = {
+      ...updated[idx],
+      id: result.data.fileId,
+      status,
+      uploadedAt: result.data.uploadedAt || updated[idx].uploadedAt,
+    }
+    updated[idx] = real
+    emit('update:modelValue', updated)
+    if (status === 'checking') scheduleAutoApprove([real])
+  } else {
+    updated[idx] = { ...updated[idx], status: 'rejected' as const }
+    emit('update:modelValue', updated)
+  }
 }
 
 function statusPreview(status: FileStatus): { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' } {
@@ -78,22 +109,25 @@ function formatSize(bytes: number): string {
 function onSelect(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files) return
+  const now = new Date().toISOString()
+  const base = { uploadedAt: now, checkedAt: null as string | null, downloadUrl: null as string | null }
   const nextFiles: FileMeta[] = [...files.value]
+  const pending: { tempId: string; file: File }[] = []
   Array.from(input.files).forEach((f) => {
-    const now = new Date().toISOString()
-    const base = { uploadedAt: now, checkedAt: null as string | null, downloadUrl: null as string | null }
     if (!allowedTypes.value.includes(f.type)) {
-      nextFiles.push({ ...base, id: `rejected-type-${Date.now()}`, name: f.name, size: f.size, mimeType: f.type, status: 'rejected' })
+      nextFiles.push({ ...base, id: `rejected-type-${Date.now()}-${localSeq++}`, name: f.name, size: f.size, mimeType: f.type, status: 'rejected' })
       return
     }
     if (f.size > MAX_SIZE_BYTES) {
-      nextFiles.push({ ...base, id: `rejected-size-${Date.now()}`, name: f.name, size: f.size, mimeType: f.type, status: 'rejected' })
+      nextFiles.push({ ...base, id: `rejected-size-${Date.now()}-${localSeq++}`, name: f.name, size: f.size, mimeType: f.type, status: 'rejected' })
       return
     }
-    nextFiles.push({ ...base, id: `mock-file-${Date.now()}`, name: f.name, size: f.size, mimeType: f.type, status: 'checking' })
+    const tempId = `pending-${Date.now()}-${localSeq++}`
+    nextFiles.push({ ...base, id: tempId, name: f.name, size: f.size, mimeType: f.type, status: 'uploading' })
+    pending.push({ tempId, file: f })
   })
   emit('update:modelValue', nextFiles)
-  scheduleAutoApprove(nextFiles)
+  for (const p of pending) void resolveUpload(p.tempId, p.file)
   input.value = ''
 }
 </script>

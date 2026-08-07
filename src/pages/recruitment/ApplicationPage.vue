@@ -46,7 +46,8 @@ function restoredFileMeta(value: unknown): FileMeta[] {
     return value.map((v): FileMeta => (typeof v === 'object' && v !== null ? (v as FileMeta) : restoredFileMeta(v)[0])).filter(Boolean)
   }
   if (typeof value !== 'string' || value === '') return []
-  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }]
+  // 历史 fileId 字符串回填：不宣称已通过安全检测（无真实元数据），以中性态 uploaded 展示
+  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'uploaded', uploadedAt: '', checkedAt: null, downloadUrl: null }]
 }
 
 async function loadData() {
@@ -242,13 +243,14 @@ function isFilled(value: unknown, field: FormField): boolean {
   return typeof value === 'string' && value.trim() !== ''
 }
 
-/** 附件状态拦截：检查中/上传中不可提交，被拒绝或隔离需重新处理 */
+/** 附件状态拦截：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
 function fileBlockingError(value: unknown): string | null {
   if (!Array.isArray(value)) return null
   for (const f of value as FileMeta[]) {
     if (f.status === 'checking' || f.status === 'uploading') return '文件安全检查中，请稍候再提交'
     if (f.status === 'rejected') return '文件上传失败，请重新上传'
     if (f.status === 'quarantined') return '附件疑似恶意内容已隔离，请联系管理员处理'
+    if (f.status === 'deleted') return '文件已移除，请重新上传'
   }
   return null
 }

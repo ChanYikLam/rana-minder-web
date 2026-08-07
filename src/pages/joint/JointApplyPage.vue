@@ -85,7 +85,8 @@ function restoredFileMeta(value: unknown): FileMeta[] {
     return value.map((v): FileMeta => (typeof v === 'object' && v !== null ? (v as FileMeta) : restoredFileMeta(v)[0])).filter(Boolean)
   }
   if (typeof value !== 'string' || value === '') return []
-  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }]
+  // 历史 fileId 字符串回填：不宣称已通过安全检测（无真实元数据），以中性态 uploaded 展示
+  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'uploaded', uploadedAt: '', checkedAt: null, downloadUrl: null }]
 }
 
 /** validateJointForm 返回单错误串，DynamicForm 的 fieldErrors 需要 string[] */
