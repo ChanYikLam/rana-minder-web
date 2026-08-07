@@ -27,17 +27,9 @@ vi.mock('@/services/download', () => ({
 
 import { toast } from 'vue-sonner'
 
-const commonStubs = {
-  PageStateBoundary: { template: '<div><slot /></div>' },
-  Card: { template: '<div><slot /></div>' },
-  EmptyState: { template: '<div><slot />{{ title }}</div>', props: ['type', 'title'] },
-  PermissionGuard: { template: '<div><slot /></div>' },
-  StateTag: { template: '<span />' },
-  HighRiskConfirm: {
-    props: ['open', 'confirmLabel', 'executing', 'errorMessage'],
-    template: '<div class="hrc" v-if="open"><slot />{{ errorMessage }}<button class="hrc-confirm" :disabled="executing" @click="$emit(\'confirm\')">{{ confirmLabel || \'确认\' }}</button></div>',
-  },
-}
+import { pageStubs } from '@/test-utils/pageStubs'
+
+const commonStubs = pageStubs
 
 const generatingTask = {
   id: 'exp-001',

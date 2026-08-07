@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runNavigationGuard, type GuardSession, type GuardTarget, type GuardWorkspace } from './guard'
+import { resolveLoginTarget } from '@/pages/auth/loginTarget'
 
 function makeSession(overrides: Partial<GuardSession> = {}): GuardSession {
   return {
@@ -161,6 +162,58 @@ describe('runNavigationGuard 根路径落点', () => {
 
     expect(decision).toEqual({ path: '/org/club-002/dashboard' })
     expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ workspace: { clubId: 'club-002' } }))
+  })
+
+  it('store 上下文命中但落点兜底 /me：hasPermission 走 workspace 版，决策回退 P-IDN-03', async () => {
+    const session = makeSession({
+      isAuthenticated: true,
+      user: { id: 'u1' },
+      workspace: { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' },
+      // 会话级权限不含看板权限；若误用 session.hasPermission 则无法解析出 org 落点
+      hasPermission: () => false,
+    })
+    const workspacePermission = vi.fn((p: string) => p === 'club:dashboard:view')
+    const workspace = makeWorkspace({
+      hasWorkspace: true,
+      currentUserId: 'u1',
+      currentClubId: 'club-002',
+      hasPermission: workspacePermission,
+    })
+    // workspace 看板权限命中 → 真实 resolveLoginTarget 返回 /org/club-002/dashboard
+    const decision = await runNavigationGuard(
+      makeTarget({ path: '/', fullPath: '/', name: 'P-GEN-00-root' }),
+      session,
+      workspace,
+      resolveLoginTarget,
+    )
+
+    expect(decision).toEqual({ path: '/org/club-002/dashboard' })
+    // hasPermission 确实使用 workspace 版（store 上下文优先），而非 session 版
+    expect(workspacePermission).toHaveBeenCalledWith('club:dashboard:view')
+  })
+
+  it('store 上下文命中但无看板权限：resolveLoginTarget 兜底 /me，决策回退 P-IDN-03', async () => {
+    const session = makeSession({
+      isAuthenticated: true,
+      user: { id: 'u1' },
+      workspace: { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' },
+      hasPermission: () => false,
+    })
+    const workspace = makeWorkspace({
+      hasWorkspace: true,
+      currentUserId: 'u1',
+      currentClubId: 'club-002',
+      hasPermission: () => false,
+    })
+
+    const decision = await runNavigationGuard(
+      makeTarget({ path: '/', fullPath: '/', name: 'P-GEN-00-root' }),
+      session,
+      workspace,
+      resolveLoginTarget,
+    )
+
+    expect(decision).toEqual({ name: 'P-IDN-03' })
   })
 })
 
