@@ -42,6 +42,9 @@ const groupResults = ref<SearchResult[]>([])
 const rawResults = ref<GroupSearchResult[]>([])
 const selectedGroup = ref<GroupSearchResult | null>(null)
 const selectedLeaderId = ref<string | null>(null)
+const selectedDeptGroups = ref<string[]>([])
+const selectedRoleGroups = ref<string[]>([])
+const selectedLeaderRoleGroup = ref<string>('')
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
 const groupDetailSeq = ref(0)
 const wizardError = ref('')
@@ -76,6 +79,9 @@ async function echoWizardSelection() {
   groupDetail.value = d
   const savedLeader = club.wizard?.leaderGroupId
   selectedLeaderId.value = savedLeader && d.leaderGroups.some((g) => g.id === savedLeader) ? savedLeader : null
+  selectedDeptGroups.value = club.wizard?.deptGroups ?? []
+  selectedRoleGroups.value = club.wizard?.roleGroups ?? []
+  selectedLeaderRoleGroup.value = club.wizard?.leaderRoleGroup ?? ''
   wizardError.value = ''
 }
 
@@ -119,9 +125,12 @@ async function onGroupSelect(result: SearchResult) {
   const raw = rawResults.value.find((g) => g.id === result.id)
   selectedGroup.value = raw ?? null
   selectedLeaderId.value = null
+  selectedDeptGroups.value = []
+  selectedRoleGroups.value = []
+  selectedLeaderRoleGroup.value = ''
   groupDetail.value = null
   wizardError.value = ''
-  await saveWizardStep({ step: 1, selectedGroupId: result.id, leaderGroupId: null })
+  await saveWizardStep({ step: 1, selectedGroupId: result.id, leaderGroupId: null, deptGroups: [], roleGroups: [], leaderRoleGroup: '' })
   const seq = ++groupDetailSeq.value
   const detail = await get<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] }>(`/admin/groups/${result.id}`)
   if (seq !== groupDetailSeq.value) return
@@ -140,13 +149,16 @@ const wizardBindingWarning = computed<{ ok: boolean; message: string }>(() => {
   return { ok: true, message: '层级、用途唯一与重复绑定校验通过' }
 })
 
-async function saveWizardStep(patch: { step: number; selectedGroupId?: string | null; leaderGroupId?: string | null }) {
+async function saveWizardStep(patch: { step: number; selectedGroupId?: string | null; leaderGroupId?: string | null; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string }) {
   if (!wizardClub.value) return
   const res = await post(`/admin/clubs/wizard/save-step`, {
     clubId: wizardClub.value.clubId,
     step: patch.step,
     selectedGroupId: patch.selectedGroupId !== undefined ? patch.selectedGroupId : selectedGroup.value?.id ?? null,
     leaderGroupId: patch.leaderGroupId !== undefined ? patch.leaderGroupId : selectedLeaderId.value,
+    deptGroups: patch.deptGroups !== undefined ? patch.deptGroups : selectedDeptGroups.value,
+    roleGroups: patch.roleGroups !== undefined ? patch.roleGroups : selectedRoleGroups.value,
+    leaderRoleGroup: patch.leaderRoleGroup !== undefined ? patch.leaderRoleGroup : selectedLeaderRoleGroup.value,
   })
   if (res.kind === 'completed') {
     await loadData()
@@ -163,7 +175,8 @@ async function selectLeader(groupId: string) {
     return
   }
   selectedLeaderId.value = groupId
-  await saveWizardStep({ step: 2, leaderGroupId: groupId })
+  selectedLeaderRoleGroup.value = groupId
+  await saveWizardStep({ step: 2, leaderGroupId: groupId, leaderRoleGroup: groupId })
 }
 
 const importingBusy = ref(false)

@@ -21,7 +21,7 @@ const saving = ref(false)
 const savingPrefs = ref(false)
 const refilling = ref(false)
 
-// 页面 UI 仅展示 4 类常用偏好；fullPreferences 持有全部 8 类（含页面未展示的结论/成员/换届/纠错）
+// 页面 UI 仅展示 4 类常用偏好；fullPreferences 持有全部模板类型（含页面未展示的结论/成员/换届/纠错/标签改判/整体未录取）
 const preferences = ref({
   applicationStatus: true,
   interviewNotify: true,

@@ -15,6 +15,9 @@ export const MEMBER_BY_USER: Record<string, Record<string, string>> = {
   'user-interviewer-001': { 'club-001': 'mem-002' },
   'user-member-001': { 'club-001': 'mem-001' },
   'user-deptleader-001': { 'club-001': 'mem-006' },
+  // 新身份（P3-1）：资料不完整/邮箱未验证用户同样按「用户 × 社团」登记，避免 currentClubId 已设但成员 id 解析为 null
+  'user-incomplete-001': { 'club-001': 'mem-007' },
+  'user-unverified-001': { 'club-001': 'mem-008' },
 }
 
 /** 按「用户 × 社团」解析成员 id；该用户在目标社团无成员身份（或数据未种子）时返回 null */
@@ -25,24 +28,48 @@ export function resolveMemberId(userId: string, clubId: string): string | null {
 /** 成员级异常 id 单调序列：同毫秒批量触发时保证唯一（MemberProfilePage 以 an.id 作 v-for key） */
 let anomalySeq = 0
 
+/** 仅供测试重置异常序号（reset.ts 调用，保证跨用例触发号不膨胀） */
+export function resetAnomalySeq(): void {
+  anomalySeq = 0
+}
+
+/** 对账去重窗口（ms）：窗口内同成员同类异常不重复登记（信息未变不产生新记录） */
+export const RECONCILE_DEDUP_MS = 30 * 24 * 3600 * 1000
+
+/** 异常上限：单成员最多保留的异常记录（超出丢弃最旧，防止对账反复触发导致成员详情页无限膨胀） */
+const ANOMALY_MAX_KEEP = 20
+
 /**
  * 成员级外部变更触发点（P2-015：与社团级 triggerGroupLost 对称）：
  * 模拟对账检测到成员在统一身份认证侧的信息变更，向该成员登记数据异常
  * （成员详情页「数据异常」块呈现，可经事实纠错处理）；不改成员在职状态，仅留痕。
+ * 幂等去重：同一成员在去重窗口（RECONCILE_DEDUP_MS）内已存在同类未处置异常时不再重复登记
+ * （对账按周期/事件触发，信息未变不产生新记录，避免数据污染）。
  */
 export function triggerMemberExternalChange(
   clubId: string,
   memberId: string,
   kind: 'casdoor_mismatch' | 'external_change' = 'external_change',
-): { ok: boolean; error?: string; data?: MockMember } {
+): { ok: boolean; error?: string; data?: MockMember; registered?: boolean; anomaly?: MockAnomaly } {
   const member = members.find((m) => m.clubId === clubId && m.id === memberId)
   if (!member) return { ok: false, error: '未找到该成员' }
   if (member.status !== 'active') return { ok: false, error: '仅活跃成员可触发外部变更检测' }
+
+  // 幂等去重：同成员同类异常在窗口内已登记且未处置 → 视为重复对账，不再新增
+  const now = Date.now()
+  const duplicate = member.anomalies.some(
+    (a) => a.kind === kind && now - new Date(a.createdAt).getTime() < RECONCILE_DEDUP_MS,
+  )
+  if (duplicate) return { ok: true, registered: false, data: member }
+
   const message = kind === 'casdoor_mismatch'
     ? '对账检测到成员在统一身份认证侧信息不一致（如部门/学籍），已登记待人工核验'
     : '对账检测到成员外部信息变更（如学籍/姓名/部门调整），已登记待人工确认'
-  member.anomalies.unshift({ id: 'anm-' + Date.now() + '-' + anomalySeq++, kind, message, createdAt: new Date().toISOString() })
-  return { ok: true, data: member }
+  const anomaly: MockAnomaly = { id: 'anm-' + now + '-' + anomalySeq++, kind, message, createdAt: new Date().toISOString() }
+  member.anomalies.unshift(anomaly)
+  // 超上限截断最旧记录（保持成员详情页数据异常块长度可控）
+  if (member.anomalies.length > ANOMALY_MAX_KEEP) member.anomalies.length = ANOMALY_MAX_KEEP
+  return { ok: true, registered: true, anomaly, data: member }
 }
 
 export type MockRoleKey = 'club_leader' | 'hr' | 'department_leader' | 'interviewer' | 'member'
@@ -337,6 +364,24 @@ export const members: MockMember[] = [
     departmentHistory: [
       { id: 'dhis-007', action: 'join', departmentName: '技术部', at: '2022-09-01T10:00:00+08:00' },
     ],
+    anomalies: [],
+  },
+  {
+    id: 'mem-007', clubId: 'club-001', studentId: '20240201',
+    name: '赵雨萌', email: 'incomplete@example.edu.cn', phone: '13800000021',
+    status: 'active', joinedAt: '2025-09-01T00:00:00+08:00', exitedAt: null,
+    positions: [],
+    tenures: [],
+    departmentHistory: [],
+    anomalies: [],
+  },
+  {
+    id: 'mem-008', clubId: 'club-001', studentId: '20240202',
+    name: '孙雅静', email: 'unverified@example.edu.cn', phone: '13800000022',
+    status: 'active', joinedAt: '2025-09-01T00:00:00+08:00', exitedAt: null,
+    positions: [],
+    tenures: [],
+    departmentHistory: [],
     anomalies: [],
   },
   {

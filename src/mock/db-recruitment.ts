@@ -72,6 +72,14 @@ export type DeptPathStatus = 'pending' | 'evaluating' | 'hold' | 'decided' | 'wa
 export type InterviewStatus = 'pending_selection' | 'scheduled' | 'leave' | 'late' | 'absent' | 'in_progress' | 'completed' | 'cancelled' | 'invalidated'
 export type RecInvitationStatus = 'pending_acceptance' | 'accepted' | 'rejected' | 'withdrawn' | 'expired'
 
+/** 标签变更历史记录（REC-039：谁、何时、何种操作） */
+export interface LabelHistoryEntry {
+  actorName: string
+  actorId: string
+  action: 'set' | 'clear' | 'override'
+  timestamp: string
+}
+
 export interface RecDeptPath {
   departmentId: string
   departmentName: string
@@ -80,9 +88,12 @@ export interface RecDeptPath {
   status: DeptPathStatus
   decided: 'admit' | 'not_admit' | null
   labelSetBy: string | null
+  /** 标签设置者的可通知用户 id（REC-039/改判通知用；显式存储避免按姓名反查同名歧义） */
+  labelSetByUserId: string | null
   waitlist: boolean
   holdDeadline: string | null
   publishedAt: string | null
+  labelHistory: LabelHistoryEntry[]
   version: number
 }
 
@@ -106,6 +117,13 @@ export interface RecApplication {
   adjustmentReason: string | null
   notQualifiedReason: string | null
   identityAnomalyAt: string | null
+  /** 资格快照（提交时固化，用于后续审计与 REC-035 回放） */
+  eligibilitySnapshot: {
+    answers: Record<string, unknown>
+    preferences: { departmentId: string; departmentName: string; order: number }[]
+    submittedAt: string
+    formVersion: number
+  } | null
   version: number
 }
 
@@ -459,10 +477,10 @@ export const recruitmentApplications: RecApplication[] = [
     ],
     allowAdjustment: true, formVersion: 1, answers: {},
     paths: {
-      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
-      'dept-003': { departmentId: 'dept-003', departmentName: '设计部', order: 2, source: 'volunteer', status: 'pending', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
+      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
+      'dept-003': { departmentId: 'dept-003', departmentName: '设计部', order: 2, source: 'volunteer', status: 'pending', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
     },
-    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
   },
   {
@@ -472,9 +490,9 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
     paths: {
-      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
+      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
     },
-    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
   },
   {
@@ -484,9 +502,9 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-001', departmentName: '技术部' }],
     allowAdjustment: false, formVersion: 1, answers: {},
     paths: {
-      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'waitlist', decided: null, labelSetBy: '李思颖', waitlist: true, holdDeadline: null, publishedAt: null, version: 2 },
+      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'waitlist', decided: null, labelSetBy: '李思颖', labelSetByUserId: 'user-hr-001', waitlist: true, holdDeadline: null, publishedAt: null, labelHistory: [], version: 2 },
     },
-    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
   },
   {
@@ -496,9 +514,9 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: false, formVersion: 1, answers: {},
     paths: {
-      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'published', decided: 'not_admit', labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: daysFromNow(-28), version: 2 },
+      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'published', decided: 'not_admit', labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: daysFromNow(-28), labelHistory: [], version: 2 },
     },
-    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
   },
   {
@@ -508,9 +526,9 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
     paths: {
-      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 },
+      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
     },
-    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null,
+    submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
   },
 ]
@@ -1200,7 +1218,7 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
       id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
       status: 'draft', preferences: [], allowAdjustment: a.allowAdjustmentDefault, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
-      recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
+      recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null, version: 1,
     }
     if (!a.applicantIds.includes(app.id)) a.applicantIds.push(app.id)
     recruitmentApplications.push(app)
@@ -1250,6 +1268,8 @@ export function withdrawApplicationSubmission(activityId: string, applicantId: s
   app.status = 'draft'
   app.submittedAt = null
   app.withdrawnAt = null
+  // 撤销提交回到草稿：资格快照须同步清空，避免草稿态残留已失效的「提交时快照」
+  app.eligibilitySnapshot = null
   app.version += 1
   return ok(app)
 }
@@ -1283,7 +1303,7 @@ export function submitApplication(activityId: string, applicantId: string, input
       id: 'app-' + Date.now(), activityId, clubId: a.clubId, applicantId, applicantName: applicantNameOf(applicantId), studentId: applicantStudentIdOf(applicantId),
       status: 'draft', preferences: [], allowAdjustment: input.allowAdjustment ?? a.allowAdjustmentDefault, formVersion: a.formVersion,
       answers: input.answers || {}, paths: {}, submittedAt: null, withdrawnAt: null,
-      recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, version: 1,
+      recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null, version: 1,
     }
     recruitmentApplications.push(app)
     a.applicantIds.push(app.id)
@@ -1314,9 +1334,17 @@ export function submitApplication(activityId: string, applicantId: string, input
   app.adjustmentReason = null
   app.notQualifiedReason = null
   app.version += 1
+  // 保存资格快照（REC-035：提交时固化，审计/回放使用；深拷贝防后续变更污染）
+  // 注意：使用 structuredClone 而非浅展开——answers 可能含嵌套对象/数组，浅拷贝会共享引用
+  app.eligibilitySnapshot = {
+    answers: structuredClone(input.answers || {}),
+    preferences: structuredClone(app.preferences),
+    submittedAt: app.submittedAt!,
+    formVersion: a.formVersion,
+  }
   for (const p of app.preferences) {
     if (!app.paths[p.departmentId]) {
-      app.paths[p.departmentId] = { departmentId: p.departmentId, departmentName: p.departmentName, order: p.order, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, version: 1 }
+      app.paths[p.departmentId] = { departmentId: p.departmentId, departmentName: p.departmentName, order: p.order, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 }
     }
   }
   return ok(app)
@@ -1410,9 +1438,8 @@ export function publishNotQualified(activityId: string, applicantId: string, rea
 
 // ================= REC 评价/路径/结论 =================
 
-export function setDeptLabel(activityId: string, applicantId: string, departmentId: string, label: boolean, actorId: string, actorName: string, actorRole: string, isDeptLeader: boolean, actorUserId?: string | null): { ok: boolean; error?: string } {
+export function setDeptLabel(activityId: string, applicantId: string, departmentId: string, label: boolean, actorId: string, actorName: string, actorRole: string, isDeptLeader: boolean, actorUserId?: string | null): { ok: boolean; error?: string; data?: { override: boolean; prevLabelBy: string | null; prevLabelByUserId: string | null; prevUserId: string | null } } {
   void actorRole
-  void actorId
   const app = findApplication(activityId, applicantId)
   if (!app) return err('申请不存在')
   const path = app.paths[departmentId]
@@ -1421,22 +1448,56 @@ export function setDeptLabel(activityId: string, applicantId: string, department
   const vol = app.preferences.find((p) => p.departmentId === departmentId)
   if (isDeptLeader && !vol) return err('部门负责人仅能为正式报名本部门的申请人设置标签')
   if (isDeptLeader && actorUserId && actorUserId === app.applicantId) return err('不能设置自己的标签')
+  // 记录标签历史（REC-039）
+  if (!path.labelHistory) path.labelHistory = []
+  // 检测是否为改判：设置标签且已有其他设置者
+  const override = !!label && !!path.labelSetBy && path.labelSetBy !== actorName
+  // 原设置者直接取已固化的 userId（REC-039 存 labelSetByUserId），避免按姓名反查同名歧义
+  const prevLabelBy = path.labelSetBy
+  const prevLabelByUserId = path.labelSetByUserId
+  const prevUserId = prevLabelByUserId
   if (label) {
     path.status = 'decided'
     path.decided = 'admit'
     path.labelSetBy = actorName
+    // 显式固化设置者 userId（可与姓名一致地用于后续改判通知；无则回退 null，不再按姓名猜测）
+    path.labelSetByUserId = actorUserId ?? null
+    path.labelHistory.push({ actorName, actorId, action: override ? 'override' : 'set', timestamp: now() })
   } else {
     path.decided = null
     path.labelSetBy = null
+    path.labelSetByUserId = null
+    path.labelHistory.push({ actorName, actorId, action: 'clear', timestamp: now() })
     if (path.waitlist) path.status = 'waitlist'
     else path.status = 'evaluating'
   }
   path.version += 1
   app.version += 1
+  return ok({ override, prevLabelBy, prevLabelByUserId, prevUserId })
+}
+
+/** 调剂路径创建（REC-036：管理员为申请人添加 source='adjustment' 的部门路径） */
+export function addAdjustmentPath(activityId: string, applicantId: string, departmentId: string, departmentName: string, reason: string): { ok: boolean; error?: string } {
+  const app = findApplication(activityId, applicantId)
+  if (!app) return err('申请不存在')
+  const a = findAnyActivity(activityId)
+  if (!a) return err('活动不存在')
+  // 仅「已提交」的申请可被调剂（草稿/已退出/资格失效/已录取等均不可）
+  if (app.status !== 'submitted') return err('仅已提交的申请可创建调剂路径')
+  if (app.paths[departmentId]) return err('该部门路径已存在')
+  if (!a.departments.some((d) => d.id === departmentId)) return err('部门不在本次招新范围内')
+  if (!reason.trim()) return err('必须填写调剂原因')
+  const maxOrder = Math.max(0, ...Object.values(app.paths).map((p) => p.order))
+  app.paths[departmentId] = {
+    departmentId, departmentName, order: maxOrder + 1, source: 'adjustment',
+    status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false,
+    holdDeadline: null, publishedAt: null, labelHistory: [], version: 1,
+  }
+  app.version += 1
   return ok()
 }
 
-export function decidePath(activityId: string, applicantId: string, departmentId: string, decision: 'admit' | 'not_admit' | 'hold', holdDeadline?: string): { ok: boolean; error?: string } {
+export function decidePath(activityId: string, applicantId: string, departmentId: string, decision: 'admit' | 'not_admit' | 'hold', holdDeadline?: string): { ok: boolean; error?: string; overallNotAdmitted?: boolean } {
   const app = findApplication(activityId, applicantId)
   if (!app) return err('申请不存在')
   const path = app.paths[departmentId]
@@ -1456,6 +1517,14 @@ export function decidePath(activityId: string, applicantId: string, departmentId
   }
   path.version += 1
   app.version += 1
+  // 检测整体未录取（所有有结论的路径均为 not_admit，且无待定/暂缓/候补/录取）
+  const allPaths = Object.values(app.paths)
+  const hasNotAdmit = allPaths.some((p) => p.decided === 'not_admit')
+  if (hasNotAdmit) {
+    const allDecidedNotAdmit = allPaths.every((p) => p.decided === 'not_admit' || p.decided === null)
+    const hasAnyAdmitOrPending = allPaths.some((p) => p.decided === 'admit' || p.status === 'evaluating' || p.status === 'hold' || p.status === 'pending' || p.status === 'waitlist')
+    return { ok: true, overallNotAdmitted: allDecidedNotAdmit && hasNotAdmit && !hasAnyAdmitOrPending }
+  }
   return ok()
 }
 

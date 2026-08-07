@@ -32,6 +32,10 @@ const typeLabel = computed(() => {
     system: '系统',
     member: '成员',
     transition: '换届',
+    conclusion: '结论',
+    correction: '纠错',
+    label_override: '标签改判',
+    overall_not_admitted: '整体未录取',
   }
   return map[props.notification.type] || props.notification.type
 })
