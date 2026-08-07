@@ -99,7 +99,9 @@ async function handleTest() {
   if (result.kind === 'completed') {
     testResult.value = '测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收'
   } else {
-    testError.value = result.kind === 'rejected' && result.error?.message ? result.error.message : '测试邮件发送失败，请稍后重试'
+    // 保留通用引导文案，同时透出服务端具体原因（如连接超时），便于定位
+    const detail = result.kind === 'rejected' && result.error?.message ? `（${result.error.message}）` : ''
+    testError.value = `测试邮件发送失败，请稍后重试${detail}`
   }
 }
 
