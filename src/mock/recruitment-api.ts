@@ -10,7 +10,7 @@ import type { MockMethod } from './types'
 // Node HTTP types via any (mock layer, no @types/node in remote baseline)
 type RawReq = any
 type RawRes = any
-import { resolveMockUser, getPermissions, getWorkspace, USER_MEMBER_MAP, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
+import { resolveMockUser, getPermissions, getWorkspace, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
 import { pushNotifications, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
 import * as rdb from './db-recruitment'
 import * as db from './db'
@@ -205,11 +205,12 @@ function applicantIdOf(url: string): string | null {
   return actorApplicantId(resolveMockUser(url))
 }
 
-/** 当前操作者成员信息（用于评价人、确认人等署名） */
-function actorInfo(url: string): { memberId: string | null; name: string; role: string } {
+/** 当前操作者成员信息（用于评价人、确认人等署名）；
+ * memberId 按「用户 × 社团」解析（db.resolveMemberId），多社团用户在目标社团的成员 id 独立 */
+function actorInfo(url: string, clubId: string): { memberId: string | null; name: string; role: string } {
   const user = resolveMockUser(url)
   const ws = getWorkspace(user)
-  return { memberId: USER_MEMBER_MAP[user.id] || null, name: user.name, role: ws?.role || 'member' }
+  return { memberId: db.resolveMemberId(user.id, clubId), name: user.name, role: ws?.role || 'member' }
 }
 
 /** 根据社团查找具备面试权限的面试官 */
@@ -780,10 +781,10 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { label?: boolean }
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const member = me.memberId ? db.findMember(query.clubId, me.memberId) : undefined
       const isDeptLeader = !!member && member.positions.some((p) => p.status === 'active' && p.departmentId === query.departmentId && (p.title === '部长' || p.title === '负责人'))
-      const applicantUserId = Object.keys(USER_MEMBER_MAP).find((uid) => USER_MEMBER_MAP[uid] === me.memberId) || null
+      const applicantUserId = me.memberId ? Object.keys(db.MEMBER_BY_USER).find((uid) => db.MEMBER_BY_USER[uid][query.clubId] === me.memberId) || null : null
       return result(rdb.setDeptLabel(query.activityId, query.applicantId, query.departmentId, !!input.label, me.memberId || '', me.name, me.role, isDeptLeader, applicantUserId))
     },
   },
@@ -813,7 +814,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       return result(rdb.publishDepartmentResult(query.activityId, query.applicantId, query.departmentId, me.name))
     },
   },
@@ -854,7 +855,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!canManageRec(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { userId?: string; userName?: string; scope?: 'activity' | 'round'; roundId?: string }
       if (!input.userId || !input.userName) return businessError('必须指定面试官人选')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const r = rdb.assignInterviewerTask({
         clubId: query.clubId, activityId: query.activityId, kind: 'recruitment',
         scope: input.scope === 'round' ? 'round' : 'activity', roundId: input.roundId,
@@ -881,7 +882,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!task || task.clubId !== query.clubId || task.activityId !== query.activityId) {
         return businessError('任务不存在或不属于该社团')
       }
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       return result(rdb.revokeInterviewerTask(query.taskId, me.name))
     },
   },
@@ -1123,7 +1124,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const isManager = canManageRec(url, query.clubId)
       const ws = interviewerWorkspace(url, query.clubId, query.activityId)
       const act = rdb.findAnyActivity(query.activityId)
@@ -1178,7 +1179,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         ? rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
         : undefined
       if (!app) return notFound('申请人不存在')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const ws = interviewerWorkspace(url, query.clubId, query.activityId)
       if (!canManageRec(url, query.clubId)) {
         const roundId = roundOfApplicant(query.activityId, applicantId || '')
@@ -1209,7 +1210,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const apps = rdb.recruitmentApplications.filter(
         (a) =>
           a.activityId === query.activityId &&
@@ -1278,7 +1279,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!canManageRec(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { applicantId?: string; departmentId?: string; expireDays?: number }
       if (!input.applicantId || !input.departmentId) return businessError('必须指定申请人与录取部门')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const rinv = rdb.createRecInvitation(query.activityId, input.applicantId, input.departmentId, Number(input.expireDays) || 7, me.name)
       if (rinv.ok) {
         const uid = userIdOfApplicant(input.applicantId)
@@ -1763,7 +1764,7 @@ const jointHandlers: MockMethod[] = [
       if (!canManageJoint(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { userId?: string; userName?: string }
       if (!input.userId || !input.userName) return businessError('必须指定面试官人选')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const r = rdb.assignInterviewerTask({
         clubId: query.clubId, activityId: query.jointId, kind: 'joint', scope: 'activity',
         userId: input.userId, userName: input.userName,
@@ -1784,7 +1785,7 @@ const jointHandlers: MockMethod[] = [
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageJoint(url, query.clubId)) return forbidden()
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       return result(rdb.revokeInterviewerTask(query.taskId, me.name))
     },
   },
@@ -1964,7 +1965,7 @@ const jointHandlers: MockMethod[] = [
       if (!canManageJoint(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { conclusion: 'admit' | 'not_admit' }
       if (!['admit', 'not_admit'].includes(input.conclusion)) return businessError('不支持的结论')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       return result(rdb.setJointConclusion(query.jointId, query.applicantId, query._mock_club || query.clubId, input.conclusion, me.name, me.role))
     },
   },
@@ -1976,7 +1977,7 @@ const jointHandlers: MockMethod[] = [
       if (!canManageJoint(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { action: 'keep' | 'modify'; newConclusion?: 'admit' | 'not_admit' }
       if (!['keep', 'modify'].includes(input.action)) return businessError('不支持的复核动作')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const r = rdb.reviewJointConclusion(query.jointId, query.applicantId, query._mock_club || query.clubId, input.action, me.name, me.role, input.newConclusion)
       if (r.ok && input.action === 'modify') {
         // REC-018：改判需通知原结论设置者（站内信）
@@ -2010,7 +2011,7 @@ const jointHandlers: MockMethod[] = [
       if (JOINT_TERMINAL.has(rdb.findJoint(query.jointId)?.status || '')) return businessError('活动已结束，结论评价已锁定；如需修改请走复核或事实纠错')
       if (con.clubId !== actingClub) return businessError('只能提交或修改本社团对应的联合结论评价')
       if (con.status === 'accepted_locked' || con.status === 'archived') return businessError('结论已锁定，不可再评价')
-      const me = actorInfo(url)
+      const me = actorInfo(url, query.clubId)
       const extra = rdb.upsertJointReviewExtra(query.jointId, con.applicantId, actingClub, {
         rating: Number(input.rating) || 0,
         comment: input.comment || '',

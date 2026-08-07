@@ -5,7 +5,7 @@ import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
 import { DEMO_ROLES } from '@/mock/auth'
 import type { MockRole } from '@/mock/auth'
-import { resolveLoginTarget } from './loginTarget'
+import { resolveLoginTarget, parseSameOriginRedirect } from './loginTarget'
 import {
   ShieldCheck, Users, UserCog, Building2, ClipboardCheck, User, GraduationCap,
   LogIn, Compass,
@@ -31,23 +31,12 @@ const roleIcons: Record<MockRole['role'], typeof ShieldCheck> = {
 
 const mockRoles = DEMO_ROLES.map((r) => ({ ...r, icon: roleIcons[r.role] }))
 
-function getRequestedRedirect(): string | null {
-  const redirect = route.query.redirect
-  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return null
-
-  try {
-    const target = new URL(redirect, window.location.origin)
-    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : null
-  } catch {
-    return null
-  }
-}
-
 function resolveTargetAfterLogin(): string {
   return resolveLoginTarget({
     workspace: session.workspace,
     hasPermission: (permission) => session.hasPermission(permission),
-    requestedRedirect: getRequestedRedirect(),
+    requestedRedirect: parseSameOriginRedirect(route.query.redirect),
+    needsProfileGate: session.needsProfileGate,
   })
 }
 
@@ -64,7 +53,7 @@ async function handleLogin() {
   loginError.value = null
 
   try {
-    const result = await startLogin(getRequestedRedirect() ?? '/me', selectedRole.value)
+    const result = await startLogin(parseSameOriginRedirect(route.query.redirect) ?? '/me', selectedRole.value)
     if (result === 'redirected') return
     if (result === 'disabled') {
       loginError.value = '统一认证尚未配置，当前无法登录'

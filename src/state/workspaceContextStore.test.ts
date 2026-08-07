@@ -27,7 +27,7 @@ function seedUser(id: string) {
   } as User
 }
 
-function ctxResult(role: 'club_leader' | 'member') {
+function ctxResult(role: 'club_leader' | 'member', memberId: string | null = null) {
   return {
     kind: 'completed' as const,
     data: {
@@ -35,6 +35,7 @@ function ctxResult(role: 'club_leader' | 'member') {
       clubName: '计算机协会',
       role,
       permissions: role === 'club_leader' ? ['club:dashboard:view', 'club:member:manage'] : ['club:member:view-self'],
+      memberId,
     },
   }
 }
@@ -77,6 +78,42 @@ describe('workspaceContextStore 工作空间缓存（按用户身份）', () => 
     expect(store.currentRole).toBe('member')
     expect(store.currentPermissions).toEqual(['club:member:view-self'])
     expect(store.hasPermission('club:dashboard:view')).toBe(false)
+  })
+
+  it('会话未初始化（session.user 为 null）时不得命中缓存，强制重新拉取', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('member') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 会话被清空（未初始化），但缓存仍残留上一身份 → 不得命中缓存返回旧上下文
+    useSessionViewStore().user = null
+    const ok = await store.loadWorkspace('club-001')
+
+    expect(ok).toBe(true)
+    expect(mockedGetContext).toHaveBeenCalledTimes(2)
+  })
+
+  it('context 返回 memberId 时写入 currentMemberId（社团切换后自审身份按新社团解析）', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('club_leader', 'mem-101') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+
+    expect(store.currentMemberId).toBe('mem-101')
+  })
+
+  it('context 未返回 memberId 时 currentMemberId 为 null（不沿用上一社团成员 id）', async () => {
+    mockedGetContext.mockResolvedValue(ctxResult('member') as never)
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    await store.loadWorkspace('club-001')
+
+    expect(store.currentMemberId).toBeNull()
   })
 
   it('context 请求失败时清空工作空间并返回 false', async () => {
