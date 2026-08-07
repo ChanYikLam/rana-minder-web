@@ -37,6 +37,7 @@ export interface WizardDraft {
 export interface MockClubAccess {
   clubId: string
   clubName: string
+  description: string
   status: ClubAccessStatus
   groupId: string | null
   mappingVersion: number
@@ -112,35 +113,35 @@ function daysAgo(days: number): string {
 /** 接入注册表：club-001/002 已启用；club-004 待接入；club-003 停用中；club-005 同步异常（可演示修复/重绑） */
 export const clubAccesses: MockClubAccess[] = [
   {
-    clubId: 'club-001', clubName: '计算机协会', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
+    clubId: 'club-001', clubName: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001' },
     leaderGroupId: 'grp-lead-001', leaderName: '张明远', memberCount: 128,
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 128,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
-    clubId: 'club-002', clubName: '电子设计协会', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
+    clubId: 'club-002', clubName: '电子设计协会', description: '电子设计与嵌入式开发', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002' },
     leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', memberCount: 86,
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 86,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
-    clubId: 'club-003', clubName: '数学建模协会', status: 'suspended', groupId: 'grp-003', mappingVersion: 1,
+    clubId: 'club-003', clubName: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'suspended', groupId: 'grp-003', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-003', leaderGroupId: null },
     leaderGroupId: null, leaderName: null, memberCount: 64,
     createdAt: '2023-03-01T00:00:00+08:00', boundAt: '2023-03-10T10:00:00+08:00', importedCount: 64,
     syncEvents: [], freezeIntervals: [{ id: 'fri-001', reason: '常规停用', suspendedAt: daysAgo(9), recoveredAt: null }], readonly: true,
   },
   {
-    clubId: 'club-004', clubName: '摄影协会', status: 'wizard_pending', groupId: null, mappingVersion: 0,
+    clubId: 'club-004', clubName: '摄影协会', description: '摄影艺术与后期制作', status: 'wizard_pending', groupId: null, mappingVersion: 0,
     wizardStep: 0, wizard: { selectedGroupId: null, leaderGroupId: null },
     leaderGroupId: null, leaderName: null, memberCount: 0,
     createdAt: '2025-07-28T00:00:00+08:00', boundAt: null, importedCount: 0,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
-    clubId: 'club-005', clubName: '新媒体中心', status: 'sync_abnormal_ro', groupId: 'grp-005', mappingVersion: 2,
+    clubId: 'club-005', clubName: '新媒体中心', description: '校园新媒体运营与内容创作', status: 'sync_abnormal_ro', groupId: 'grp-005', mappingVersion: 2,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-005', leaderGroupId: null },
     leaderGroupId: null, leaderName: null, memberCount: 37,
     createdAt: '2024-09-01T00:00:00+08:00', boundAt: '2024-09-08T10:00:00+08:00', importedCount: 37,
@@ -264,8 +265,55 @@ export function getGroupDetail(groupId: string): {
   }
 }
 
+/** 创建新社团接入记录（向导提交后进入待审核，外部已做名称/Group 等校验） */
+export function createClub(input: { clubName: string; description: string; groupId: string; leaderGroupId: string }): { ok: boolean; error?: string; data?: ClubAccessItem } {
+  const name = input.clubName.trim()
+  if (!name) return { ok: false, error: '社团名称不能为空' }
+  if (clubAccesses.some((c) => c.clubName === name)) return { ok: false, error: '社团名称已存在' }
+  const group = findGroup(input.groupId)
+  if (!group) return { ok: false, error: '所选 Group 不存在' }
+  const binding = validateGroupForBinding(input.groupId, '')
+  if (!binding.ok) return { ok: false, error: binding.error }
+  const leaderGroup = findGroup(input.leaderGroupId)
+  if (!leaderGroup || leaderGroup.members.length === 0) return { ok: false, error: '负责人职位 Group 无效' }
+  const id = `club-${String(clubAccesses.length + 1).padStart(3, '0')}`
+  const newClub: MockClubAccess = {
+    clubId: id,
+    clubName: name,
+    description: input.description.trim(),
+    status: 'wizard_pending',
+    groupId: null,
+    mappingVersion: 0,
+    wizardStep: 0,
+    wizard: { selectedGroupId: input.groupId, leaderGroupId: input.leaderGroupId },
+    leaderGroupId: null,
+    leaderName: null,
+    memberCount: 0,
+    createdAt: nowIso(),
+    boundAt: null,
+    importedCount: 0,
+    syncEvents: [],
+    freezeIntervals: [],
+    readonly: false,
+  }
+  clubAccesses.push(newClub)
+  return { ok: true, data: listClubAccesses().find((c) => c.clubId === id) }
+}
+
 export function getClubAccess(clubId: string): MockClubAccess | undefined {
   return findClub(clubId)
+}
+
+/** 列出所有 Group（用于 Casdoor Group 兼容层），支持按父节点和用途过滤 */
+export function listGroups(opts?: { parentId?: string | null; purpose?: string }): GroupNode[] {
+  let result: GroupSeed[] = groups
+  if (opts?.parentId !== undefined) result = result.filter((g) => g.parentId === opts.parentId)
+  if (opts?.purpose) result = result.filter((g) => g.purpose === opts.purpose)
+  return result.map((g) => ({
+    id: g.id, name: g.name, stableId: g.stableId, path: g.path,
+    parentId: g.parentId, purpose: g.purpose, boundClubId: g.boundClubId,
+    memberCount: g.members.length,
+  }))
 }
 
 export function listClubAccesses(): ClubAccessItem[] {
@@ -274,6 +322,7 @@ export function listClubAccesses(): ClubAccessItem[] {
     .map((c) => ({
       clubId: c.clubId,
       clubName: c.clubName,
+      description: c.description,
       status: c.status,
       groupId: c.groupId,
       groupName: groupName(c.groupId),
