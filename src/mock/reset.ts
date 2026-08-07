@@ -2,6 +2,7 @@ import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, 
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
 import { correctionsDb } from './db-corrections'
+import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
 import { resetForms } from './db-forms'
 
 const seed = {
@@ -27,6 +28,7 @@ const seed = {
   sysNotifications: structuredClone(sysNotifications),
   notificationSeq: notificationSeqBase,
   correctionsDb: structuredClone(correctionsDb),
+  auditLogsDb: structuredClone(auditLogsDb) as AuditLogEntry[],
   applicantProfiles: structuredClone(APPLICANT_PROFILES),
 } as const
 
@@ -64,4 +66,9 @@ export function resetNotifications(): void {
 
 export function resetCorrections(): void {
   correctionsDb.splice(0, correctionsDb.length, ...structuredClone(seed.correctionsDb))
+}
+
+export function resetAuditLogs(): void {
+  auditLogsDb.splice(0, auditLogsDb.length, ...structuredClone(seed.auditLogsDb))
+  setAuditLogSeq(1000)
 }
