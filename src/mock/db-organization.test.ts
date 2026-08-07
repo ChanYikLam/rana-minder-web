@@ -194,6 +194,13 @@ describe('syncPositionMembership 职位 Group 成员同步（ORG-001/017：Group
     expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-003', memberId: 'mem-201', title: '负责人', active: true, error: '未找到对应职位 Group' })
   })
 
+  it('负责人免职 + leaderGroupId 未配置（空）：容忍 ok:true 且不留痕（向导未配置 ≠ 配置损坏）', () => {
+    const tracesBefore = groupSyncTraces.length
+    const r = syncPositionMembership({ clubId: 'club-003', memberId: 'mem-201', memberName: '郑浩宇', departmentName: null, title: '负责人', active: false })
+    expect(r).toMatchObject({ ok: true })
+    expect(groupSyncTraces.length).toBe(tracesBefore)
+  })
+
   it('负责人免职 + leaderGroupId 悬空：返回明确错误并留痕（不静默吞错）', () => {
     const access = clubAccesses.find((c) => c.clubId === 'club-001')!
     const prev = access.leaderGroupId
