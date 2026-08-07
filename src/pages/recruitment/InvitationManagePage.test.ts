@@ -21,8 +21,10 @@ describe('InvitationManagePage 录取邀请管理', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('加载成功：渲染邀请列表', async () => {
-    mockGet.mockResolvedValue({
+  it('加载成功：渲染邀请列表（三个接口契约齐全）', async () => {
+    // onMounted 顺序：invitations → applications + departments（并行）
+    // mockResolvedValueOnce 优先于默认值，按调用顺序设置
+    mockGet.mockResolvedValueOnce({
       kind: 'completed',
       data: { items: [{ id: 'inv-1', applicantId: 'app-1', applicantName: '张三', departmentId: 'dept-1', departmentName: '技术部', status: 'sent', sentAt: '2026-08-01T04:00:00Z', acceptedAt: null, expiredAt: '2026-08-08T04:00:00Z', version: 1 }] },
     })
@@ -30,10 +32,18 @@ describe('InvitationManagePage 录取邀请管理', () => {
       kind: 'completed',
       data: { items: [{ applicantId: 'app-1', applicantName: '张三', status: 'accepted' }] },
     })
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { departments: [{ id: 'dept-1', name: '技术部' }] },
+    })
     const wrapper = mount(InvitationManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/invitations')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/applications')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1')
     expect(wrapper.text()).toContain('张三')
+    expect(wrapper.text()).toContain('技术部')
+    wrapper.unmount()
   })
 
   it('加载失败：不渲染列表', async () => {

@@ -50,20 +50,13 @@ describe('CorrectionPage 事实纠错', () => {
 
   it('加载失败后重试恢复：错误态点重试成功渲染列表', async () => {
     // 局部 stub 暴露 PageStateBoundary 的 retry 事件（共享 pageStubs 不含，避免影响其他文件）
-    const retryStubs = {
-      ...pageStubs,
-      PageStateBoundary: {
-        props: ['state'],
-        template: '<div><slot /><button v-if="state === \'error\'" class="retry-btn" @click="$emit(\'retry\')">重试</button></div>',
-      },
-    }
     mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [correction] } })
-    const wrapper = mount(CorrectionPage, { global: { stubs: retryStubs } })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('状态显示错误')
 
-    await wrapper.find('.retry-btn').trigger('click')
+    await wrapper.find('.psb-retry').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('状态显示错误')
     wrapper.unmount()
