@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  errorCodeOf,
   errorToPageState,
   httpStatusToResult,
   parseApiError,
@@ -78,6 +79,11 @@ describe('parseApiError', () => {
   it('falls back to IFC-ERR-016 for non-object bodies', () => {
     const result = parseApiError('plain string')
     expect(result.code).toBe('IFC-ERR-016')
+  })
+
+  it('falsy supportId 被剥离为 undefined', () => {
+    const result = parseApiError({ code: 'IFC-ERR-005', message: 'x', supportId: '' })
+    expect(result.supportId).toBeUndefined()
   })
 
   it('falls back to IFC-ERR-016 for null/undefined', () => {
@@ -248,5 +254,33 @@ describe('httpStatusToResult', () => {
     expect(kinds.has('accepted')).toBe(true)
     expect(kinds.has('concurrency_conflict')).toBe(true)
     expect(kinds.has('dependency_unavailable')).toBe(true)
+  })
+
+  it('202 且 body 无错误码时仍返回 accepted（任务缺省占位）', () => {
+    const result = httpStatusToResult(202, {})
+    expect(result).toEqual({ kind: 'accepted', data: { taskId: '', status: 'processing' } })
+  })
+
+  it('concurrency_conflict 缺 currentData 时该字段为 undefined', () => {
+    const result = expectKind(httpStatusToResult(409, { code: 'IFC-ERR-008', message: '冲突' }), 'concurrency_conflict')
+    expect(result.currentData).toBeUndefined()
+  })
+})
+
+describe('errorCodeOf', () => {
+  it('从四类错误结果中提取已知错误码', () => {
+    expect(errorCodeOf({ kind: 'rejected', error: { code: 'IFC-ERR-005', message: 'x' } })).toBe('IFC-ERR-005')
+    expect(errorCodeOf({ kind: 'concurrency_conflict', error: { code: 'IFC-ERR-008', message: 'x' }, currentData: {} })).toBe('IFC-ERR-008')
+    expect(errorCodeOf({ kind: 'external_uncertain', error: { code: 'IFC-ERR-013', message: 'x' } })).toBe('IFC-ERR-013')
+    expect(errorCodeOf({ kind: 'dependency_unavailable', error: { code: 'IFC-ERR-012', message: 'x' } })).toBe('IFC-ERR-012')
+  })
+
+  it('未知错误码回退 IFC-ERR-016', () => {
+    expect(errorCodeOf({ kind: 'rejected', error: { code: 'MYSTERY', message: 'x' } })).toBe('IFC-ERR-016')
+  })
+
+  it('completed / accepted 无错误码，统一回退 IFC-ERR-016', () => {
+    expect(errorCodeOf({ kind: 'completed', data: {} })).toBe('IFC-ERR-016')
+    expect(errorCodeOf({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } })).toBe('IFC-ERR-016')
   })
 })

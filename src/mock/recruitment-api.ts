@@ -14,6 +14,7 @@ import { resolveMockUser, getPermissions, getWorkspace, USER_APPLICANT_MAP, mock
 import { pushNotifications, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
 import * as rdb from './db-recruitment'
 import * as db from './db'
+import * as formdb from './db-forms'
 
 /** 错误信封类型 */
 interface ErrorEnvelope {
@@ -1355,46 +1356,37 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return result(r)
     },
   },
-  // 动态表单定义（报名表）
+  // 动态表单定义（报名表）：由 db-forms 提供（SM-FORM-001）
   {
     url: '/api/org/:clubId/forms/:formId',
     method: 'get',
     response: ({ query }: { query: Record<string, string> }) => {
-      if (query.formId === 'form-002') {
-        return ok({
-          id: 'form-002', clubId: query.clubId, title: '面试评价表', status: 'published',
-          versions: [{
-            version: 1, status: 'published', publishedAt: '2025-07-20T10:00:00+08:00',
-            fields: [
-              { id: 'f1', type: 'rating', label: '综合评分', description: null, required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-              { id: 'f2', type: 'textarea', label: '评语', description: null, required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-            ],
-          }],
-        })
-      }
-      return ok({
-        id: 'form-001', clubId: query.clubId, title: '招新报名表', status: 'published',
-        versions: [{
-          version: 1, status: 'published', publishedAt: '2025-08-01T10:00:00+08:00',
-          fields: [
-            { id: 'f1', type: 'text', label: '自我介绍', description: '简要介绍自己的特长和兴趣', required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-            { id: 'f2', type: 'select', label: '意向部门', description: null, required: true, readonly: false, permission: 'read_write', options: ['技术部', '运营部', '设计部'], conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-            { id: 'f3', type: 'textarea', label: '相关经历', description: '如有相关项目或活动经历请填写', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-            { id: 'f4', type: 'file', label: '作品附件', description: '可选，上传作品集或简历', required: false, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-          ],
-        }],
-      })
+      const result = formdb.getFormDetail(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return ok({ ...result.data, clubId: query.clubId })
     },
   },
-  // 表单提交
+  // 表单提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/org/:clubId/forms/:formId/submissions',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: unknown }) => {
-      const input = unwrap(body) as { version?: number; answers?: Record<string, unknown> }
+      const input = unwrap(body) as { version?: number; answers?: Record<string, unknown>; idempotencyKey?: string }
       if (!input.version) return businessError('必须指定表单版本')
       if (!input.answers || typeof input.answers !== 'object') return businessError('answers 不能为空')
-      return ok({ formId: query.formId, version: input.version, status: 'submitted', submittedAt: new Date().toISOString() })
+      const result = formdb.submitFormSubmission(query.formId, {
+        version: input.version,
+        formData: input.answers,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+      })
+      if (!result.ok) return businessError(result.error)
+      return ok({
+        id: result.data.id,
+        formId: query.formId,
+        version: result.data.version,
+        status: result.data.status,
+        submittedAt: result.data.submittedAt,
+      })
     },
   },
   // 文件预览

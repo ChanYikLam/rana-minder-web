@@ -9,7 +9,7 @@ import {
   suspendClub,
   reaccessClub,
   clearTemplateMappings,
-  createClub,
+  createClubAccess,
   resetOrgDb,
   triggerGroupLost,
   type MockClubAccess,
@@ -20,7 +20,7 @@ import {
  * - 种子数据预置 club-001/002 默认映射
  * - completeWizard / recoverClub / reaccessClub / rebindClub 自动建立映射（幂等）
  * - disconnectClub 清除映射
- * - createClub 存储向导选择的 dept/role Group ID
+ * - createClubAccess 存储向导选择的 dept/role Group ID
  */
 describe('P1-005 Group→Template 映射生命周期', () => {
   beforeEach(() => {
@@ -44,8 +44,9 @@ describe('P1-005 Group→Template 映射生命周期', () => {
   it('completeWizard 建立映射；状态机拒绝重复 complete，且不产生重复映射', () => {
     const club = clubAccesses.find((c) => c.clubId === 'club-004') as MockClubAccess
     // 模拟向导选择：主 Group + 负责人
-    club.wizard = { selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-004' }
+    club.wizard = { selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-004', email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: 'grp-lead-004' }
     club.leaderGroupId = 'grp-lead-004'
+    club.deptGroupIds = []
     club.roleGroupIds = ['grp-lead-004']
 
     const r1 = completeWizard('club-004')
@@ -95,19 +96,20 @@ describe('P1-005 Group→Template 映射生命周期', () => {
     expect(after.some((m) => m.groupId === 'grp-lead-001')).toBe(true)
   })
 
-  it('createClub 存储向导选择的 deptGroupIds / roleGroupIds', () => {
-    const result = createClub({
-      clubName: '审计测试社团',
-      description: '测试',
+  it('createClubAccess 存储向导选择的 deptGroupIds / roleGroupIds', () => {
+    const result = createClubAccess({
       groupId: 'grp-004',
+      name: '审计测试社团',
+      description: '测试',
       leaderGroupId: 'grp-lead-004',
-      deptGroupIds: ['grp-dept-001'],
-      roleGroupIds: ['grp-lead-004'],
+      deptGroups: [],
+      roleGroups: ['grp-lead-004', 'grp-vice-004'],
+      leaderRoleGroup: 'grp-lead-004',
     })
     expect(result.ok).toBe(true)
 
     const created = clubAccesses.find((c) => c.clubName === '审计测试社团')
-    expect(created?.deptGroupIds).toEqual(['grp-dept-001'])
-    expect(created?.roleGroupIds).toEqual(['grp-lead-004'])
+    expect(created?.deptGroupIds).toEqual([])
+    expect(created?.roleGroupIds).toEqual(['grp-lead-004', 'grp-vice-004'])
   })
 })

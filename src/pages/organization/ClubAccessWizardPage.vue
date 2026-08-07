@@ -1,24 +1,31 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
+import type { GroupNode, ClubAccessItem } from '@/types/domain/organization'
 import { Users, CheckCircle2, XCircle, AlertTriangle, ArrowLeft, ArrowRight, FolderTree } from '@lucide/vue'
-interface CasdoorGroupRow {
+
+type GroupRow = GroupNode & { match?: string; score?: number }
+
+interface GroupDetail {
   id: string
   name: string
   stableId: string
   path: string
-  parentId: string | null
-  purpose: 'club' | 'department' | 'position'
+  purpose: GroupNode['purpose']
   boundClubId: string | null
-  memberCount: number
+  members: { id: string; name: string }[]
+  leaderGroups: GroupNode[]
+  departments: GroupNode[]
+  positions: GroupNode[]
 }
 
-interface ClubRow { clubId: string; clubName: string; status: string }
+const router = useRouter()
 
 type Step = 'group' | 'info' | 'structure' | 'validate' | 'done'
 
@@ -35,9 +42,8 @@ const step = ref<Step>('group')
 const keyword = ref('')
 const searchResults = ref<SearchResult[]>([])
 const searchFailed = ref(false)
-const selectedGroup = ref<CasdoorGroupRow | null>(null)
-const candidateGroups = ref<CasdoorGroupRow[]>([])
-const searchRaw = ref<CasdoorGroupRow[]>([])
+const selectedGroup = ref<GroupDetail | null>(null)
+const candidateGroups = ref<GroupRow[]>([])
 
 const form = ref({
   name: '',
@@ -48,16 +54,13 @@ const form = ref({
   leaderRoleGroup: '',
 })
 
-const existingClubs = ref<ClubRow[]>([])
-const deptCandidates = ref<CasdoorGroupRow[]>([])
-const roleCandidates = ref<CasdoorGroupRow[]>([])
+const existingClubs = ref<ClubAccessItem[]>([])
+const deptCandidates = ref<GroupNode[]>([])
+const roleCandidates = ref<GroupNode[]>([])
 const importing = ref(false)
 const submitted = ref<{ id: string; status: string } | null>(null)
 
-const fuzzyExampleMembers = computed(() => {
-  const n = Math.min(selectedGroup.value?.memberCount ?? 0, 3)
-  return Array.from({ length: n }, (_, i) => `示例成员 ${i + 1}`)
-})
+const previewMembers = computed(() => (selectedGroup.value?.members ?? []).slice(0, 5))
 
 const checks = computed(() => {
   const list: { label: string; ok: boolean; detail: string }[] = []
@@ -66,12 +69,12 @@ const checks = computed(() => {
   list.push({ label: '无重复绑定', ok: !!g && !g.boundClubId, detail: g?.boundClubId ? `已绑定 ${g.boundClubId}` : '未绑定' })
   list.push({ label: '名称唯一', ok: !!form.value.name.trim() && !existingClubs.value.some((c) => c.clubName === form.value.name.trim()), detail: form.value.name.trim() || '未填写' })
   const leader = roleCandidates.value.find((r) => r.id === form.value.leaderRoleGroup)
-  const leaderInTree = !!g && !!leader && leader.purpose === 'position' && leader.parentId === g.id
-  list.push({ label: '负责人职位已指定且在层级下', ok: !!g && leaderInTree, detail: leader ? leader.path : '未指定' })
+  const leaderInTree = !!g && !!leader && leader.parentId === g.id
+  list.push({ label: '负责人职位已指定且在层级下', ok: !!g && leaderInTree, detail: leader ? `${leader.name}（${leader.path}）` : '未指定' })
   list.push({ label: '负责人职位有效（≥1 名负责人）', ok: !!g && leaderInTree && leader!.memberCount >= 1, detail: leader ? `成员 ${leader.memberCount} 名` : '-' })
-  const deptOk = form.value.deptGroups.every((p) => deptCandidates.value.some((d) => d.id === p))
+  const deptOk = form.value.deptGroups.every((id) => deptCandidates.value.some((d) => d.id === id))
   list.push({ label: '部门 Group 层级正确', ok: deptOk, detail: `${form.value.deptGroups.length} 个已选` })
-  const roleOk = form.value.roleGroups.every((p) => roleCandidates.value.some((r) => r.id === p))
+  const roleOk = form.value.roleGroups.every((id) => roleCandidates.value.some((r) => r.id === id))
   list.push({ label: '职位 Group 层级正确', ok: roleOk, detail: `${form.value.roleGroups.length} 个已选` })
   return list
 })
@@ -81,12 +84,12 @@ const allPass = computed(() => checks.value.every((c) => c.ok))
 async function loadInitial() {
   state.value = 'loading'
   const [groups, clubs] = await Promise.all([
-    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups'),
-    get<{ items: ClubRow[] }>('/admin/clubs'),
+    get<{ items: GroupRow[] }>('/admin/groups'),
+    get<{ items: ClubAccessItem[] }>('/admin/clubs'),
   ])
   if (groups.kind === 'completed' && clubs.kind === 'completed') {
-    candidateGroups.value = (groups as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items
-    existingClubs.value = (clubs as { kind: 'completed'; data: { items: ClubRow[] } }).data.items
+    candidateGroups.value = (groups as { kind: 'completed'; data: { items: GroupRow[] } }).data.items
+    existingClubs.value = (clubs as { kind: 'completed'; data: { items: ClubAccessItem[] } }).data.items
     schedule('')
     state.value = 'normal'
   } else {
@@ -94,13 +97,13 @@ async function loadInitial() {
   }
 }
 
-function toSearchResult(g: CasdoorGroupRow): SearchResult {
+function toSearchResult(g: GroupRow): SearchResult {
   const bound = g.boundClubId ? ` · 已绑定 ${g.boundClubId}` : ''
   return {
     id: g.id,
     name: g.name,
     subtitle: `${g.path} · ${g.memberCount} 名成员${bound}`,
-    group: g.purpose === 'club' ? '社团级 Group' : g.purpose === 'department' ? '部门级' : '角色级',
+    group: g.purpose === 'club' ? '社团级 Group' : g.purpose === 'department' ? '部门级' : '职位级',
     match: 'exact',
     score: 0,
   }
@@ -110,18 +113,16 @@ const { searching, seq, schedule } = useDebouncedSearch({
   onSearch: async (kw) => {
     if (!kw) {
       // 空关键字：立即重置为候选列表，不发请求
-      searchRaw.value = candidateGroups.value
       searchResults.value = candidateGroups.value.filter((g) => g.purpose === 'club').map(toSearchResult)
       searchFailed.value = false
       return
     }
     searchFailed.value = false
     const mySeq = seq.value
-    const result = await get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: kw })
+    const result = await get<{ items: GroupRow[] }>('/admin/groups/search', { q: kw })
     if (mySeq !== seq.value) return
     if (result.kind === 'completed') {
-      const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
-      searchRaw.value = data.items
+      const data = (result as { kind: 'completed'; data: { items: GroupRow[] } }).data
       searchResults.value = data.items.map(toSearchResult)
       searchFailed.value = false
     } else {
@@ -136,16 +137,12 @@ const { searching, seq, schedule } = useDebouncedSearch({
 watch(keyword, (kw) => schedule(kw))
 
 async function onSelectGroup(r: SearchResult) {
-  const g = searchRaw.value.find((x) => x.id === r.id) ?? candidateGroups.value.find((c) => c.id === r.id)
-  if (!g) return
-  selectedGroup.value = g
-  form.value.name = form.value.name || g.name
-  const [depts, roles] = await Promise.all([
-    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { under: g.id, kind: 'department' }),
-    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { under: g.id, kind: 'position' }),
-  ])
-  if (depts.kind === 'completed') deptCandidates.value = (depts as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items
-  if (roles.kind === 'completed') roleCandidates.value = (roles as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items
+  const detail = await get<GroupDetail>('/admin/groups/' + r.id)
+  if (detail.kind !== 'completed') return
+  selectedGroup.value = (detail as { kind: 'completed'; data: GroupDetail }).data
+  form.value.name = form.value.name || selectedGroup.value.name
+  deptCandidates.value = selectedGroup.value.departments
+  roleCandidates.value = selectedGroup.value.positions
 }
 
 async function submit() {
@@ -154,16 +151,17 @@ async function submit() {
     groupId: selectedGroup.value?.id,
     name: form.value.name,
     description: form.value.description,
+    leaderGroupId: form.value.leaderRoleGroup,
     email: form.value.email,
     deptGroups: form.value.deptGroups,
     roleGroups: form.value.roleGroups,
-    leaderGroupId: form.value.leaderRoleGroup,
+    leaderRoleGroup: form.value.leaderRoleGroup,
   })
   importing.value = false
   if (result.kind === 'completed') {
     submitted.value = (result as { kind: 'completed'; data: { id: string; status: string } }).data
     step.value = 'done'
-    toast.success('接入申请已提交审批')
+    toast.success('接入条目已创建')
   } else {
     toast.error('提交失败：请返回校验页修正')
   }
@@ -213,11 +211,11 @@ onMounted(loadInitial)
           <p class="text-sm font-medium text-text-primary flex items-center gap-2">
             <CheckCircle2 :size="16" class="text-success" /> 已选择 {{ selectedGroup.name }}
           </p>
-          <p class="text-xs text-text-secondary mt-1">{{ selectedGroup.path }} · {{ selectedGroup.memberCount }} 名成员</p>
+          <p class="text-xs text-text-secondary mt-1">{{ selectedGroup.path }} · {{ selectedGroup.members.length }} 名成员</p>
         </div>
         <p v-if="searchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
         <p v-else-if="searchResults.length === 0 && keyword.trim() && !searching" class="mt-2 text-xs text-text-secondary">
-          无匹配 Group：需满足社团级层级且未重复绑定；学院行政类角色 Group 不可作为社团接入。
+          无匹配 Group：需满足社团级层级且未重复绑定；部门/职位级 Group 不可作为社团接入。
         </p>
       </Card>
 
@@ -311,7 +309,7 @@ onMounted(loadInitial)
                 </span>
                 <span class="text-xs text-text-secondary shrink-0">{{ r.memberCount }} 人</span>
               </label>
-              <p v-if="roleCandidates.length === 0" class="text-xs text-text-secondary">该 Group 下暂无角色级 Group</p>
+              <p v-if="roleCandidates.length === 0" class="text-xs text-text-secondary">该 Group 下暂无职位级 Group</p>
             </div>
           </div>
         </div>
@@ -332,11 +330,11 @@ onMounted(loadInitial)
         <div class="mt-4 rounded-md border border-border p-3">
           <p class="text-xs font-medium text-text-secondary mb-2 flex items-center gap-1.5"><Users :size="14" /> 成员关系预览</p>
           <p class="text-xs text-text-secondary">
-            接入后 {{ selectedGroup?.memberCount ?? 0 }} 名现有成员成为社团成员关系。以下为虚构示例，系统不导入真实成员数据：
+            该 Group 现有 {{ selectedGroup?.members.length ?? 0 }} 名成员，接入后可在「社团接入管理」导入（仅记录已导入历史，不生成新成员关系）：
           </p>
           <ul class="mt-2 space-y-1">
-            <li v-for="m in fuzzyExampleMembers" :key="m" class="text-sm text-text-secondary flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-warning" /> {{ m }}（示例）
+            <li v-for="m in previewMembers" :key="m.id" class="text-sm text-text-secondary flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-warning" /> {{ m.name }}
             </li>
           </ul>
         </div>
@@ -345,7 +343,7 @@ onMounted(loadInitial)
       <!-- Step 4: 校验 -->
       <Card v-else-if="step === 'validate'">
         <p class="text-sm font-medium text-text-primary mb-1">接入前校验</p>
-        <p class="text-xs text-text-secondary mb-4">任一步骤失败将保持未启用，不产生部分生效的权限；通过后提交进入平台审批。</p>
+        <p class="text-xs text-text-secondary mb-4">任一步骤失败将保持未启用，不产生部分生效的权限；通过后创建接入任务（无审批环节，启用需在「社团接入管理」完成）。</p>
         <ul class="space-y-2">
           <li
             v-for="c in checks"
@@ -369,11 +367,17 @@ onMounted(loadInitial)
       <Card v-else-if="step === 'done'">
         <div class="flex flex-col items-center py-8 text-center">
           <CheckCircle2 :size="40" class="text-success mb-3" />
-          <p class="text-lg font-semibold text-text-primary mb-1">接入申请已提交</p>
+          <p class="text-lg font-semibold text-text-primary mb-1">接入条目已创建</p>
           <p class="text-sm text-text-secondary">
-            {{ form.name }}（{{ submitted?.id }}）已进入待审核状态，审批通过后将出现在公开社团目录。
+            {{ form.name }}（{{ submitted?.id }}）已进入接入流程（待启用），无审批环节；请在「社团接入管理」中完成成员导入并启用，
+            启用后出现在公开社团目录。
           </p>
-          <p class="text-xs text-text-secondary mt-1">可前往「社团接入管理」查看并处理。</p>
+          <button
+            class="mt-4 px-4 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:opacity-90"
+            @click="router.push('/admin/clubs')"
+          >
+            前往社团接入管理
+          </button>
         </div>
       </Card>
 
@@ -392,7 +396,7 @@ onMounted(loadInitial)
           :disabled="!allPass || importing"
           @click="submit"
         >
-          {{ importing ? '提交中...' : '提交审批' }} <ArrowRight :size="14" />
+          {{ importing ? '创建中...' : '创建接入任务' }} <ArrowRight :size="14" />
         </button>
         <button
           v-else

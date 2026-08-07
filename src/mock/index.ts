@@ -6,6 +6,7 @@ import * as orgdb from './db-organization'
 import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 import { correctionsDb, type CorrectionRecord } from './db-corrections'
+import * as formdb from './db-forms'
 
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
 const REAUTH_TTL_MS = 10 * 60 * 1000
@@ -563,13 +564,14 @@ const publicHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const kw = (query.q || '').trim()
-      const clubs = orgdb.listClubAccesses()
+      const clubs = orgdb
+        .listClubAccesses()
         .filter((c) => c.status === 'enabled')
         .map((c) => ({
           id: c.clubId,
           name: c.clubName,
           description: c.description,
-          memberCount: c.memberCount,
+          memberCount: db.getMemberStats(c.clubId).total,
           logo: null,
           layer: 'exact' as SearchLayer,
         }))
@@ -1626,6 +1628,24 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
+  // Group→权限模板映射查询（P1-005：按社团查询已建立的映射关系）
+  {
+    url: '/api/admin/clubs/:clubId/template-mappings',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      return { code: 0, data: { items: orgdb.getTemplateMappings(query.clubId) } }
+    },
+  },
+  // Group 目录（接入向导候选：SM-ORG-001 唯一 Group 数据源，仅暴露社团级候选，不泄露内部职位/部门层级）
+  {
+    url: '/api/admin/groups',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      return { code: 0, data: { items: orgdb.listGroups().filter((g) => g.purpose === 'club') } }
+    },
+  },
   // Group 分层搜索（精确 → 中文连续子串 → 受控错别字近似，3 有效字符门槛）
   {
     url: '/api/admin/groups/search',
@@ -1650,11 +1670,21 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/clubs/wizard/save-step',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null } } }) => {
+    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
       if (!isPlatformClubManager(url)) return forbidden()
       const input = body.input || {}
       if (!input.clubId) return businessError('缺少社团 ID')
-      const result = orgdb.saveWizardStep(input.clubId, { step: input.step ?? 0, selectedGroupId: input.selectedGroupId, leaderGroupId: input.leaderGroupId })
+      const email = (input.email ?? '').trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return businessError('联系邮箱格式不正确')
+      const result = orgdb.saveWizardStep(input.clubId, {
+        step: input.step ?? 0,
+        selectedGroupId: input.selectedGroupId,
+        leaderGroupId: input.leaderGroupId,
+        email,
+        deptGroups: input.deptGroups,
+        roleGroups: input.roleGroups,
+        leaderRoleGroup: input.leaderRoleGroup,
+      })
       if (!result.ok) return businessError(result.error || '保存失败')
       return { code: 0, data: result.data }
     },
@@ -1761,24 +1791,54 @@ response: ({ url }: { url: string }) => {
 
     },
   },
-  // 表单设计器
+  // 表单设计器（SM-FORM-001：编辑态取最新草稿，无草稿回退最新已发布版本）
   {
     url: '/api/org/:clubId/forms/designer/:formId',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          id: 'form-001', title: '招新报名表', status: 'published',
-          fields: [
-            { id: 'f1', type: 'text', label: '自我介绍', required: true, readonly: false, permission: 'read_write', options: null, description: '简要介绍自己' },
-            { id: 'f2', type: 'select', label: '意向部门', required: true, readonly: false, permission: 'read_write', options: ['技术部', '运营部', '设计部'], description: null },
-            { id: 'f3', type: 'textarea', label: '相关经历', required: false, readonly: false, permission: 'read_write', options: null, description: '可选' },
-            { id: 'f4', type: 'file', label: '作品附件', required: false, readonly: false, permission: 'read_write', options: null, description: '可选' },
-          ],
-          version: 1,
-        },
-      }
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.getDesignerState(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  // 表单设计器发布（SM-FORM-001 draft --publish--> published）
+  {
+    url: '/api/org/:clubId/forms/designer/:formId/publish',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { version?: number } } }) => {
+      const result = formdb.publishForm(query.formId, Number(body.input?.version) || 1)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  // 表单停用（SM-FORM-001 published --deprecate--> deprecated）
+  {
+    url: '/api/org/:clubId/forms/designer/:formId/deprecate',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.deprecateForm(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  // 表单复用（SM-FORM-001 deprecated --reuse--> draft）
+  {
+    url: '/api/org/:clubId/forms/designer/:formId/reuse',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.reuseForm(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  // 表单克隆（SM-FORM-001 published|deprecated --clone--> draft，生成独立草稿）
+  {
+    url: '/api/org/:clubId/forms/designer/:formId/clone',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { title?: string } } }) => {
+      const result = formdb.cloneForm(query.formId, body.input?.title)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
   // 邮件配置
@@ -1890,12 +1950,24 @@ response: ({ url }: { url: string }) => {
       }
     },
   },
-  // 表单设计器保存草稿
+  // 表单设计器保存草稿（SM-FORM-001：已发布版本不可覆盖；expectedVersion 冲突 → 409）
   {
     url: '/api/org/:clubId/forms/designer/:formId/save',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
+      const input = body.input as { fields?: unknown[]; version?: number; expectedVersion?: number }
+      const result = formdb.saveFormDraft(query.formId, {
+        fields: (input.fields || []) as never,
+        version: Number(input.version) || 1,
+        expectedVersion: input.expectedVersion === undefined ? undefined : Number(input.expectedVersion),
+      })
+      if (!result.ok) {
+        if (result.error.includes('冲突')) {
+          return { statusCode: 409, body: { code: 'IFC-ERR-008', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+        }
+        return businessError(result.error)
+      }
+      return { code: 0, data: result.data }
     },
   },
   // 文件详情（FORM/REC：FilePreviewPage 打开前先取元数据）
@@ -2367,15 +2439,6 @@ policies: retentionPolicies,
       return { code: 0, data: { items: permissionTemplates } }
     },
   },
-  // Group→权限模板映射查询（P1-005：按社团查询已建立的映射关系）
-  {
-    url: '/api/admin/clubs/:clubId/template-mappings',
-    method: 'get',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformClubManager(url)) return forbidden()
-      return { code: 0, data: { items: orgdb.getTemplateMappings(query.clubId) } }
-    },
-  },
   // 新建权限模板（直接进入草稿状态）
   {
     url: '/api/admin/config/permission-templates',
@@ -2469,130 +2532,22 @@ policies: retentionPolicies,
   },
   // 保存权限模板草稿
   // 发布权限模板
-  // Casdoor Group 目录（接入向导：分层搜索 / 层级候选，统一使用 orgdb.groups）
-  {
-    url: '/api/admin/casdoor/groups',
-    method: 'get',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const under = query.under
-      if (under) {
-        const items = orgdb.listGroups({ parentId: under, purpose: query.kind || undefined })
-        return { code: 0, data: { items } }
-      }
-      const items = query.keyword ? orgdb.searchGroups(query.keyword) : orgdb.listGroups({ purpose: 'club' })
-      return { code: 0, data: { items } }
-    },
-  },
-  // 提交新社团接入向导（校验通过后进入待审核，统一使用 orgdb）
+  // 提交新社团接入向导（ORG-005 从既有 Group 接入；创建进入 wizard_pending，无审批环节，完成接入见 admin/clubs/wizard/save-step + complete）
   {
     url: '/api/admin/clubs/wizard',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { groupId?: string; name?: string; description?: string; deptGroups?: string[]; roleGroups?: string[]; leaderGroupId?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
+    response: ({ url, body }: { url: string; body: { input: { groupId?: string; name?: string; description?: string; leaderGroupId?: string; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
       const input = body.input ?? {}
-      const groupId = input.groupId
-      if (!groupId) return businessError('请选择要接入的 Group')
-      const group = orgdb.getGroupDetail(groupId)
-      if (!group) return businessError('所选 Group 不存在')
-      if (group.purpose !== 'club') return businessError('仅社团级 Group 可接入，请选择社团类 Group')
-      if (group.boundClubId) return businessError('该 Group 已绑定其他社团（重复绑定）')
-      const name = (input.name ?? '').trim()
-      if (!name) return businessError('请填写社团名称')
-      if (!input.leaderGroupId) return businessError('启用前必须指定负责人职位 Group')
-      const leaderGroup = orgdb.listGroups({ purpose: 'position' }).find((g) => g.id === input.leaderGroupId)
-      if (!leaderGroup) return businessError('负责人职位必须是角色级 Group')
-      if (leaderGroup.parentId !== groupId) return businessError('负责人职位 Group 必须位于所选社团层级之下')
-      if (leaderGroup.memberCount < 1) return businessError('负责人职位 Group 中无有效负责人')
-      // 校验部门 Group
-      const deptGroups = orgdb.listGroups({ purpose: 'department' })
-      for (const p of input.deptGroups ?? []) {
-        const d = deptGroups.find((g) => g.id === p)
-        if (!d) return businessError(`部门 Group「${p}」不存在或类型不正确`)
-        if (d.parentId !== groupId) return businessError(`部门 Group「${p}」不在所选社团层级之下`)
-      }
-      // 校验职位 Group
-      const positionGroups = orgdb.listGroups({ purpose: 'position' })
-      for (const p of input.roleGroups ?? []) {
-        const r = positionGroups.find((g) => g.id === p)
-        if (!r) return businessError(`职位 Group「${p}」不存在或类型不正确`)
-        if (r.parentId !== groupId) return businessError(`职位 Group「${p}」不在所选社团层级之下`)
-      }
-      const result = orgdb.createClub({ clubName: name, description: input.description ?? '', groupId, leaderGroupId: input.leaderGroupId, deptGroupIds: input.deptGroups ?? [], roleGroupIds: input.roleGroups ?? [] })
-      if (!result.ok) return businessError(result.error || '创建失败')
-      return { code: 0, data: { id: result.data!.clubId, status: 'wizard_pending', pendingAt: new Date().toISOString() } }
-    },
-  },
-  // 批准社团接入（统一使用 orgdb，完成向导验证）
-  {
-    url: '/api/admin/clubs/:clubId/approve',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const result = orgdb.completeWizard(query.clubId)
-      if (!result.ok) return businessError(result.error || '批准失败')
-      return { code: 0, data: { id: result.data!.clubId, status: result.data!.status, approvedAt: new Date().toISOString() } }
-    },
-  },
-  // 拒绝社团接入（统一使用 orgdb，解除接入）
-  {
-    url: '/api/admin/clubs/:clubId/reject',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const result = orgdb.disconnectClub(query.clubId)
-      if (!result.ok) return businessError(result.error || '拒绝失败')
-      return { code: 0, data: { id: result.data!.clubId, status: result.data!.status, rejectedAt: new Date().toISOString() } }
-    },
-  },
-  // 停用社团（统一使用 orgdb，普通停用）
-  {
-    url: '/api/admin/clubs/:clubId/suspend',
-    method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reason?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const result = orgdb.suspendClub(query.clubId, 'normal', body.input?.reason || '停用', { hasActiveBusiness: hasActiveBusinessFor(query.clubId) })
-      if (!result.ok) return businessError(result.error || '停用失败')
-      return { code: 0, data: { id: result.data!.clubId, status: result.data!.status, suspendedAt: new Date().toISOString() } }
-    },
-  },
-  // 紧急停用社团（统一使用 orgdb，强制停用）
-  {
-    url: '/api/admin/clubs/:clubId/emergency-suspend',
-    method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string; reason?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
-        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
-      }
-      const result = orgdb.suspendClub(query.clubId, 'force', body.input?.reason || '紧急停用', { hasActiveBusiness: false })
-      if (!result.ok) return businessError(result.error || '紧急停用失败')
-      return { code: 0, data: { id: result.data!.clubId, status: result.data!.status, suspendedAt: new Date().toISOString() } }
-    },
-  },
-  // 恢复社团（统一使用 orgdb）
-  {
-    url: '/api/admin/clubs/:clubId/re-enable',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const result = orgdb.recoverClub(query.clubId)
-      if (!result.ok) return businessError(result.error || '恢复失败')
-      return { code: 0, data: { id: result.data!.clubId, status: result.data!.status, reEnabledAt: new Date().toISOString() } }
-    },
-  },
-  // 解除接入（统一使用 orgdb）
-  {
-    url: '/api/admin/clubs/:clubId/revoke',
-    method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
-        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
-      }
-      const result = orgdb.disconnectClub(query.clubId)
-      if (!result.ok) return businessError(result.error || '解除接入失败')
-      return { code: 0, data: { id: result.data!.clubId, status: result.data!.status, revokedAt: new Date().toISOString() } }
+      if (!input.groupId) return businessError('缺少 Group ID')
+      const email = (input.email ?? '').trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return businessError('联系邮箱格式不正确')
+      const result = orgdb.createClubAccess({
+        groupId: input.groupId, name: input.name ?? '', description: input.description, leaderGroupId: input.leaderGroupId ?? '',
+        email, deptGroups: input.deptGroups, roleGroups: input.roleGroups, leaderRoleGroup: input.leaderRoleGroup,
+      })
+      if (!result.ok || !result.data) return businessError(result.error || '接入失败')
+      return { code: 0, data: { id: result.data.clubId, status: result.data.status, wizardStep: result.data.wizardStep, createdAt: result.data.createdAt } }
     },
   },
   // 运维状态
@@ -2647,7 +2602,7 @@ policies: retentionPolicies,
     response: () => {
       const clubs = orgdb.listClubAccesses().filter((c) => c.status === 'enabled')
       const distribution = clubs
-        .map((c) => ({ name: c.clubName, count: c.memberCount }))
+        .map((c) => ({ name: c.clubName, count: db.listMembers(c.clubId).filter((m) => m.status === 'active').length }))
         .filter((d) => d.count > 0)
       const totalMembers = distribution.reduce((s, d) => s + d.count, 0)
       const activeRec = rdb.recruitmentActivities.filter((a) => a.status === 'in_progress').length
@@ -2856,55 +2811,94 @@ policies: retentionPolicies,
       return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
     },
   },
-  // 管理员路由：表单
+  // 管理员路由：表单（SM-FORM-001：编辑态取最新草稿，无草稿回退最新已发布版本）
   {
     url: '/api/admin/forms/designer/:formId',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          id: 'pform-001', title: '平台通用报名表', status: 'published',
-          fields: [
-            { id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null },
-            { id: 'f2', type: 'text', label: '学号', required: true, readonly: false, permission: 'read_write', options: null, description: null },
-            { id: 'f3', type: 'select', label: '意向社团', required: true, readonly: false, permission: 'read_write', options: ['计算机协会', '电子设计协会', '数学建模协会'], description: null },
-          ],
-          version: 3,
-        },
-      }
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.getDesignerState(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
   {
     url: '/api/admin/forms/designer/:formId/save',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { id: query.formId, status: 'draft', version: 2, savedAt: new Date().toISOString(), ...body.input } }
+      const input = body.input as { fields?: unknown[]; version?: number; expectedVersion?: number }
+      const result = formdb.saveFormDraft(query.formId, {
+        fields: (input.fields || []) as never,
+        version: Number(input.version) || 1,
+        expectedVersion: input.expectedVersion === undefined ? undefined : Number(input.expectedVersion),
+      })
+      if (!result.ok) {
+        if (result.error.includes('冲突')) {
+          return { statusCode: 409, body: { code: 'IFC-ERR-008', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+        }
+        return businessError(result.error)
+      }
+      return { code: 0, data: result.data }
+    },
+  },
+  // 平台表单发布/停用/复用/克隆（SM-FORM-001）
+  {
+    url: '/api/admin/forms/designer/:formId/publish',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { version?: number } } }) => {
+      const result = formdb.publishForm(query.formId, Number(body.input?.version) || 1)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  {
+    url: '/api/admin/forms/designer/:formId/deprecate',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.deprecateForm(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  {
+    url: '/api/admin/forms/designer/:formId/reuse',
+    method: 'post',
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.reuseForm(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
+  {
+    url: '/api/admin/forms/designer/:formId/clone',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: { title?: string } } }) => {
+      const result = formdb.cloneForm(query.formId, body.input?.title)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
   {
     url: '/api/admin/forms/:formId',
     method: 'get',
     response: ({ query }: { query: Record<string, string> }) => {
-      return {
-        code: 0,
-        data: {
-          id: query.formId, title: '平台通用表单', status: 'published',
-          versions: [{
-            version: 1, status: 'published', publishedAt: '2025-07-01T10:00:00+08:00',
-            fields: [
-              { id: 'f1', type: 'text', label: '字段1', description: null, required: true, readonly: false, permission: 'read_write', options: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null },
-            ],
-          }],
-        },
-      }
+      const result = formdb.getFormDetail(query.formId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
+  // 平台表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/admin/forms/versions/:formId/submit',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
+      const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
+      const result = formdb.submitFormSubmission(query.formId, {
+        version: Number(input.version) || 1,
+        formData: (input.formData || {}) as Record<string, unknown>,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+      })
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
   // 工作空间：导出下载（EXP-003：每次下载实时校验当前权限与作用域）
@@ -2970,12 +2964,19 @@ policies: retentionPolicies,
       return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
     },
   },
-  // 工作空间：表单版本提交
+  // 工作空间：表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/org/:clubId/forms/versions/:formId/submit',
     method: 'post',
     response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { id: query.formId, status: 'submitted', version: (body.input?.version as number) || 1, submittedAt: new Date().toISOString() } }
+      const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
+      const result = formdb.submitFormSubmission(query.formId, {
+        version: Number(input.version) || 1,
+        formData: (input.formData || {}) as Record<string, unknown>,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+      })
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
 ]
@@ -3020,22 +3021,14 @@ const listHandlers: MockMethod[] = [
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
-  // 表单列表
+  // 表单列表（SM-FORM-001：展示定义状态与最新版本号）
   {
     url: '/api/org/:clubId/forms',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          items: [
-            { id: 'form-001', title: '招新报名表', status: 'published', version: 1, updatedAt: '2025-08-01T10:00:00+08:00' },
-            { id: 'form-002', title: '面试评价表', status: 'published', version: 2, updatedAt: '2025-07-20T10:00:00+08:00' },
-            { id: 'form-003', title: '成员信息表', status: 'draft', version: 1, updatedAt: '2025-07-25T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
-      }
+    response: ({ query }: { query: Record<string, string> }) => {
+      const result = formdb.listForms(query.clubId)
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: { ...result.data, nextCursor: null } }
     },
   },
   // 平台表单列表
@@ -3043,16 +3036,9 @@ const listHandlers: MockMethod[] = [
     url: '/api/admin/forms',
     method: 'get',
     response: () => {
-      return {
-        code: 0,
-        data: {
-          items: [
-            { id: 'pform-001', title: '平台通用报名表', status: 'published', version: 3, scope: 'platform', updatedAt: '2025-07-01T10:00:00+08:00' },
-            { id: 'pform-002', title: '平台通用面试表', status: 'published', version: 1, scope: 'platform', updatedAt: '2025-06-15T10:00:00+08:00' },
-          ],
-          nextCursor: null,
-        },
-      }
+      const result = formdb.listPlatformForms()
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: { ...result.data, nextCursor: null } }
     },
   },
   // 平台联合活动列表
