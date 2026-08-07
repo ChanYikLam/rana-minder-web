@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import * as db from './db'
-import { getGroupDetail, searchGroups, clubAccesses, groupSyncTraces } from './db-organization'
+import { getGroupDetail, syncPositionMembership, clubAccesses, groupSyncTraces } from './db-organization'
 import {
   cancelAppointmentCommand,
   confirmInvitationSync,
@@ -345,20 +345,32 @@ describe('职位 Group 成员同步（ORG-001/017）', () => {
     const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
     executeAppointmentCommand(appointed.command!.id)
     expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
-    const posGroup = searchGroups('干事').find((g) => g.purpose === 'position')
-    expect(posGroup).toBeTruthy()
-    expect(getGroupDetail(posGroup!.id)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+    // searchGroups 仅暴露社团级候选（SM-ORG-001），职位 Group 通过 syncPositionMembership 的返回 groupId 定位（幂等复用既有组）
+    const synced = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '技术部', title: '干事', active: true })
+    expect(synced.ok).toBe(true)
+    expect(synced.groupId).toBeTruthy()
+    expect(getGroupDetail(synced.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(true)
   })
 
   it('调岗：移出原职位 Group、写入新职位 Group', () => {
+    // 前置：先任命 mem-005 为「技术部/干事」入组（独立可运行）
+    const pre = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(pre.command!.id)
+    expect(executeAppointmentCommand(pre.command!.id).ok).toBe(true)
+    const oldGroup = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '技术部', title: '干事', active: true })
+    expect(oldGroup.ok).toBe(true)
+    expect(oldGroup.groupId).toBeTruthy()
+    expect(getGroupDetail(oldGroup.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+
     const transferred = createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-004', departmentName: '人事部', title: '部长', scheduledAt: null, actorName: '系统' })
     executeAppointmentCommand(transferred.command!.id)
     expect(executeAppointmentCommand(transferred.command!.id).ok).toBe(true)
-    const oldGroup = searchGroups('干事').find((g) => g.purpose === 'position')!
-    expect(getGroupDetail(oldGroup.id)!.members.some((m) => m.id === 'mem-005')).toBe(false)
+    expect(getGroupDetail(oldGroup.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(false)
     // 人事部无部门 Group → 部长职位 Group 挂社团 Group 下
-    const newGroup = searchGroups('部长').find((g) => g.purpose === 'position')!
-    expect(getGroupDetail(newGroup.id)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+    const newGroup = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '人事部', title: '部长', active: true })
+    expect(newGroup.ok).toBe(true)
+    expect(newGroup.groupId).toBeTruthy()
+    expect(getGroupDetail(newGroup.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(true)
   })
 
   it('辞职批准：同步移除职位 Group 成员（自带前置数据，不依赖调岗用例副作用）', () => {
@@ -376,13 +388,16 @@ describe('职位 Group 成员同步（ORG-001/017）', () => {
       expect(executeAppointmentCommand(created.command!.id).ok).toBe(true)
       appointed.push(created.command!.id)
     }
-    const group = searchGroups('部长').find((g) => g.purpose === 'position')!
-    expect(getGroupDetail(group.id)!.members.map((m) => m.id)).toEqual(expect.arrayContaining(['mem-005', 'mem-006']))
+    const synced = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '运营部', title: '部长', active: true })
+    expect(synced.ok).toBe(true)
+    expect(synced.groupId).toBeTruthy()
+    const group = getGroupDetail(synced.groupId!)!
+    expect(group.members.map((m) => m.id)).toEqual(expect.arrayContaining(['mem-005', 'mem-006']))
 
     // mem-006 辞职批准：移出「部长」职位 Group；mem-005 仍保留——验证的是辞职同步结果而非调岗残留
     const req = createResignationRequest('club-001', 'mem-006', '林晓薇', '运营部', '部长', '毕业离校')
     expect(decideResignationRequest(req.id, 'approve', '系统').ok).toBe(true)
-    const detail = getGroupDetail(group.id)!
+    const detail = getGroupDetail(synced.groupId!)!
     expect(detail.members.some((m) => m.id === 'mem-006')).toBe(false)
     expect(detail.members.some((m) => m.id === 'mem-005')).toBe(true)
     // 未因承诺而退让 mem-006 之外的组外成员
