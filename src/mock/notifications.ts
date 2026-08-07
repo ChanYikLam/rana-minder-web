@@ -139,7 +139,9 @@ export const notificationTemplates: Record<NotificationKind, NotificationTemplat
     title: '部门标签被改判',
     body: '您在「{{activityTitle}}」中为 {{applicantName}} 设置的「{{departmentName}}」录取标签已被 {{actorName}} 覆盖。请前往查看。',
     channel: ['inbox'],
-    link: '/recruitment/{{activityId}}/applications',
+    // 实际路由为 /org/:clubId/recruitment/:activityId/applications；此处默认链接缺 :clubId，
+    // 调用方（recruitment-api 标签改判通知）已通过 opts.link 显式覆盖，模板默认值仅作兜底
+    link: null,
     dedupKey: 'label_override:{{activityId}}:{{applicantId}}:{{departmentId}}',
   },
   overall_not_admitted: {

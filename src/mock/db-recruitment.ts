@@ -1255,6 +1255,8 @@ export function withdrawApplicationSubmission(activityId: string, applicantId: s
   app.status = 'draft'
   app.submittedAt = null
   app.withdrawnAt = null
+  // 撤销提交回到草稿：资格快照须同步清空，避免草稿态残留已失效的「提交时快照」
+  app.eligibilitySnapshot = null
   app.version += 1
   return ok(app)
 }
@@ -1320,9 +1322,10 @@ export function submitApplication(activityId: string, applicantId: string, input
   app.notQualifiedReason = null
   app.version += 1
   // 保存资格快照（REC-035：提交时固化，审计/回放使用；深拷贝防后续变更污染）
+  // 注意：使用 structuredClone 而非浅展开——answers 可能含嵌套对象/数组，浅拷贝会共享引用
   app.eligibilitySnapshot = {
-    answers: { ...(input.answers || {}) },
-    preferences: app.preferences.map((p) => ({ ...p })),
+    answers: structuredClone(input.answers || {}),
+    preferences: structuredClone(app.preferences),
     submittedAt: app.submittedAt!,
     formVersion: a.formVersion,
   }
@@ -1422,7 +1425,10 @@ export function publishNotQualified(activityId: string, applicantId: string, rea
 
 // ================= REC 评价/路径/结论 =================
 
-/** 按展示姓名反查前端用户 id（通知「原设置者」用，避免循环依赖 notifications 模块） */
+/** 按展示姓名反查前端用户 id（通知「原设置者」用）。
+ * 与 notifications.userIdOfName 语义一致：无法从这里导入（notifications → db-recruitment 已存在依赖，反向导入会成环），故保留本地实现。
+ * 注意：mockUsers 中存在同名用户（如「陈雨桐」同时为 member 与 applicant2），
+ * 按姓名反查会命中首个匹配项，存在歧义；当前 mock 场景可接受，真实实现应改为存 userId。 */
 function userIdOfName(name: string): string | null {
   if (!name) return null
   for (const user of Object.values(mockUsers)) {
@@ -1470,6 +1476,8 @@ export function addAdjustmentPath(activityId: string, applicantId: string, depar
   if (!app) return err('申请不存在')
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
+  // 仅「已提交」的申请可被调剂（草稿/已退出/资格失效/已录取等均不可）
+  if (app.status !== 'submitted') return err('仅已提交的申请可创建调剂路径')
   if (app.paths[departmentId]) return err('该部门路径已存在')
   if (!a.departments.some((d) => d.id === departmentId)) return err('部门不在本次招新范围内')
   if (!reason.trim()) return err('必须填写调剂原因')

@@ -802,7 +802,12 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
             departmentId: query.departmentId,
             departmentName: deptInfo?.name || '',
             actorName: me.name,
-          }, { clubId: act.clubId })
+            clubName: act.clubName,
+          }, {
+            clubId: act.clubId,
+            // 实际路由为 /org/:clubId/recruitment/:activityId/applications；模板默认链接缺少 :clubId 会导致点击 404，故显式覆盖
+            link: `/org/${act.clubId}/recruitment/${query.activityId}/applications`,
+          })
         }
       }
       return result(r)
