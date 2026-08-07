@@ -62,9 +62,9 @@ describe('通知动态化（P1-B5/B6）', () => {
 })
 
 describe('P1-009 通知模板目录（NTF）', () => {
-  it('模板目录覆盖全部业务类型（application/interview/invitation/conclusion/system/member/transition/correction）', () => {
+  it('模板目录覆盖全部业务类型（application/interview/invitation/conclusion/system/member/transition/correction/label_override/overall_not_admitted）', () => {
     const kinds = Object.keys(notificationTemplates)
-    expect(kinds).toEqual(['application', 'interview', 'invitation', 'conclusion', 'system', 'member', 'transition', 'correction'])
+    expect(kinds).toEqual(['application', 'interview', 'invitation', 'conclusion', 'system', 'member', 'transition', 'correction', 'label_override', 'overall_not_admitted'])
     for (const tpl of Object.values(notificationTemplates)) {
       expect(tpl.title.length).toBeGreaterThan(0)
       expect(tpl.channel.length).toBeGreaterThan(0)

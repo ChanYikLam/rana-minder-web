@@ -636,6 +636,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         paths: app.paths, submittedAt: app.submittedAt, withdrawnAt: app.withdrawnAt,
         identityAnomalyAt: app.identityAnomalyAt, recoveryWindowDeadline: app.recoveryWindowDeadline,
         adjustmentDeadline: app.adjustmentDeadline, adjustmentReason: app.adjustmentReason, notQualifiedReason: app.notQualifiedReason,
+        eligibilitySnapshot: app.eligibilitySnapshot,
         version: app.version,
       })
     },
@@ -709,6 +710,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         submittedAt: app.submittedAt, withdrawnAt: app.withdrawnAt, identityAnomalyAt: app.identityAnomalyAt,
         recoveryWindowDeadline: app.recoveryWindowDeadline, adjustmentDeadline: app.adjustmentDeadline,
         adjustmentReason: app.adjustmentReason, notQualifiedReason: app.notQualifiedReason,
+        eligibilitySnapshot: app.eligibilitySnapshot,
         paths: app.paths, version: app.version,
       })
     },
@@ -786,7 +788,30 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       const member = me.memberId ? db.findMember(query.clubId, me.memberId) : undefined
       const isDeptLeader = !!member && member.positions.some((p) => p.status === 'active' && p.departmentId === query.departmentId && (p.title === '部长' || p.title === '负责人'))
       const applicantUserId = me.memberId ? Object.keys(db.MEMBER_BY_USER).find((uid) => db.MEMBER_BY_USER[uid][query.clubId] === me.memberId) || null : null
-      return result(rdb.setDeptLabel(query.activityId, query.applicantId, query.departmentId, !!input.label, me.memberId || '', me.name, me.role, isDeptLeader, applicantUserId))
+      const r = rdb.setDeptLabel(query.activityId, query.applicantId, query.departmentId, !!input.label, me.memberId || '', me.name, me.role, isDeptLeader, applicantUserId)
+      // 标签改判通知原设置者（REC-018 同语义：改判需通知原结论设置者；label 层补充）
+      if (r.ok && r.data?.override && r.data?.prevUserId && r.data.prevUserId !== resolveMockUser(url).id) {
+        const act = rdb.findAnyActivity(query.activityId)
+        const app = rdb.findApplication(query.activityId, query.applicantId)
+        if (act && app) {
+          const deptInfo = act.departments.find((d) => d.id === query.departmentId)
+          pushNotification([r.data.prevUserId], 'label_override', {
+            activityTitle: act.title,
+            activityId: query.activityId,
+            applicantId: query.applicantId,
+            applicantName: app.applicantName,
+            departmentId: query.departmentId,
+            departmentName: deptInfo?.name || '',
+            actorName: me.name,
+            clubName: act.clubName,
+          }, {
+            clubId: act.clubId,
+            // 实际路由为 /org/:clubId/recruitment/:activityId/applications；模板默认链接缺少 :clubId 会导致点击 404，故显式覆盖
+            link: `/org/${act.clubId}/recruitment/${query.activityId}/applications`,
+          })
+        }
+      }
+      return result(r)
     },
   },
   // 部门路径决策（admit / not_admit / hold）
@@ -796,7 +821,34 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { decision: 'admit' | 'not_admit' | 'hold'; holdDeadline?: string }
-      return result(rdb.decidePath(query.activityId, query.applicantId, query.departmentId, input.decision, input.holdDeadline))
+      const r = rdb.decidePath(query.activityId, query.applicantId, query.departmentId, input.decision, input.holdDeadline)
+      // 整体未录取通知（所有路径都 not_admit 且无待定/暂缓时触发）
+      if (r.ok && r.overallNotAdmitted) {
+        const act = rdb.findAnyActivity(query.activityId)
+        const app = rdb.findApplication(query.activityId, query.applicantId)
+        if (act && app) {
+          const userId = userIdOfApplicant(query.applicantId)
+          if (userId) {
+            pushNotification([userId], 'overall_not_admitted', {
+              activityTitle: act.title,
+              activityId: query.activityId,
+              applicantId: query.applicantId,
+            }, { clubId: act.clubId })
+          }
+        }
+      }
+      return result(r)
+    },
+  },
+  // 调剂路径创建（REC-036：管理员为申请人添加 source='adjustment' 的部门路径）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/paths/adjustment',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { departmentId: string; departmentName: string; reason: string }
+      if (!input.departmentId || !input.departmentName) return businessError('必须指定调剂部门')
+      return result(rdb.addAdjustmentPath(query.activityId, query.applicantId, input.departmentId, input.departmentName, input.reason))
     },
   },
   // 候补名单
