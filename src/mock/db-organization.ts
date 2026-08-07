@@ -6,6 +6,7 @@
  * 停用体系：普通停用（进行中业务阻止）/紧急停用（只读+期限暂停）/恢复顺延/解除接入/修复/重绑/重新接入
  */
 import { assertTransition } from './state-machines/transitions'
+import { getMemberStats } from './db'
 import type { ClubAccessItem, ClubAccessStatus, GroupNode, GroupMatchTier, GroupSearchResult } from '../types/domain/organization'
 
 const SM = 'SM-ORG-001'
@@ -49,7 +50,6 @@ export interface MockClubAccess {
   wizard: WizardDraft | null
   leaderGroupId: string | null
   leaderName: string | null
-  memberCount: number
   createdAt: string
   boundAt: string | null
   importedCount: number
@@ -119,36 +119,36 @@ export const clubAccesses: MockClubAccess[] = [
   {
     clubId: 'club-001', clubName: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001', email: 'club-001@example.edu.cn', deptGroups: ['/学校学生组织/计算机协会/技术部'], roleGroups: [], leaderRoleGroup: '/学校学生组织/计算机协会/负责人' },
-    leaderGroupId: 'grp-lead-001', leaderName: '张明远', memberCount: 128,
-    createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 128,
+    leaderGroupId: 'grp-lead-001', leaderName: '张明远',
+    createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 6,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-002', clubName: '电子设计协会', description: '电子设计与嵌入式开发', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002', email: 'club-002@example.edu.cn', deptGroups: [], roleGroups: [], leaderRoleGroup: '/学校学生组织/电子设计协会/负责人' },
-    leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', memberCount: 86,
-    createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 86,
+    leaderGroupId: 'grp-lead-002', leaderName: '赵子涵',
+    createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 1,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-003', clubName: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'suspended', groupId: 'grp-003', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-003', leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
-    leaderGroupId: null, leaderName: null, memberCount: 64,
-    createdAt: '2023-03-01T00:00:00+08:00', boundAt: '2023-03-10T10:00:00+08:00', importedCount: 64,
+    leaderGroupId: null, leaderName: null,
+    createdAt: '2023-03-01T00:00:00+08:00', boundAt: '2023-03-10T10:00:00+08:00', importedCount: 0,
     syncEvents: [], freezeIntervals: [{ id: 'fri-001', reason: '常规停用', suspendedAt: daysAgo(9), recoveredAt: null }], readonly: true,
   },
   {
     clubId: 'club-004', clubName: '摄影协会', description: '摄影艺术与后期制作', status: 'wizard_pending', groupId: null, mappingVersion: 0,
     wizardStep: 0, wizard: { selectedGroupId: null, leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
-    leaderGroupId: null, leaderName: null, memberCount: 0,
+    leaderGroupId: null, leaderName: null,
     createdAt: '2025-07-28T00:00:00+08:00', boundAt: null, importedCount: 0,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-005', clubName: '新媒体中心', description: '校园新媒体运营与内容创作', status: 'sync_abnormal_ro', groupId: 'grp-005', mappingVersion: 2,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-005', leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
-    leaderGroupId: null, leaderName: null, memberCount: 37,
-    createdAt: '2024-09-01T00:00:00+08:00', boundAt: '2024-09-08T10:00:00+08:00', importedCount: 37,
+    leaderGroupId: null, leaderName: null,
+    createdAt: '2024-09-01T00:00:00+08:00', boundAt: '2024-09-08T10:00:00+08:00', importedCount: 0,
     syncEvents: [{ id: 'evt-001', kind: 'group_lost', at: daysAgo(3), note: '对账检测到 Group 删除/移动/失权，进入同步异常只读' }],
     freezeIntervals: [], readonly: true,
   },
@@ -314,7 +314,7 @@ export function listClubAccesses(): ClubAccessItem[] {
       mappingVersion: c.mappingVersion,
       wizardStep: c.wizardStep,
       leaderName: c.leaderName,
-      memberCount: c.memberCount,
+      memberCount: getMemberStats(c.clubId).total,
       createdAt: c.createdAt,
       boundAt: c.boundAt,
       importedCount: c.importedCount,
@@ -361,7 +361,6 @@ export function createClubAccess(input: { groupId: string; name: string; descrip
     wizard: { selectedGroupId: input.groupId, leaderGroupId: input.leaderGroupId, email: (input.email ?? '').trim(), deptGroups: input.deptGroups ?? [], roleGroups: input.roleGroups ?? [], leaderRoleGroup: input.leaderRoleGroup ?? '' },
     leaderGroupId: input.leaderGroupId,
     leaderName: memberNames[leader.members[0]] ?? null,
-    memberCount: group.members.length,
     createdAt: nowIso(),
     boundAt: null,
     importedCount: 0,
@@ -378,10 +377,17 @@ export function saveWizardStep(clubId: string, input: { step: number; selectedGr
   if (!club) return { ok: false, error: '未找到该社团' }
   const check = validateTransition(club, 'wizard_pending', 'save_step')
   if (!check.ok) return { ok: false, error: check.error }
+  const selectedGroupId = input.selectedGroupId !== undefined ? input.selectedGroupId : club.wizard?.selectedGroupId ?? null
+  const leaderGroupId = input.leaderGroupId !== undefined ? input.leaderGroupId : club.wizard?.leaderGroupId ?? null
+  if (leaderGroupId) {
+    const leader = findGroup(leaderGroupId)
+    if (!leader) return { ok: false, error: '负责人职位 Group 不存在' }
+    if (selectedGroupId && (leader.parentId !== selectedGroupId || leader.purpose !== 'position')) return { ok: false, error: '负责人职位 Group 必须在所选社团层级下且为职位 Group' }
+  }
   club.wizardStep = Math.max(0, Math.min(4, input.step))
   club.wizard = {
-    selectedGroupId: input.selectedGroupId !== undefined ? input.selectedGroupId : club.wizard?.selectedGroupId ?? null,
-    leaderGroupId: input.leaderGroupId !== undefined ? input.leaderGroupId : club.wizard?.leaderGroupId ?? null,
+    selectedGroupId,
+    leaderGroupId,
     email: input.email !== undefined ? input.email.trim() : club.wizard?.email ?? '',
     deptGroups: input.deptGroups !== undefined ? input.deptGroups : club.wizard?.deptGroups ?? [],
     roleGroups: input.roleGroups !== undefined ? input.roleGroups : club.wizard?.roleGroups ?? [],
@@ -403,12 +409,12 @@ export function completeWizard(clubId: string): { ok: boolean; error?: string; d
   if (!leaderGroupId) return { ok: false, error: '必须指定负责人职位 Group' }
   const leaderGroup = findGroup(leaderGroupId)
   if (!leaderGroup || leaderGroup.members.length === 0) return { ok: false, error: '负责人职位 Group 内没有有效负责人，接入不可完成' }
+  if (leaderGroup.parentId !== groupId || leaderGroup.purpose !== 'position') return { ok: false, error: '负责人职位 Group 必须在所选社团层级下且为职位 Group' }
   const group = findGroup(groupId)!
   group.boundClubId = clubId
   club.groupId = groupId
   club.leaderGroupId = leaderGroupId
   club.leaderName = memberNames[leaderGroup.members[0]] ?? null
-  club.memberCount = group.members.length
   club.boundAt = nowIso()
   club.mappingVersion += 1
   club.status = 'enabled'
@@ -426,7 +432,6 @@ export function importMembers(clubId: string, memberIds: string[]): { ok: boolea
   if (!memberIds || memberIds.length === 0) return { ok: false, error: '成员列表不能为空，请先选择要导入的成员' }
   const valid = memberIds.filter((id) => group.members.includes(id))
   if (valid.length !== memberIds.length) return { ok: false, error: '存在不在该 Group 内的成员，导入被拒绝' }
-  club.memberCount = valid.length
   club.importedCount = valid.length
   club.boundAt = club.boundAt || nowIso()
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
@@ -500,7 +505,6 @@ function bindGroupInternal(club: MockClubAccess, groupId: string): { ok: boolean
   group.boundClubId = club.clubId
   club.groupId = groupId
   club.mappingVersion += 1
-  club.memberCount = group.members.length
   return { ok: true }
 }
 

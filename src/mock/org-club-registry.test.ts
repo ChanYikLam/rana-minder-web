@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import { resolveMockUser, clearMockSession } from './auth'
 import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb } from './reset'
+import { getClubAccess } from './db-organization'
 
 class MockServerResponse {
   statusCode = 200
@@ -153,6 +154,112 @@ describe('P0-001 社团注册表统一（orgdb 单一权威）', () => {
       input: { groupId: 'grp-004', name: '越权', description: '', leaderGroupId: 'grp-lead-004' },
     })
     expect(out.statusCode).toBe(403)
+  })
+})
+
+/** 审计修复：负责人职位层级复检（complete/save-step）与成员数单一数据源（seed 不再双口径） */
+describe('审计修复：负责人层级复检与成员数单一数据源', () => {
+  beforeEach(() => {
+    clearMockSession()
+    resetRecruitmentDB()
+    resetNotifications()
+    resetCorrections()
+    resetDb()
+    resetOrgDb()
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+  })
+
+  it('save-step 拒绝写入非法负责人绑定（grp-lead-001 不属于 grp-004 层级）', async () => {
+    const created = await invokeHandler(wizardPattern, 'post', wizardUrl(), {
+      input: { groupId: 'grp-004', name: '智能影像社', description: '', leaderGroupId: 'grp-lead-004' },
+    })
+    const id = (created.body.data as { id: string }).id
+
+    const illegal = await invokeHandler('/api/admin/clubs/wizard/save-step', 'post', '/api/admin/clubs/wizard/save-step', {
+      input: { clubId: id, step: 2, selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-001' },
+    })
+    expect(illegal.statusCode).toBe(422)
+    expect(illegal.body.message).toContain('必须在所选社团层级下')
+
+    const still = getClubAccess(id)!
+    expect(still.status).toBe('wizard_pending')
+    expect(still.wizard?.leaderGroupId).toBe('grp-lead-004')
+  })
+
+  it('save-step 仅改选 Group 时按生效组合复检，残留旧职位引用被拒', async () => {
+    const created = await invokeHandler(wizardPattern, 'post', wizardUrl(), {
+      input: { groupId: 'grp-004', name: '智能影像社', description: '', leaderGroupId: 'grp-lead-004' },
+    })
+    const id = (created.body.data as { id: string }).id
+
+    const stale = await invokeHandler('/api/admin/clubs/wizard/save-step', 'post', '/api/admin/clubs/wizard/save-step', {
+      input: { clubId: id, step: 1, selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-001' },
+    })
+    expect(stale.statusCode).toBe(422)
+    expect(stale.body.message).toContain('必须在所选社团层级下')
+  })
+
+  it('complete 启用前复检负责人层级（审计复现：grp-lead-001 绑到 grp-004 被拒，不产生绑定）', async () => {
+    const created = await invokeHandler(wizardPattern, 'post', wizardUrl(), {
+      input: { groupId: 'grp-004', name: '智能影像社', description: '', leaderGroupId: 'grp-lead-004' },
+    })
+    const id = (created.body.data as { id: string }).id
+
+    const club = getClubAccess(id)!
+    club.wizard!.leaderGroupId = 'grp-lead-001'
+    club.wizard!.selectedGroupId = 'grp-004'
+
+    const complete = await invokeHandler('/api/admin/clubs/wizard/complete', 'post', '/api/admin/clubs/wizard/complete', {
+      input: { clubId: id },
+    })
+    expect(complete.statusCode).toBe(422)
+    expect(complete.body.message).toContain('必须在所选社团层级下')
+
+    expect(club.status).toBe('wizard_pending')
+    expect(club.groupId).toBeNull()
+
+    const list = await invokeHandler('/api/admin/groups', 'get', '/api/admin/groups')
+    const groups = (list.body.data as { items: { id: string; boundClubId: string | null }[] }).items
+    expect(groups.find((g) => g.id === 'grp-004')?.boundClubId).toBeNull()
+  })
+
+  it('管理列表与公开目录成员数同口径（成员表为单一数据源，无 128/86/64 幻数）', async () => {
+    const list = await invokeHandler('/api/admin/clubs', 'get', clubsListUrl)
+    const items = (list.body.data as { items: { clubId: string; memberCount: number; importedCount: number }[] }).items
+    const byId = Object.fromEntries(items.map((c) => [c.clubId, c]))
+
+    expect(byId['club-001'].memberCount).toBe(6)
+    expect(byId['club-002'].memberCount).toBe(1)
+    expect(byId['club-003'].memberCount).toBe(0)
+    expect(byId['club-005'].memberCount).toBe(0)
+    expect(items.every((c) => c.memberCount < 128 && c.importedCount < 128)).toBe(true)
+
+    const explore = await invokeHandler('/api/explore/clubs', 'get', exploreUrl)
+    const exploreItems = (explore.body.data as { items: { id: string; memberCount: number }[] }).items
+    for (const c of exploreItems) {
+      expect(byId[c.id].memberCount).toBe(c.memberCount)
+    }
+  })
+
+  it('新接入完成后成员数同样来自成员表（与公开目录一致）', async () => {
+    const created = await invokeHandler(wizardPattern, 'post', wizardUrl(), {
+      input: { groupId: 'grp-004', name: '智能影像社', description: '影像创作与后期', leaderGroupId: 'grp-lead-004' },
+    })
+    const id = (created.body.data as { id: string }).id
+    await invokeHandler('/api/admin/clubs/wizard/save-step', 'post', '/api/admin/clubs/wizard/save-step', {
+      input: { clubId: id, step: 3, selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-004' },
+    })
+    await invokeHandler('/api/admin/clubs/wizard/complete', 'post', '/api/admin/clubs/wizard/complete', {
+      input: { clubId: id },
+    })
+
+    const list = await invokeHandler('/api/admin/clubs', 'get', clubsListUrl)
+    const items = (list.body.data as { items: { clubId: string; memberCount: number }[] }).items
+    expect(items.find((c) => c.clubId === id)?.memberCount).toBe(0)
+
+    const explore = await invokeHandler('/api/explore/clubs', 'get', exploreUrl)
+    const exploreItems = (explore.body.data as { items: { id: string; memberCount: number }[] }).items
+    expect(exploreItems.find((c) => c.id === id)?.memberCount).toBe(0)
   })
 })
 

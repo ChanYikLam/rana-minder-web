@@ -42,6 +42,7 @@ const rawResults = ref<GroupSearchResult[]>([])
 const selectedGroup = ref<GroupSearchResult | null>(null)
 const selectedLeaderId = ref<string | null>(null)
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
+const groupDetailSeq = ref(0)
 const wizardError = ref('')
 
 function toSearchResult(g: GroupSearchResult): SearchResult {
@@ -86,8 +87,10 @@ async function onGroupSelect(result: SearchResult) {
   selectedLeaderId.value = null
   groupDetail.value = null
   wizardError.value = ''
-  await saveWizardStep({ step: 1, selectedGroupId: result.id })
+  await saveWizardStep({ step: 1, selectedGroupId: result.id, leaderGroupId: null })
+  const seq = ++groupDetailSeq.value
   const detail = await get<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] }>(`/admin/groups/${result.id}`)
+  if (seq !== groupDetailSeq.value) return
   if (detail.kind === 'completed') groupDetail.value = detail.data
 }
 
@@ -108,15 +111,25 @@ async function saveWizardStep(patch: { step: number; selectedGroupId?: string | 
   const res = await post(`/admin/clubs/wizard/save-step`, {
     clubId: wizardClub.value.clubId,
     step: patch.step,
-    selectedGroupId: patch.selectedGroupId ?? selectedGroup.value?.id ?? null,
-    leaderGroupId: patch.leaderGroupId ?? selectedLeaderId.value ?? null,
+    selectedGroupId: patch.selectedGroupId !== undefined ? patch.selectedGroupId : selectedGroup.value?.id ?? null,
+    leaderGroupId: patch.leaderGroupId !== undefined ? patch.leaderGroupId : selectedLeaderId.value,
   })
-  if (res.kind === 'completed') await loadData()
+  if (res.kind === 'completed') {
+    await loadData()
+  } else {
+    wizardError.value = 'error' in res && res.error ? (res.error as { message?: string }).message || '保存失败，请重试' : '保存失败，请重试'
+  }
 }
 
 async function selectLeader(groupId: string) {
+  if (!selectedGroup.value) return
+  const leaders = groupDetail.value?.leaderGroups ?? []
+  if (!leaders.some((g) => g.id === groupId)) {
+    wizardError.value = '负责人职位 Group 不属于当前所选社团，请重新选择'
+    return
+  }
   selectedLeaderId.value = groupId
-  await saveWizardStep({ step: 2 })
+  await saveWizardStep({ step: 2, leaderGroupId: groupId })
 }
 
 const importingBusy = ref(false)

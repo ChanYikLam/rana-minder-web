@@ -165,7 +165,8 @@ describe('接入向导 saveWizardStep / importMembers / completeWizard（club-00
     const r = importMembers('club-004', ['mem-201', 'mem-202', 'mem-203'])
     expect(r.ok).toBe(true)
     expect(r.data?.importedCount).toBe(3)
-    expect(r.data?.memberCount).toBe(3)
+    // 成员数为成员表单一数据源派生；导入仅记录并入历史，不向成员表造行
+    expect(r.data?.memberCount).toBe(0)
   })
 
   it('completeWizard：非向导态被状态机拒绝', () => {
@@ -187,7 +188,12 @@ describe('接入向导 saveWizardStep / importMembers / completeWizard（club-00
   })
 
   it('completeWizard：负责人职位 Group 无有效负责人时拒绝', () => {
-    saveWizardStep('club-004', { step: 3, selectedGroupId: 'grp-004', leaderGroupId: 'grp-dept-001' })
+    // 非法层级绑定已在 save-step 阶段拒绝（wizard 不落库）；此处直接篡改 wizard 验证 complete 兜底复检
+    const illegalStep = saveWizardStep('club-004', { step: 3, selectedGroupId: 'grp-004', leaderGroupId: 'grp-dept-001' })
+    expect(illegalStep).toMatchObject({ ok: false, error: '负责人职位 Group 必须在所选社团层级下且为职位 Group' })
+
+    const club = getClubAccess('club-004')!
+    club.wizard = { ...club.wizard!, selectedGroupId: 'grp-004', leaderGroupId: 'grp-dept-001' }
     expect(completeWizard('club-004')).toMatchObject({ ok: false, error: '负责人职位 Group 内没有有效负责人，接入不可完成' })
   })
 
@@ -202,7 +208,7 @@ describe('接入向导 saveWizardStep / importMembers / completeWizard（club-00
       status: 'enabled',
       groupId: 'grp-004',
       leaderName: '孙欣怡',
-      memberCount: 3,
+      memberCount: 0,
       readonly: false,
     })
     // 内部状态：负责人职位 Group 写入
