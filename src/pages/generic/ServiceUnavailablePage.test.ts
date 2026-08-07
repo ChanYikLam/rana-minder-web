@@ -22,12 +22,16 @@ describe('ServiceUnavailablePage 服务不可用页', () => {
   })
 
   it('降级白名单窗口内：展示剩余分钟数', () => {
+    // fake timers 固定时钟：store 的 now 与 degradedSince 在同一时间基上，
+    // 避免真实时钟下两者创建时差（负载高时可 >60s）导致 Math.ceil 分钟数漂移
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-07T12:00:00Z'))
     const session = useSessionViewStore()
     session.degraded = true
-    session.degradedSince = Date.now() - 5 * 60 * 1000
-    // 15 分钟窗口剩余 10 分钟
+    session.degradedSince = new Date('2026-08-07T11:55:00Z').getTime()
     const wrapper = mount(ServiceUnavailablePage)
     expect(wrapper.text()).toContain('降级最小白名单剩余 10 分钟')
+    vi.useRealTimers()
   })
 
   it('降级窗口已过期：白名单横幅不再展示', () => {
