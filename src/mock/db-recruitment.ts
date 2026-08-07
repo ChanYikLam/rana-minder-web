@@ -2090,15 +2090,43 @@ export function reviewJointConclusion(jointId: string, applicantId: string, club
         status: 'pending_acceptance', sentAt: now(), expiredAt: daysFromNow(7), acceptedAt: null,
         reviewFlag: false, frozenRemainingMs: null, casdoorSync: 'none', version: 1,
       }
+      // SM-JNT-005：invite_pending 先回退 evaluating（invite_terminal），再 evaluating→invite_pending（create_invite）
+      if (con.status === 'invite_pending') {
+        const mv0 = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+        if (!mv0.ok) return err(mv0.reason || '结论状态不可回退')
+      }
+      const mv = moveJointConclusion(con, 'create_invite', 'invite_pending')
+      if (!mv.ok) return err(mv.reason || '结论状态不可发送邀请')
       jointInvitations.unshift(inv)
       con.inviteId = inv.id
     } else {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）或保持 evaluating
+      if (con.status === 'invite_pending') {
+        const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+        if (!mv.ok) return err(mv.reason || '结论状态不可回退')
+      }
       con.inviteId = null
     }
     con.reviewFlag = false
   }
   con.version += 1
   return ok()
+}
+
+/** SM-JNT-005 结论状态机守卫写入：断言通过才落库。
+ * 新提交产生的结论从 pending 起步，写入非 evaluating 目标前先补 create（pending→evaluating）
+ * （createJointInvitation 对未设结论的 pending 结论发 join 调剂邀请时同样适用）。 */
+function moveJointConclusion(con: JointConclusion, event: string, toStatus: JointConclusionStatus): { ok: boolean; reason?: string } {
+  let from = con.status
+  if (from === 'pending' && toStatus !== 'evaluating') {
+    const t0 = assertTransition('SM-JNT-005', from, 'evaluating', 'create')
+    if (!t0.ok) return t0
+    from = 'evaluating'
+  }
+  const t = assertTransition('SM-JNT-005', from, toStatus, event)
+  if (!t.ok) return t
+  con.status = toStatus
+  return { ok: true }
 }
 
 export function setJointConclusion(jointId: string, applicantId: string, clubId: string, conclusion: 'admit' | 'not_admit', actorName: string, actorRole: string): { ok: boolean; error?: string; data?: JointConclusion } {
@@ -2110,7 +2138,10 @@ export function setJointConclusion(jointId: string, applicantId: string, clubId:
     const inv = jointInvitations.find((x) => x.id === con.inviteId)
     if (inv && inv.status === 'pending_acceptance') return err('存在待处理邀请，请先撤回或等待处理')
   }
-  const t = assertTransition('SM-JNT-005', con.status, 'evaluating', 'modify')
+  // SM-JNT-005：pending 首次写入走 create、invite_pending 邀请终态后重设走 invite_terminal、其余走 modify
+  const fromStatus = con.status
+  const event = fromStatus === 'pending' ? 'create' : fromStatus === 'invite_pending' ? 'invite_terminal' : 'modify'
+  const t = assertTransition('SM-JNT-005', fromStatus, 'evaluating', event)
   if (!t.ok) return err(t.reason || '当前结论状态不可修改')
   con.status = 'evaluating'
   con.conclusion = conclusion
@@ -2139,8 +2170,14 @@ export function createJointInvitation(jointId: string, applicantId: string, club
   }
   jointInvitations.unshift(inv)
   if (con) {
+    // SM-JNT-005：evaluating→invite_pending（create_invite）；pending 未设结论时先 create→evaluating
+    const move = moveJointConclusion(con, 'create_invite', 'invite_pending')
+    if (!move.ok) {
+      const ci = jointInvitations.findIndex((x) => x.id === inv.id)
+      if (ci >= 0) jointInvitations.splice(ci, 1)
+      return err(move.reason || '当前结论状态不可发送邀请')
+    }
     con.inviteId = inv.id
-    con.status = 'invite_pending'
     con.version += 1
   }
   if (!ja.firstInviteAt) {
@@ -2161,9 +2198,11 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
     inv.status = 'rejected'
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+      const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+      if (!mv.ok) return err(mv.reason || '结论状态不可回退')
       con.reviewFlag = false
       con.inviteId = null
-      con.status = 'evaluating'
       con.version += 1
     }
     inv.version += 1
@@ -2175,8 +2214,10 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
     inv.status = 'expired'
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+      const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+      if (!mv.ok) return err(mv.reason || '结论状态不可回退')
       con.inviteId = null
-      con.status = 'evaluating'
       con.version += 1
     }
     return err('邀请已过期')
@@ -2187,7 +2228,9 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
     inv.casdoorSync = 'processing'
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
-      con.status = 'accepted_locked'
+      // SM-JNT-005：invite_pending→accepted_locked（accepted）
+      const mv = moveJointConclusion(con, 'accepted', 'accepted_locked')
+      if (!mv.ok) return err(mv.reason || '结论状态不可锁定')
       con.conclusion = 'admit'
       con.reviewFlag = false
       con.version += 1
@@ -2195,8 +2238,10 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
   } else {
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+      const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+      if (!mv.ok) return err(mv.reason || '结论状态不可回退')
       con.inviteId = null
-      con.status = 'evaluating'
       con.version += 1
     }
   }
@@ -2212,8 +2257,10 @@ export function withdrawJointInvitation(invitationId: string): { ok: boolean; er
   inv.status = 'withdrawn'
   const con = jointConclusions.find((c) => c.inviteId === inv.id)
   if (con) {
+    // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+    const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+    if (!mv.ok) return err(mv.reason || '结论状态不可回退')
     con.inviteId = null
-    con.status = 'evaluating'
     con.version += 1
   }
   inv.version += 1
@@ -2451,7 +2498,11 @@ export function submitJointEndConfirm(jointId: string, clubId: string, actorName
     if (it.jointId === ja.id && it.status === 'completed') it.status = 'completed_archived'
   }
   for (const con of jointConclusions) {
-    if (con.jointId === ja.id && con.status !== 'accepted_locked') con.status = 'archived'
+    // SM-JNT-005：evaluating/invite_pending→archived（activity_final）；accepted_locked 保持锁定
+    if (con.jointId === ja.id && con.status !== 'accepted_locked') {
+      const mv = moveJointConclusion(con, 'activity_final', 'archived')
+      if (!mv.ok) return err(mv.reason || '结论状态不可归档')
+    }
   }
   expireActivityTasks(jointId)
   ja.version += 1
@@ -2479,8 +2530,11 @@ export function forceCloseJointActivity(jointId: string, reason: string): { ok: 
     }
   }
   for (const con of jointConclusions) {
+    // SM-JNT-005：evaluating/invite_pending→archived（activity_final 或 force_invalidated）；accepted_locked 保持锁定
     if (con.jointId === ja.id && con.status !== 'accepted_locked') {
-      con.status = 'archived'
+      const event = con.status === 'invite_pending' ? 'force_invalidated' : 'activity_final'
+      const mv = moveJointConclusion(con, event, 'archived')
+      if (!mv.ok) return err(mv.reason || '结论状态不可归档')
       con.reviewFlag = false
     }
   }

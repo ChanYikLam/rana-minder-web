@@ -1417,6 +1417,18 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return result(r)
     },
   },
+  // 本人：确认录取邀请生效（Casdoor 同步确认；新-2 补申请人侧入口）
+  {
+    url: '/api/me/invitations/recruitment/:invitationId/sync-confirm',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const inv = rdb.recruitmentInvitations.find((i) => i.id === query.invitationId)
+      if (inv && inv.applicantId !== applicantId) return forbidden()
+      return result(rdb.confirmRecInvitationSync(query.invitationId))
+    },
+  },
   // 动态表单定义（报名表）：由 db-forms 提供（SM-FORM-001）
   {
     url: '/api/org/:clubId/forms/:formId',
@@ -2176,6 +2188,18 @@ const jointHandlers: MockMethod[] = [
       const inv = rdb.jointInvitations.find((i) => i.id === query.invitationId)
       if (inv && inv.applicantId !== applicantId) return forbidden()
       return result(rdb.respondJointInvitation(query.invitationId, input.action, applicantId))
+    },
+  },
+  // 本人：确认联合录取邀请生效（Casdoor 同步确认；新-2 补申请人侧入口）
+  {
+    url: '/api/me/invitations/joint/:invitationId/sync-confirm',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const inv = rdb.jointInvitations.find((i) => i.id === query.invitationId)
+      if (inv && inv.applicantId !== applicantId) return forbidden()
+      return result(rdb.confirmJointInvitationSync(query.invitationId))
     },
   },
 ]
