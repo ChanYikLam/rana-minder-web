@@ -556,15 +556,16 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
   if (inv.status === 'accepted_pending_sync') {
     const t = assertTransition('SM-MEM-004', inv.status, 'effective', 'confirmed')
     if (!t.ok) return { ok: false, error: t.reason || '当前状态不可确认生效' }
-    inv.status = 'effective'
-    const candidate = candidates.find((c) => c.id === inv.candidateId)
-    members.push({
-      id: 'mem-' + Date.now(), clubId: inv.clubId, studentId: inv.candidateStudentId, name: inv.candidateName,
-      email: candidate?.email || '', phone: candidate?.phone || '', status: 'active',
-      joinedAt: now, exitedAt: null,
-      positions: inv.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: inv.departmentId, departmentName: inv.departmentName || '', title: '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active' }] : [],
-      tenures: [], departmentHistory: [], anomalies: [],
+    // 复用 createMemberFromAdmission：业务生效时间取邀请接受时间（而非回读确认时间），且幂等不重复创建
+    const admitted = createMemberFromAdmission(inv.clubId, {
+      studentId: inv.candidateStudentId,
+      name: inv.candidateName,
+      departmentId: inv.departmentId,
+      departmentName: inv.departmentName,
+      acceptedAt: inv.acceptedAt || now,
     })
+    if (!admitted.ok) return { ok: false, error: admitted.error || '成员创建失败' }
+    inv.status = 'effective'
     return { ok: true, invitation: inv }
   }
   return { ok: false, error: '仅接受待同步的邀请可确认生效' }
@@ -572,18 +573,23 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
 
 /**
  * 录取/联合邀请接受后的成员创建桥（06「接受普通或联合录取后，成员业务生效时间为接受时间」）。
- * 幂等：同社团同学号的现有/退出中成员不重复创建；业务生效时间取邀请接受时间，而非回读确认时间。
+ * 幂等：同社团同学号的现有（active/非离职终态）成员不重复创建；业务生效时间取邀请接受时间，而非回读确认时间。
+ * 幂等边界：exiting（离职中）/pending_effective（待生效）显式报错要求先完成原流程；联系方式取自候选人档案。
  */
-export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string }): { ok: boolean; created: boolean; member?: MockMember } {
-  if (!input.studentId) return { ok: true, created: false, member: undefined }
+export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
+  if (!input.studentId) return { ok: false, created: false, error: '学号为空，无法创建成员' }
   const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
+  // exiting（离职中）/pending_effective（待生效）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
+  if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective')) {
+    return { ok: false, created: false, error: `该学号在本社团存在${existing.status === 'exiting' ? '离职中' : '待生效'}的成员记录，请先完成原有流程` }
+  }
   if (existing) return { ok: true, created: false, member: existing }
   const candidate = candidates.find((c) => c.studentId === input.studentId)
   const member: MockMember = {
     id: 'mem-' + Date.now(), clubId, studentId: input.studentId, name: input.name,
     email: candidate?.email || '', phone: candidate?.phone || '', status: 'active',
     joinedAt: input.acceptedAt, exitedAt: null,
-    positions: input.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: input.departmentId, departmentName: input.departmentName || '', title: '成员', startDate: new Date(input.acceptedAt).toISOString().slice(0, 10), endDate: null, status: 'active' }] : [],
+    positions: input.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: input.departmentId, departmentName: input.departmentName || '', title: '成员', startDate: input.acceptedAt.slice(0, 10), endDate: null, status: 'active' }] : [],
     tenures: [], departmentHistory: input.departmentId ? [{ id: 'dhis-' + Date.now(), action: 'join', departmentName: input.departmentName || '', at: input.acceptedAt }] : [], anomalies: [],
   }
   members.push(member)
