@@ -47,7 +47,7 @@ describe('AttachmentUpload 上传与安全检查', () => {
     const wrapper = mount(AttachmentUpload, { props: { modelValue: [] } })
 
     await selectFile(wrapper)
-    expect(mockPost).toHaveBeenCalledWith('/api/files/upload', { input: { purpose: 'form-attachment', name: 'resume.pdf' } })
+    expect(mockPost).toHaveBeenCalledWith('/api/files/upload', { purpose: 'form-attachment', name: 'resume.pdf' })
 
     // 上传中阶段：本地临时 id 仅为占位，不产出 mock 伪造 id
     await wrapper.setProps({ modelValue: lastFiles(wrapper) })

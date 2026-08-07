@@ -66,7 +66,8 @@ function scheduleAutoApprove(nextFiles: FileMeta[]) {
 /** 经真实上传接口换取 fileId（file- 前缀，可被 /api/files/:fileId 正常访问）；条目若已被移除则静默放弃 */
 async function resolveUpload(tempId: string, file: File) {
   const result = await post<{ fileId: string; uploadedAt?: string }>('/api/files/upload', {
-    input: { purpose: 'form-attachment', name: file.name },
+    purpose: 'form-attachment',
+    name: file.name,
   })
   const current = files.value
   const idx = current.findIndex((f) => f.id === tempId)

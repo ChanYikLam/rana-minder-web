@@ -455,7 +455,7 @@ describe('ApplicationPage 交互流程', () => {
 
       // 附件先经 /api/files/upload 换取真实 fileId，提交时 payload 携带该元数据
       expect(mockPost).toHaveBeenCalledTimes(2)
-      expect(mockPost).toHaveBeenNthCalledWith(1, '/api/files/upload', { input: { purpose: 'form-attachment', name: 'resume.pdf' } })
+      expect(mockPost).toHaveBeenNthCalledWith(1, '/api/files/upload', { purpose: 'form-attachment', name: 'resume.pdf' })
       const [url, body] = mockPost.mock.calls[1] as [string, { answers: Record<string, unknown> }]
       expect(url).toBe('/activity/recruitment/act-001/apply')
       const f2 = body.answers.f2 as FileMeta[]
