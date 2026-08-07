@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { members, listMembers } from './db'
 import { createMemberFromAdmission } from './db'
-import { respondRecInvitation, confirmRecInvitationSync, createJointInvitation, respondJointInvitation, confirmJointInvitationSync, jointInvitations, jointApplications, recruitmentInvitations, APPLICANT_PROFILES } from './db-recruitment'
+import { respondRecInvitation, confirmRecInvitationSync, createJointInvitation, respondJointInvitation, confirmJointInvitationSync, withdrawJointInvitation, setJointConclusion, jointConclusions, jointInvitations, jointApplications, recruitmentInvitations, APPLICANT_PROFILES } from './db-recruitment'
 import { resetRecruitmentDB, resetDb } from './reset'
 
 interface RecInvite { id: string; acceptedAt: string | null }
@@ -211,5 +211,60 @@ describe('P0-002 录取接受后成员创建桥（SM-MEM 关系模型）', () =>
     const created = members.find((m) => m.studentId === '20240010')!
     expect(created.email).toBe('override@example.edu.cn')
     expect(created.phone).toBe('13000000000')
+  })
+})
+
+/** 新-4/新-6 回归：SM-JNT-005 结论状态机断言覆盖——con.status 不再绕过状态机直接赋值 */
+describe('SM-JNT-005 结论状态机断言覆盖', () => {
+  beforeEach(() => {
+    resetRecruitmentDB()
+    resetDb()
+  })
+
+  const conclusionOf = (applicantId: string, clubId: string) =>
+    jointConclusions.find((c) => c.jointId === 'jnt-001' && c.applicantId === applicantId && c.clubId === clubId)
+
+  it('createJointInvitation：evaluating 结论发邀请 → invite_pending（create_invite 事件）', () => {
+    const created = createJointInvitation('jnt-001', 'u-006', 'club-001', 7)
+    expect(created.ok, created.error || '').toBe(true)
+    // 种子结论 status 为 evaluating，发邀请后进入 invite_pending
+    expect(conclusionOf('u-006', 'club-001')?.status).toBe('invite_pending')
+  })
+
+  it('respondJointInvitation accept：invite_pending 结论 → accepted_locked（accepted 事件）', () => {
+    const created = createJointInvitation('jnt-001', 'u-006', 'club-001', 7)
+    expect(created.ok).toBe(true)
+    const inv = jointInvitations.find((i) => i.applicantId === 'u-006' && i.clubId === 'club-001')!
+    const accepted = respondJointInvitation(inv.id, 'accept', 'u-006')
+    expect(accepted.ok, accepted.error || '').toBe(true)
+    expect(conclusionOf('u-006', 'club-001')?.status).toBe('accepted_locked')
+  })
+
+  it('respondJointInvitation reject：invite_pending 结论 → evaluating（invite_terminal 事件）', () => {
+    const created = createJointInvitation('jnt-001', 'u-006', 'club-001', 7)
+    expect(created.ok).toBe(true)
+    const inv = jointInvitations.find((i) => i.applicantId === 'u-006' && i.clubId === 'club-001')!
+    const rejected = respondJointInvitation(inv.id, 'reject', 'u-006')
+    expect(rejected.ok, rejected.error || '').toBe(true)
+    expect(conclusionOf('u-006', 'club-001')?.status).toBe('evaluating')
+  })
+
+  it('withdrawJointInvitation：invite_pending 结论 → evaluating（invite_terminal 事件）', () => {
+    const created = createJointInvitation('jnt-001', 'u-006', 'club-001', 7)
+    expect(created.ok).toBe(true)
+    const inv = jointInvitations.find((i) => i.applicantId === 'u-006' && i.clubId === 'club-001')!
+    const withdrawn = withdrawJointInvitation(inv.id)
+    expect(withdrawn.ok, withdrawn.error || '').toBe(true)
+    expect(conclusionOf('u-006', 'club-001')?.status).toBe('evaluating')
+  })
+
+  it('setJointConclusion：pending 结论首次设置走 create 事件进入 evaluating', () => {
+    // 手工构造 pending 结论（模拟未评估场景）
+    const target = conclusionOf('u-006', 'club-001')
+    if (target) target.status = 'pending'
+    const result = setJointConclusion('jnt-001', 'u-006', 'club-001', 'admit', '张明远', 'club_leader')
+    expect(result.ok, result.error || '').toBe(true)
+    expect(conclusionOf('u-006', 'club-001')?.status).toBe('evaluating')
+    expect(conclusionOf('u-006', 'club-001')?.conclusion).toBe('admit')
   })
 })

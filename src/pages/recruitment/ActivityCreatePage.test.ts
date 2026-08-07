@@ -44,4 +44,83 @@ describe('ActivityCreatePage 创建招新活动', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('创建招新活动')
   })
+
+  it('步骤守卫：未填必填项时下一步禁用', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
+    const wrapper = mount(ActivityCreatePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 未填标题/截止时禁用
+    const nextBtn = wrapper.findAll('button').find((b) => b.text().includes('下一步'))
+    expect(nextBtn!.attributes('disabled'), '未填必填项禁用').toBeDefined()
+
+    // 填写后可用
+    await wrapper.find('#title').setValue('秋季招新')
+    await wrapper.find('#deadline').setValue('2026-09-01T00:00')
+    await flushPromises()
+    expect(nextBtn!.attributes('disabled'), '填完必填项可用').toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('完整流程：四步向导创建活动并跳转', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { items: [{ id: 'form-1', title: '报名表', status: 'published' }] },
+    })
+    mockPost.mockResolvedValue({ kind: 'completed', data: { id: 'act-9' } })
+    const wrapper = mount(ActivityCreatePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // Step 1 → Step 2
+    await wrapper.find('#title').setValue('秋季招新')
+    await wrapper.find('#deadline').setValue('2026-09-01T00:00')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    expect(wrapper.text()).toContain('报名表单')
+
+    // Step 2：选择表单 → Step 3
+    await wrapper.find('input[type="radio"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    expect(wrapper.text()).toContain('招新方向')
+
+    // Step 3：添加部门 → Step 4
+    const deptInput = wrapper.find('input[placeholder="输入方向名称"]')
+    await deptInput.setValue('技术部')
+    await wrapper.findAll('button').find((b) => b.text().includes('添加'))!.trigger('click')
+    expect(wrapper.text()).toContain('技术部')
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    expect(wrapper.text()).toContain('预览确认')
+    expect(wrapper.text()).toContain('秋季招新')
+    expect(wrapper.text()).toContain('报名表')
+
+    // 发布
+    await wrapper.findAll('button').find((b) => b.text().includes('发布活动'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment', expect.objectContaining({ title: '秋季招新', formId: 'form-1', departments: [{ id: expect.any(String), name: '技术部' }] }))
+    expect(mockPush).toHaveBeenCalledWith('/org/club-001/recruitment/act-9')
+    wrapper.unmount()
+  })
+
+  it('发布失败：展示错误提示不跳转', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ id: 'form-1', title: '报名表', status: 'published' }] } })
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'PUB-001', message: 'x' } })
+    const wrapper = mount(ActivityCreatePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.find('#title').setValue('秋季招新')
+    await wrapper.find('#deadline').setValue('2026-09-01T00:00')
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    await wrapper.find('input[type="radio"]').trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    const deptInput = wrapper.find('input[placeholder="输入方向名称"]')
+    await deptInput.setValue('技术部')
+    await wrapper.findAll('button').find((b) => b.text().includes('添加'))!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('发布活动'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('发布失败，请稍后重试')
+    expect(mockPush).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })

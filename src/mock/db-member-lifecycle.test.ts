@@ -3,8 +3,9 @@
  * 每个测试文件拥有独立模块实例（vitest isolate），种子数据与 db.test.ts 互不污染。
  * 各流程使用不同成员避免状态冲突：邀请→候选；任命→mem-002/003；部门申请→mem-001/003/006；辞职→mem-001。
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as db from './db'
+import { getGroupDetail, syncPositionMembership, clubAccesses, groupSyncTraces } from './db-organization'
 import {
   cancelAppointmentCommand,
   confirmInvitationSync,
@@ -24,8 +25,11 @@ import {
   isLastLeader,
   listInvitations,
   listMembers,
+  members,
   respondInvitation,
   searchCandidates,
+  triggerMemberExternalChange,
+  RECONCILE_DEDUP_MS,
   withdrawInvitation,
 } from './db'
 
@@ -56,9 +60,10 @@ describe('成员查询与统计', () => {
   })
 
   it('listMembers / getMemberStats：按社团统计 total/active/exited', () => {
-    expect(listMembers('club-001')).toHaveLength(6)
+    // 含 P3-1 新身份成员（mem-007 赵雨萌 / mem-008 孙雅静）
+    expect(listMembers('club-001')).toHaveLength(8)
     expect(listMembers('club-002').map((m) => m.id)).toEqual(['mem-101'])
-    expect(getMemberStats('club-001')).toEqual({ total: 6, active: 5, exited: 1 })
+    expect(getMemberStats('club-001')).toEqual({ total: 8, active: 7, exited: 1 })
   })
 })
 
@@ -320,5 +325,206 @@ describe('辞职申请（create / decide）', () => {
     // 已处理不可重复操作
     expect(decideResignationRequest(created.id, 'approve', '系统')).toMatchObject({ ok: false, error: '该申请已处理' })
     expect(decideResignationRequest('res-ghost', 'approve', '系统')).toMatchObject({ ok: false, error: '申请不存在' })
+  })
+
+  it('triggerMemberExternalChange：成员级外部变更触发点留痕（P2-015，与社团级 triggerGroupLost 对称）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    const before = mem.anomalies.length
+
+    const r = triggerMemberExternalChange('club-001', 'mem-001')
+    expect(r.ok).toBe(true)
+    expect(r.data?.anomalies[0]).toMatchObject({ kind: 'external_change' })
+    expect(members.find((m) => m.id === 'mem-001')!.anomalies.length).toBe(before + 1)
+
+    // casdoor_mismatch 变体
+    const r2 = triggerMemberExternalChange('club-001', 'mem-001', 'casdoor_mismatch')
+    expect(r2.ok).toBe(true)
+    expect(r2.data?.anomalies[0].kind).toBe('casdoor_mismatch')
+
+    // 守卫：成员不存在 / 非活跃成员
+    expect(triggerMemberExternalChange('club-001', 'mem-zzz')).toMatchObject({ ok: false, error: '未找到该成员' })
+    expect(triggerMemberExternalChange('club-001', 'mem-005')).toMatchObject({ ok: false, error: '仅活跃成员可触发外部变更检测' })
+  })
+
+  it('triggerMemberExternalChange：批量触发 id 唯一 + 幂等去重（P2-017/015，同毫秒不再重复且同类不重复登记）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    mem.anomalies.length = 0 // 隔离前置用例登记，保证确定性
+    // 同类 external_change 连续 5 次：去重窗口内仅登记 1 条，后续 registered=false 幂等跳过
+    let registered = 0
+    for (let i = 0; i < 5; i++) {
+      const r = triggerMemberExternalChange('club-001', 'mem-001')
+      if (r.registered) registered += 1
+      expect(r.ok).toBe(true)
+    }
+    expect(registered).toBe(1)
+    const extIds = mem.anomalies.filter((a) => a.kind === 'external_change').map((a) => a.id)
+    expect(extIds).toHaveLength(1)
+    expect(extIds[0].startsWith('anm-')).toBe(true)
+
+    // 不同 kind 不互相去重：casdoor_mismatch 仍可登记
+    const r2 = triggerMemberExternalChange('club-001', 'mem-001', 'casdoor_mismatch')
+    expect(r2.registered).toBe(true)
+
+    // 重复 casdoor_mismatch 幂等跳过
+    const r3 = triggerMemberExternalChange('club-001', 'mem-001', 'casdoor_mismatch')
+    expect(r3.registered).toBe(false)
+
+    // 同毫秒不同 kind 的 id 仍唯一（MemberProfilePage 以 an.id 作 v-for key）
+    const ids = mem.anomalies.map((a) => a.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('triggerMemberExternalChange：异常上限截断（超出 ANOMALY_MAX_KEEP 丢弃最旧，成员详情页不无限膨胀）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    mem.anomalies.length = 0
+    const kinds: ('casdoor_mismatch' | 'external_change')[] = ['casdoor_mismatch', 'external_change']
+    // 用假定时器逐次推进，使每次触发都超出 30 天去重窗口 → 连续登记 30 条
+    vi.useFakeTimers()
+    try {
+      for (let i = 0; i < 30; i++) {
+        vi.setSystemTime(new Date(Date.now() + RECONCILE_DEDUP_MS + 1))
+        triggerMemberExternalChange('club-001', 'mem-001', kinds[i % 2])
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(mem.anomalies.length).toBeLessThanOrEqual(20)
+    expect(mem.anomalies.length).toBe(20)
+    // 最旧记录被截断（unshift 保留最新）
+    expect(mem.anomalies[0].createdAt >= mem.anomalies[mem.anomalies.length - 1].createdAt).toBe(true)
+  })
+
+  it('triggerMemberExternalChange：不同成员互相隔离（异常只登记在目标成员）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    const other = members.find((m) => m.id === 'mem-002')!
+    mem.anomalies.length = 0
+    other.anomalies.length = 0
+    const r = triggerMemberExternalChange('club-001', 'mem-001')
+    expect(r.registered).toBe(true)
+    expect(mem.anomalies).toHaveLength(1)
+    expect(other.anomalies).toHaveLength(0)
+  })
+})
+
+/**
+ * ORG-001/017 审计：任命/免职/调岗/辞职执行后必须同步职位 Group 成员（Group 为关系权威，positions 不得独立于 Group 变动）。
+ * mem-005（已退出，无 active 职位，未被其他流程使用）作为干净对象验证完整闭环。
+ */
+describe('职位 Group 成员同步（ORG-001/017）', () => {
+  it('任命负责人写入负责人职位 Group；免职后移除', () => {
+    const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(appointed.command!.id)
+    expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
+    expect(getGroupDetail('grp-lead-001')!.members.some((m) => m.id === 'mem-005')).toBe(true)
+
+    const dismissed = createAppointmentCommand('club-001', { action: 'dismiss', memberId: 'mem-005', memberName: '刘子豪', departmentId: null, departmentName: null, title: null, scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(dismissed.command!.id)
+    expect(executeAppointmentCommand(dismissed.command!.id).ok).toBe(true)
+    expect(getGroupDetail('grp-lead-001')!.members.some((m) => m.id === 'mem-005')).toBe(false)
+  })
+
+  it('任命部门职位：部门 Group 下自动建职位 Group 并写入成员', () => {
+    const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(appointed.command!.id)
+    expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
+    // searchGroups 仅暴露社团级候选（SM-ORG-001），职位 Group 通过 syncPositionMembership 的返回 groupId 定位（幂等复用既有组）
+    const synced = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '技术部', title: '干事', active: true })
+    expect(synced.ok).toBe(true)
+    expect(synced.groupId).toBeTruthy()
+    expect(getGroupDetail(synced.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+  })
+
+  it('调岗：移出原职位 Group、写入新职位 Group', () => {
+    // 前置：先任命 mem-005 为「技术部/干事」入组（独立可运行）
+    const pre = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(pre.command!.id)
+    expect(executeAppointmentCommand(pre.command!.id).ok).toBe(true)
+    const oldGroup = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '技术部', title: '干事', active: true })
+    expect(oldGroup.ok).toBe(true)
+    expect(oldGroup.groupId).toBeTruthy()
+    expect(getGroupDetail(oldGroup.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+
+    const transferred = createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-004', departmentName: '人事部', title: '部长', scheduledAt: null, actorName: '系统' })
+    executeAppointmentCommand(transferred.command!.id)
+    expect(executeAppointmentCommand(transferred.command!.id).ok).toBe(true)
+    expect(getGroupDetail(oldGroup.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(false)
+    // 人事部无部门 Group → 部长职位 Group 挂社团 Group 下
+    const newGroup = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '人事部', title: '部长', active: true })
+    expect(newGroup.ok).toBe(true)
+    expect(newGroup.groupId).toBeTruthy()
+    expect(getGroupDetail(newGroup.groupId!)!.members.some((m) => m.id === 'mem-005')).toBe(true)
+  })
+
+  it('辞职批准：同步移除职位 Group 成员（自带前置数据，不依赖调岗用例副作用）', () => {
+    // 前置：it4 自行任命 mem-005 / mem-006 为「运营部部长」并入「部长」职位 Group，
+    // 不再依赖 it3（调岗）或任命域用例的残留成员，具备独立可运行性。
+    const appointed: string[] = []
+    for (const m of [
+      { memberId: 'mem-005', memberName: '刘子豪' },
+      { memberId: 'mem-006', memberName: '林晓薇' },
+    ]) {
+      const created = createAppointmentCommand('club-001', {
+        action: 'appoint', memberId: m.memberId, memberName: m.memberName, departmentId: 'dept-004', departmentName: '运营部', title: '部长', scheduledAt: null, actorName: '系统',
+      })
+      executeAppointmentCommand(created.command!.id)
+      expect(executeAppointmentCommand(created.command!.id).ok).toBe(true)
+      appointed.push(created.command!.id)
+    }
+    const synced = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-005', memberName: '刘子豪', departmentName: '运营部', title: '部长', active: true })
+    expect(synced.ok).toBe(true)
+    expect(synced.groupId).toBeTruthy()
+    const group = getGroupDetail(synced.groupId!)!
+    expect(group.members.map((m) => m.id)).toEqual(expect.arrayContaining(['mem-005', 'mem-006']))
+
+    // mem-006 辞职批准：移出「部长」职位 Group；mem-005 仍保留——验证的是辞职同步结果而非调岗残留
+    const req = createResignationRequest('club-001', 'mem-006', '林晓薇', '运营部', '部长', '毕业离校')
+    expect(decideResignationRequest(req.id, 'approve', '系统').ok).toBe(true)
+    const detail = getGroupDetail(synced.groupId!)!
+    expect(detail.members.some((m) => m.id === 'mem-006')).toBe(false)
+    expect(detail.members.some((m) => m.id === 'mem-005')).toBe(true)
+    // 未因承诺而退让 mem-006 之外的组外成员
+    expect(appointed).toHaveLength(2)
+  })
+
+  it('同步失败留痕：负责人 Group 配置悬空时任命 ok 但 cmd.syncWarning 与 groupSyncTraces 记录「职位已写入、Group 未同步」', () => {
+    const access = clubAccesses.find((c) => c.clubId === 'club-001')!
+    const prevLeader = access.leaderGroupId
+    access.leaderGroupId = 'grp-lead-ghost'
+    try {
+      const created = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', scheduledAt: null, actorName: '系统' })
+      executeAppointmentCommand(created.command!.id)
+      const retry = executeAppointmentCommand(created.command!.id)
+      expect(retry.ok).toBe(true)
+      expect(retry.command?.syncWarning).toBe('负责人职位 Group 不存在或已失效')
+      expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-001', memberId: 'mem-005', title: '负责人', active: true, error: '负责人职位 Group 不存在或已失效' })
+      // 职位仍按任命写入（宽容语义），但留痕可观测补偿点
+      expect(findMember('club-001', 'mem-005')!.positions.some((p) => p.title === '负责人' && p.status === 'active')).toBe(true)
+    } finally {
+      access.leaderGroupId = prevLeader
+    }
+  })
+
+  it('辞职批准同步失败：req.syncWarning 与「职位已写入、Group 未移除」留痕一致（与任命路径同源）', () => {
+    const access = clubAccesses.find((c) => c.clubId === 'club-001')!
+    const prevLeader = access.leaderGroupId
+    access.leaderGroupId = 'grp-lead-ghost'
+    try {
+      // 前置：就 mem-003 建立唯一活动职位「主席处/负责人」（避免与前序用例残留的 active 部门职位冲突）
+      const appointed = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-003', memberName: '李思颖', departmentId: 'dept-004', departmentName: '主席办', title: '负责人', scheduledAt: null, actorName: '系统' })
+      executeAppointmentCommand(appointed.command!.id)
+      expect(executeAppointmentCommand(appointed.command!.id).ok).toBe(true)
+      const appointedPos = findMember('club-001', 'mem-003')!.positions.find((p) => p.departmentName === '主席办')!
+      expect(appointedPos).toMatchObject({ title: '负责人', status: 'active' })
+
+      // 辞职批准：清除对应职位 + 尝试移出职位 Group（leaderGroupId 悬空 → 留痕）
+      const req = createResignationRequest('club-001', 'mem-003', '李思颖', '主席办', '负责人', '毕业离校')
+      expect(decideResignationRequest(req.id, 'approve', '系统').ok).toBe(true)
+      const approved = db.resignationRequests.find((r) => r.id === req.id)!
+      expect(approved.status).toBe('approved')
+      expect(approved.syncWarning).toBe('负责人职位 Group 不存在或已失效')
+      expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-001', memberId: 'mem-003', title: '负责人', active: false, error: '负责人职位 Group 不存在或已失效' })
+    } finally {
+      access.leaderGroupId = prevLeader
+    }
   })
 })

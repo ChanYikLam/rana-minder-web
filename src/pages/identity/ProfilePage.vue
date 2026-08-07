@@ -6,10 +6,12 @@ import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
 import { identityApi } from '@/services/modules'
 import { authMode } from '@/services/auth'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { MailCheck, ShieldCheck, RefreshCw, CheckCircle2, AlertTriangle, Scale } from '@lucide/vue'
 
 interface Profile {
+  version?: number
   studentId: string
   name: string
   email: string
@@ -33,6 +35,7 @@ const SYNC_META: Record<SyncState, { label: string; className: string }> = {
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionViewStore()
 const isSyncConflict = computed(() => route.meta.mode === 'sync-conflict')
 
 const state = ref<PageState>('loading')
@@ -84,7 +87,8 @@ async function loadProfile() {
   const result = await get<Profile>('/auth/profile')
   if (result.kind === 'completed') {
     profile.value = result.data
-    version.value = 1
+    // 版本号以响应为准（P2-3：删除硬编码 1，与 mock 侧最新版本保持一致）
+    version.value = result.data.version ?? 1
     state.value = 'normal'
   } else if (result.kind === 'rejected') {
     state.value = result.error.code.startsWith('IFC-ERR-00') && ['IFC-ERR-001', 'IFC-ERR-002', 'IFC-ERR-003'].includes(result.error.code)
@@ -126,7 +130,10 @@ async function handleSave() {
   if (result.kind === 'completed') {
     profile.value = result.data
     editing.value = false
-    version.value += 1
+    // 版本号以响应为准，避免「本地自增与服务器登记不一致」再次触发 409（P2-3）
+    version.value = result.data.version ?? version.value + 1
+    // 保存后刷新会话：资料门 profileComplete 翻转即时生效（P2-3：页面保存与会话联动）
+    await session.loadSession()
   } else if (result.kind === 'concurrency_conflict') {
     submitError.value = '资料已被其他会话修改，请刷新后重试'
   } else if (result.kind === 'rejected') {
@@ -164,6 +171,8 @@ async function handleVerify() {
     showVerify.value = false
     verifyCode.value = ''
     codeSent.value = false
+    // 验证通过后刷新会话：资料门 emailVerified 翻转即时生效（P2-3）
+    await session.loadSession()
   } else if (result.kind === 'rejected') {
     verifyError.value = result.error.fieldErrors?.code?.[0] || result.error.message
   }

@@ -50,6 +50,10 @@ export interface MockClubAccess {
   wizard: WizardDraft | null
   leaderGroupId: string | null
   leaderName: string | null
+  /** 向导提交时选择的部门 Group ID 列表（P1-005 权限模板映射用） */
+  deptGroupIds: string[]
+  /** 向导提交时选择的职位 Group ID 列表（不含负责人职位） */
+  roleGroupIds: string[]
   createdAt: string
   boundAt: string | null
   importedAt: string | null
@@ -57,6 +61,34 @@ export interface MockClubAccess {
   syncEvents: ClubSyncEvent[]
   freezeIntervals: ClubFreezeInterval[]
   readonly: boolean
+}
+
+/** Group → 权限模板映射（向导提交后建立，用于接入后从 Group 成员推导权限） */
+export interface GroupTemplateMapping {
+  clubId: string
+  groupId: string
+  templateId: string
+  createdAt: string
+}
+
+/** 模板映射注册表（内存态，与 clubAccesses 同步生命周期） */
+const groupTemplateMappings: GroupTemplateMapping[] = [
+  { clubId: 'club-001', groupId: 'grp-001', templateId: 'tpl-002', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-001', groupId: 'grp-lead-001', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-001', groupId: 'grp-dept-001', templateId: 'tpl-003', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-002', groupId: 'grp-002', templateId: 'tpl-002', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-002', groupId: 'grp-lead-002', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+]
+
+/** 预置模板与 Group 用途的默认关联规则（P1-005）
+ * - leader（社团负责人职位）→ tpl-001 社团负责人模板
+ * - 普通职位（副负责人/干事等）→ tpl-002 人事模板（成员管理/招新），避免越级授予负责人权限
+ * - 部门 → tpl-003 面试官模板
+ */
+const DEFAULT_TEMPLATE_MAP: Record<string, string> = {
+  leader: 'tpl-001',     // 负责人职位 Group → 社团负责人模板
+  position: 'tpl-002',   // 普通职位 Group → 人事模板
+  department: 'tpl-003', // 部门 Group → 面试官模板
 }
 
 const nowIso = () => new Date().toISOString()
@@ -107,6 +139,15 @@ const groups: GroupSeed[] = [
     id: 'grp-dept-001', name: '计算机协会技术部', stableId: 'G-COMP-DEPT-001', path: '/学校学生组织/计算机协会/技术部',
     parentId: 'grp-001', purpose: 'department', boundClubId: 'club-001', leaderGroupId: null, members: [],
   },
+  {
+    id: 'grp-dept-004', name: '摄影协会创作部', stableId: 'G-PHOTO-DEPT-001', path: '/学校学生组织/摄影协会/创作部',
+    parentId: 'grp-004', purpose: 'department', boundClubId: null, leaderGroupId: null, members: [],
+  },
+  // 同名后缀种子（与 grp-dept-001 以「技术部」结尾）：用于验证 suffix 匹配在「社团名+部门名」约定下的精确解析优先级
+  {
+    id: 'grp-dept-002', name: '计算机协会信息技术部', stableId: 'G-COMP-DEPT-002', path: '/学校学生组织/计算机协会/信息技术部',
+    parentId: 'grp-001', purpose: 'department', boundClubId: 'club-001', leaderGroupId: null, members: [],
+  },
 ]
 
 const memberNames: Record<string, string> = {
@@ -123,36 +164,36 @@ function daysAgo(days: number): string {
 export const clubAccesses: MockClubAccess[] = [
   {
     clubId: 'club-001', clubName: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001', email: 'club-001@example.edu.cn', deptGroups: ['/学校学生组织/计算机协会/技术部'], roleGroups: [], leaderRoleGroup: '/学校学生组织/计算机协会/负责人' },
-    leaderGroupId: 'grp-lead-001', leaderName: '张明远',
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001', email: 'club-001@example.edu.cn', deptGroups: ['grp-dept-001'], roleGroups: [], leaderRoleGroup: 'grp-lead-001' },
+    leaderGroupId: 'grp-lead-001', leaderName: '张明远', deptGroupIds: ['grp-dept-001'], roleGroupIds: [],
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedAt: '2022-09-05T11:00:00+08:00', importedCount: 6,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-002', clubName: '电子设计协会', description: '电子设计与嵌入式开发', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002', email: 'club-002@example.edu.cn', deptGroups: [], roleGroups: [], leaderRoleGroup: '/学校学生组织/电子设计协会/负责人' },
-    leaderGroupId: 'grp-lead-002', leaderName: '赵子涵',
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002', email: 'club-002@example.edu.cn', deptGroups: [], roleGroups: [], leaderRoleGroup: 'grp-lead-002' },
+    leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', deptGroupIds: [], roleGroupIds: [],
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedAt: '2022-09-05T11:00:00+08:00', importedCount: 1,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-003', clubName: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'suspended', groupId: 'grp-003', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-003', leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
-    leaderGroupId: null, leaderName: null,
+    leaderGroupId: null, leaderName: null, deptGroupIds: [], roleGroupIds: [],
     createdAt: '2023-03-01T00:00:00+08:00', boundAt: '2023-03-10T10:00:00+08:00', importedAt: null, importedCount: 0,
     syncEvents: [], freezeIntervals: [{ id: 'fri-001', reason: '常规停用', suspendedAt: daysAgo(9), recoveredAt: null }], readonly: true,
   },
   {
     clubId: 'club-004', clubName: '摄影协会', description: '摄影艺术与后期制作', status: 'wizard_pending', groupId: null, mappingVersion: 0,
     wizardStep: 0, wizard: { selectedGroupId: null, leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
-    leaderGroupId: null, leaderName: null,
+    leaderGroupId: null, leaderName: null, deptGroupIds: [], roleGroupIds: [],
     createdAt: '2025-07-28T00:00:00+08:00', boundAt: null, importedAt: null, importedCount: 0,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-005', clubName: '新媒体中心', description: '校园新媒体运营与内容创作', status: 'sync_abnormal_ro', groupId: 'grp-005', mappingVersion: 2,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-005', leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
-    leaderGroupId: null, leaderName: null,
+    leaderGroupId: null, leaderName: null, deptGroupIds: [], roleGroupIds: [],
     createdAt: '2024-09-01T00:00:00+08:00', boundAt: '2024-09-08T10:00:00+08:00', importedAt: null, importedCount: 0,
     syncEvents: [{ id: 'evt-001', kind: 'group_lost', at: daysAgo(3), note: '对账检测到 Group 删除/移动/失权，进入同步异常只读' }],
     freezeIntervals: [], readonly: true,
@@ -163,6 +204,7 @@ export const clubAccesses: MockClubAccess[] = [
 
 const seedClubAccesses: MockClubAccess[] = structuredClone(clubAccesses)
 const seedGroups: GroupSeed[] = structuredClone(groups)
+const seedGroupTemplateMappings: GroupTemplateMapping[] = structuredClone(groupTemplateMappings)
 
 /** 测试隔离：恢复接入注册表与 Group 绑定关系的种子快照 */
 export function resetOrgDb(): void {
@@ -174,6 +216,7 @@ export function resetOrgDb(): void {
     g.leaderGroupId = seed.leaderGroupId
     g.members = [...seed.members]
   }
+  groupTemplateMappings.splice(0, groupTemplateMappings.length, ...structuredClone(seedGroupTemplateMappings))
 }
 
 function findClub(clubId: string): MockClubAccess | undefined {
@@ -297,6 +340,128 @@ function listPositionGroups(parentId: string, excludeBound = true): GroupNode[] 
 }
 
 /** Group 详情：基本信息 + 已有成员 + 可用负责人职位 Group（向导步骤 1/2 使用） */
+let positionGroupSeq = 0
+
+/** 部门 Group 解析：社团 Group 下 purpose=department 的 Group。解析优先级——①精确名；②「社团名+部门名」拼接（种子命名约定，如 计算机协会技术部）；
+ * ③名称后缀匹配（同后缀多候选时取命名最短者，最贴近部门名），避免同后缀歧义时 find 取到首个非目标 Group */
+function findDepartmentGroup(clubGroup: GroupSeed, departmentName: string | null): GroupSeed | null {
+  if (!departmentName) return null
+  const candidates = groups.filter((g) => g.parentId === clubGroup.id && g.purpose === 'department')
+  return (
+    candidates.find((g) => g.name === departmentName) ??
+    candidates.find((g) => g.name === clubGroup.name + departmentName) ??
+    candidates.filter((g) => g.name.endsWith(departmentName)).sort((a, b) => a.name.length - b.name.length)[0] ??
+    null
+  )
+}
+
+/** 职位 Group 定位/建立：部门职位挂在部门 Group 下（部门 Group 缺失时挂社团 Group 下），同名职位 Group 已存在则复用 */
+function resolvePositionGroup(clubGroup: GroupSeed, departmentGroup: GroupSeed | null, title: string): GroupSeed {
+  const parent = departmentGroup ?? clubGroup
+  const existing = groups.find((g) => g.parentId === parent.id && g.purpose === 'position' && g.name === title)
+  if (existing) return existing
+  positionGroupSeq += 1
+  const node: GroupSeed = {
+    id: `grp-pos-${positionGroupSeq}`,
+    name: title,
+    stableId: `G-POS-${positionGroupSeq}`,
+    path: `${parent.path}/${title}`,
+    parentId: parent.id,
+    purpose: 'position',
+    boundClubId: clubGroup.boundClubId,
+    leaderGroupId: null,
+    members: [],
+  }
+  groups.push(node)
+  return node
+}
+
+/**
+ * ORG-001/017：Group 为当前关系权威——任命/免职/换届执行后同步职位 Group 成员，positions 不得独立于 Group 变动。
+ * 职位 Group 解析：title=负责人 → 社团负责人职位 Group（leaderGroupId）；其余 → 部门 Group 下的同名职位 Group（部门 Group 缺失时挂社团 Group 下），无则自动建立。
+ * 宽容语义：移除操作不自动建组（未命中既有职位 Group 视为无事可做，不记录失败）；社团未接入/未绑定 Group 时返回 ok:false 但不阻断任命流程（调用方忽略结果）。
+ * 失败留痕：所有 ok:false 写入 groupSyncTraces，避免「职位已写入但 Group 未同步」静默发生；负责人 Group 配置悬空（leaderGroupId 指向不存在）视为配置损坏，
+ * 即使移除也返回明确错误并入留痕，不再静默吞错。
+ */
+export interface PositionSyncInput {
+  clubId: string
+  memberId: string
+  memberName: string
+  departmentName: string | null
+  title: string
+  active: boolean
+}
+
+export interface GroupSyncTrace {
+  id: string
+  at: string
+  ok: boolean
+  clubId: string
+  memberId: string
+  memberName: string
+  departmentName: string | null
+  title: string
+  active: boolean
+  error: string
+}
+
+/** ORG-001/017 同步失败留痕（最近失败在前；调用方可据此观测/补偿，AppointmentCommand.syncWarning 同步可见） */
+export const groupSyncTraces: GroupSyncTrace[] = []
+
+let groupSyncTraceSeq = 0
+
+function groupSyncFail(input: PositionSyncInput, error: string): { ok: false; error: string } {
+  groupSyncTraceSeq += 1
+  groupSyncTraces.unshift({
+    id: `gs-${groupSyncTraceSeq}`,
+    at: nowIso(),
+    ok: false,
+    clubId: input.clubId,
+    memberId: input.memberId,
+    memberName: input.memberName,
+    departmentName: input.departmentName,
+    title: input.title,
+    active: input.active,
+    error,
+  })
+  return { ok: false, error }
+}
+
+export function syncPositionMembership(input: PositionSyncInput): { ok: boolean; error?: string; groupId?: string } {
+  const access = clubAccesses.find((c) => c.clubId === input.clubId)
+  if (!access) return groupSyncFail(input, '社团未接入')
+  const clubGroup = access.groupId ? groups.find((g) => g.id === access.groupId) : undefined
+  if (!clubGroup) return groupSyncFail(input, '社团未绑定 Group')
+  let target: GroupSeed | null
+  if (input.title === '负责人') {
+    if (access.leaderGroupId) {
+      target = groups.find((g) => g.id === access.leaderGroupId) ?? null
+      // leaderGroupId 为空时非目标（社团接入向导未配置负责人 Group）不视为错误；配置了却不存在则视为配置损坏，不静默吞错
+      if (!target) return groupSyncFail(input, '负责人职位 Group 不存在或已失效')
+    } else {
+      target = null
+    }
+  } else if (input.active) {
+    target = resolvePositionGroup(clubGroup, findDepartmentGroup(clubGroup, input.departmentName), input.title)
+  } else {
+    const parent = findDepartmentGroup(clubGroup, input.departmentName) ?? clubGroup
+    target = groups.find((g) => g.parentId === parent.id && g.purpose === 'position' && g.name === input.title) ?? null
+  }
+  if (!target) {
+    if (input.active) return groupSyncFail(input, '未找到对应职位 Group')
+    // 移除宽容：负责人无配置或非负责人职位从未建组/从未入组，视为无事可做，不记录失败
+    return { ok: true }
+  }
+  const idx = target.members.indexOf(input.memberId)
+  if (input.active) {
+    if (idx === -1) target.members.push(input.memberId)
+    if (!memberNames[input.memberId]) memberNames[input.memberId] = input.memberName
+  } else if (idx !== -1) {
+    target.members.splice(idx, 1)
+  }
+  return { ok: true, groupId: target.id }
+}
+
 export function getGroupDetail(groupId: string): {
   id: string
   name: string
@@ -376,6 +541,43 @@ export function listGroups(): GroupNode[] {
   }))
 }
 
+// ================= 模板映射（US-CFG-01 / P1-005） =================
+
+/** 查询社团所有 Group→Template 映射 */
+export function getTemplateMappings(clubId: string): GroupTemplateMapping[] {
+  return groupTemplateMappings.filter((m) => m.clubId === clubId)
+}
+
+/** 创建单条 Group→Template 映射（幂等） */
+function ensureMapping(clubId: string, groupId: string, templateId: string) {
+  const exists = groupTemplateMappings.some((m) => m.clubId === clubId && m.groupId === groupId)
+  if (!exists) {
+    groupTemplateMappings.push({ clubId, groupId, templateId, createdAt: nowIso() })
+  }
+}
+
+/** 为社团批量创建权限模板映射（向导完成后调用，幂等） */
+function createTemplateMappings(club: MockClubAccess) {
+  // 负责人 Group → tpl-001（社团负责人模板）
+  if (club.leaderGroupId) ensureMapping(club.clubId, club.leaderGroupId, 'tpl-001')
+  // 部门 Group → tpl-003（面试官模板）
+  for (const deptId of club.deptGroupIds) ensureMapping(club.clubId, deptId, DEFAULT_TEMPLATE_MAP.department)
+  // 普通职位 Group（roleGroupIds 不含负责人，负责人已在上面单独映射） → tpl-002（人事模板）
+  for (const roleId of club.roleGroupIds) {
+    if (roleId === club.leaderGroupId) continue // 负责人已映射 tpl-001，避免重复
+    ensureMapping(club.clubId, roleId, DEFAULT_TEMPLATE_MAP.position)
+  }
+  // 社团主 Group → tpl-002（人事模板；主 Group 成员为普通成员，不授予负责人级权限）
+  if (club.groupId) ensureMapping(club.clubId, club.groupId, DEFAULT_TEMPLATE_MAP.position)
+}
+
+/** 清除社团所有模板映射（解除接入时调用） */
+export function clearTemplateMappings(clubId: string) {
+  for (let i = groupTemplateMappings.length - 1; i >= 0; i--) {
+    if (groupTemplateMappings[i].clubId === clubId) groupTemplateMappings.splice(i, 1)
+  }
+}
+
 /**
  * 新社团接入：从既有 Casdoor Group 选择接入（ORG-005 取消新建社团，CFG-006 向导）。
  * 创建即进入 wizard_pending（SM-ORG-001 初始态），任一步校验失败保持未启用且不产生部分权限；
@@ -410,6 +612,8 @@ export function createClubAccess(input: { groupId: string; name: string; descrip
     wizard: { selectedGroupId: input.groupId, leaderGroupId: input.leaderGroupId, email: (input.email ?? '').trim(), deptGroups: input.deptGroups ?? [], roleGroups: input.roleGroups ?? [], leaderRoleGroup: input.leaderRoleGroup ?? '' },
     leaderGroupId: input.leaderGroupId,
     leaderName: memberNames[leader.members[0]] ?? null,
+    deptGroupIds: input.deptGroups ?? [],
+    roleGroupIds: input.roleGroups ?? [],
     createdAt: nowIso(),
     boundAt: null,
     importedAt: null,
@@ -477,10 +681,13 @@ export function completeWizard(clubId: string): { ok: boolean; error?: string; d
   club.groupId = groupId
   club.leaderGroupId = leaderGroupId
   club.leaderName = memberNames[leaderGroup.members[0]] ?? null
+  club.deptGroupIds = club.wizard?.deptGroups ?? club.deptGroupIds ?? []
+  club.roleGroupIds = club.wizard?.roleGroups ?? club.roleGroupIds ?? []
   club.boundAt = nowIso()
   club.mappingVersion += 1
   club.status = 'enabled'
   club.readonly = false
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -531,6 +738,7 @@ export function recoverClub(clubId: string): { ok: boolean; error?: string; data
   club.status = 'enabled'
   club.readonly = false
   pushSyncEvent(club, 'recover', '恢复启用，冻结期限已按停用时长顺延')
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -538,6 +746,8 @@ export function recoverClub(clubId: string): { ok: boolean; error?: string; data
 export function disconnectClub(clubId: string): { ok: boolean; error?: string; data?: ClubAccessItem } {
   const club = findClub(clubId)
   if (!club) return { ok: false, error: '未找到该社团' }
+  // 支持 enabled → pending_rebind（前端管理页对已启用社团展示"解除接入"）与
+  // sync_abnormal_ro → pending_rebind（对账异常后解除），统一走 pending_rebind 待重接状态
   const check = validateTransition(club, 'pending_rebind', 'disconnect')
   if (!check.ok) return { ok: false, error: check.error }
   const prevGroupId = club.groupId
@@ -563,6 +773,7 @@ export function disconnectClub(clubId: string): { ok: boolean; error?: string; d
   club.wizardStep = 0
   club.wizard = { selectedGroupId: null, leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' }
   pushSyncEvent(club, 'disconnect', `解除接入（原 Group：${prevGroupName}），等待重新接入`)
+  clearTemplateMappings(clubId)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -602,6 +813,7 @@ export function rebindClub(clubId: string, groupId: string): { ok: boolean; erro
   club.status = 'suspended'
   club.readonly = false
   pushSyncEvent(club, 'rebind', `重新绑定 Group「${groupName(groupId)}」，统一先进入已停用`)
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -621,6 +833,7 @@ export function reaccessClub(clubId: string, groupId: string): { ok: boolean; er
   club.status = 'suspended'
   club.readonly = false
   pushSyncEvent(club, 'reaccess', `重新接入 Group「${groupName(groupId)}」，统一先进入已停用`)
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 

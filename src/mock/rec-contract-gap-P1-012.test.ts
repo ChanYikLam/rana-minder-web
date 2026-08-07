@@ -107,6 +107,33 @@ describe('P1-012 REC 契约缺口修复', () => {
       expect(JSON.stringify(app.eligibilitySnapshot!.answers)).toBe(snapshotAnswers)
     })
 
+    it('快照对嵌套 answers 也做深拷贝（非浅展开）', async () => {
+      resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+      await invokeHandler(applyUrl, '/api/activity/recruitment/act-002/apply', {
+        formData: { profile: { name: '陈雨桐', tags: ['a'] }, grade: '2021' },
+        preferences: [{ departmentId: 'dept-101' }],
+        allowAdjustment: true,
+      })
+      const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.applicantName === '陈雨桐')!
+      const snapshot = app.eligibilitySnapshot!
+      // 修改嵌套对象/数组不应影响快照
+      ;(snapshot.answers.profile as { tags: string[] }).tags.push('b')
+      expect((app.answers.profile as { tags: string[] }).tags).toEqual(['a'])
+    })
+
+    it('撤销提交后资格快照被清空', async () => {
+      resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+      await invokeHandler(applyUrl, '/api/activity/recruitment/act-002/apply', {
+        formData: { name: '陈雨桐' },
+        preferences: [{ departmentId: 'dept-101' }],
+        allowAdjustment: true,
+      })
+      const out = await invokeHandler('/api/activity/recruitment/:activityId/apply/withdraw', '/api/activity/recruitment/act-002/apply/withdraw')
+      expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+      const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.applicantName === '陈雨桐')!
+      expect(app.eligibilitySnapshot).toBeNull()
+    })
+
     it('GET 我的申请返回 eligibilitySnapshot 字段', async () => {
       resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
       await invokeHandler(applyUrl, '/api/activity/recruitment/act-002/apply', {
@@ -146,6 +173,22 @@ describe('P1-012 REC 契约缺口修复', () => {
         reason: '调剂',
       })
       expect(out.statusCode).toBe(403)
+    })
+
+    it('非已提交状态的申请不可创建调剂路径', async () => {
+      // 先以 u-002 的申请人身份撤销提交回到草稿（其面试为 pending_selection，可撤销）
+      resolveMockUser(`/api/auth/session?_mock_user=${mockUserKeyOf('user-applicant-002')}`)
+      const withdrawn = await invokeHandler('/api/activity/recruitment/:activityId/apply/withdraw', '/api/activity/recruitment/act-001/apply/withdraw')
+      expect(withdrawn.statusCode, JSON.stringify(withdrawn.body)).toBe(200)
+      // 切回管理员创建调剂路径：应因申请非已提交而被拒
+      resolveMockUser(`/api/auth/session?_mock_user=${LEADER_KEY}`)
+      const out = await invokeHandler(adjustmentUrl, '/api/org/club-001/recruitment/act-001/applications/u-002/paths/adjustment', {
+        departmentId: 'dept-001',
+        departmentName: '技术部',
+        reason: '调剂',
+      })
+      expect(out.statusCode).toBe(422)
+      expect(String(out.body.message)).toContain('仅已提交')
     })
 
     it('调剂路径已存在 / 部门不在活动范围 / 缺少原因时拒绝', async () => {
@@ -200,6 +243,8 @@ describe('P1-012 REC 契约缺口修复', () => {
       expect(path.labelHistory[0].action).toBe('set')
       expect(path.labelHistory[0].actorName).toBe('张明远')
       expect(path.labelHistory[0].timestamp).toBeTruthy()
+      // REC-039：标签设置者 userId 显式固化，后续改判通知不再按姓名反查（避免同名歧义）
+      expect(path.labelSetByUserId).toBe('user-leader-001')
     })
 
     it('清除标签写入 labelHistory（action=clear）', async () => {
@@ -229,6 +274,8 @@ describe('P1-012 REC 契约缺口修复', () => {
       const path = rdb.findApplication('act-001', 'u-001')!.paths['dept-001']
       expect(path.labelHistory.some((h) => h.action === 'override')).toBe(true)
       expect(path.labelSetBy).toBe('张明远')
+      // 覆盖后 labelSetByUserId 同步更新为当前操作者（李思颖先设 → 张明远覆盖）
+      expect(path.labelSetByUserId).toBe('user-leader-001')
       // history 保持追加：set + override 两条
       expect(path.labelHistory.length).toBe(2)
     })
@@ -248,6 +295,7 @@ describe('P1-012 REC 契约缺口修复', () => {
         label: true,
       })
       expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+      // 改判通知应发给原设置者本人（李思颖 user-hr-001），而不是按姓名反查命中的同名账号
       const items = listNotifications('user-hr-001', false)
       const ntf = items.find((n) => n.type === 'label_override')
       expect(ntf).toBeTruthy()
@@ -255,6 +303,8 @@ describe('P1-012 REC 契约缺口修复', () => {
       expect(ntf!.body).toContain('刘子豪')
       expect(ntf!.body).toContain('技术部')
       expect(ntf!.body).toContain('张明远')
+      // 链接必须匹配真实路由 /org/:clubId/recruitment/:activityId/applications（点击可达）
+      expect(ntf!.link).toBe('/org/club-001/recruitment/act-001/applications')
     })
 
     it('同一操作者重复设置不触发改判通知', async () => {

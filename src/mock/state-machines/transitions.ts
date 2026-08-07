@@ -83,6 +83,7 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       normal_suspend: 'suspended',
       force_suspend: 'suspended',
       group_lost: 'sync_abnormal_ro',
+      disconnect: 'pending_rebind',
     },
     suspended: {
       re_enable: 'enabled',
@@ -304,6 +305,7 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       first_invite: 'invite_phase',
       collect_cancel: 'cancelled',
       force_close: 'force_closed',
+      deadline_expired: 'closed',
     },
     invite_phase: {
       all_invites_final: 'closing_confirm',
