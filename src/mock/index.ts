@@ -77,13 +77,13 @@ function businessError(message: string) {
 }
 
 /** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
-function forbidden(url?: string) {
+function forbidden(url?: string, method: string = 'post') {
   if (url) {
     const user = resolveMockUser(url)
     trackAccessEvent({
       actorId: user.id,
       actorName: user.name,
-      method: 'post',
+      method,
       path: (url.split('?')[0] || url),
       outcome: 'forbidden',
       at: Date.now(),
@@ -3103,7 +3103,7 @@ response: ({ url }: { url: string }) => {
     url: '/api/admin/governance/high-risk-commands',
     method: 'get',
     response: ({ url }: { url: string }) => {
-      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden(url)
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden(url, 'get')
       return {
         code: 0,
         data: {
@@ -3121,7 +3121,7 @@ response: ({ url }: { url: string }) => {
     url: '/api/admin/governance/anomaly-access',
     method: 'get',
     response: ({ url }: { url: string }) => {
-      if (!getPermissions(resolveMockUser(url), '').includes('platform:audit:view')) return forbidden(url)
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:audit:view')) return forbidden(url, 'get')
       const alerts = listAnomalyAlerts()
       return {
         code: 0,
@@ -3183,7 +3183,7 @@ response: ({ url }: { url: string }) => {
     url: '/api/admin/security/oidc',
     method: 'get',
     response: ({ url }: { url: string }) => {
-      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden(url)
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden(url, 'get')
       return { code: 0, data: getOidcConfig() }
     },
   },
