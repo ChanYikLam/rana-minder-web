@@ -243,6 +243,8 @@ describe('P1-012 REC 契约缺口修复', () => {
       expect(path.labelHistory[0].action).toBe('set')
       expect(path.labelHistory[0].actorName).toBe('张明远')
       expect(path.labelHistory[0].timestamp).toBeTruthy()
+      // REC-039：标签设置者 userId 显式固化，后续改判通知不再按姓名反查（避免同名歧义）
+      expect(path.labelSetByUserId).toBe('user-leader-001')
     })
 
     it('清除标签写入 labelHistory（action=clear）', async () => {
@@ -272,6 +274,8 @@ describe('P1-012 REC 契约缺口修复', () => {
       const path = rdb.findApplication('act-001', 'u-001')!.paths['dept-001']
       expect(path.labelHistory.some((h) => h.action === 'override')).toBe(true)
       expect(path.labelSetBy).toBe('张明远')
+      // 覆盖后 labelSetByUserId 同步更新为当前操作者（李思颖先设 → 张明远覆盖）
+      expect(path.labelSetByUserId).toBe('user-leader-001')
       // history 保持追加：set + override 两条
       expect(path.labelHistory.length).toBe(2)
     })
@@ -291,6 +295,7 @@ describe('P1-012 REC 契约缺口修复', () => {
         label: true,
       })
       expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+      // 改判通知应发给原设置者本人（李思颖 user-hr-001），而不是按姓名反查命中的同名账号
       const items = listNotifications('user-hr-001', false)
       const ntf = items.find((n) => n.type === 'label_override')
       expect(ntf).toBeTruthy()
