@@ -169,6 +169,13 @@ const platformConfig: PlatformConfig = {
   maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
   academicYear: '2026—2027', cohort: '2026级',
 }
+/** 平台配置字段白名单（P2-017：POST 仅接受白名单字段并按期望类型校验，拒绝未知键/类型越界） */
+const CONFIG_FIELD_TYPES: Record<keyof PlatformConfig, 'string' | 'boolean' | 'number'> = {
+  clubName: 'string', clubDescription: 'string',
+  requireEmailVerification: 'boolean', requireProfileComplete: 'boolean',
+  maxMembers: 'number', allowSelfExit: 'boolean',
+  academicYearStart: 'number', academicYear: 'string', cohort: 'string',
+}
 let platformConfigVersion = 1
 
 /** 保留策略（US-AUD-04：不可变版本发布；缩短期限对已有数据 ≥7 天缓冲） */
@@ -210,6 +217,14 @@ const adminExportTasks: ExportTask[] = [
 const EXPORT_GENERATE_MS = 3000
 const EXPORT_EXPIRY_MS = 24 * 3600 * 1000
 const EXPORT_STALE_FAIL_MS = 24 * 3600 * 1000
+const DAY_MS = 24 * 3600 * 1000
+
+/** P2-017：周期对比趋势——本期 > 上期 → up（差值），本期 < 上期 → down（差值），持平 → flat/0 */
+function trendOf(current: number, previous: number): { trend: 'up' | 'down' | 'flat'; trendValue: number } {
+  if (current > previous) return { trend: 'up', trendValue: current - previous }
+  if (current < previous) return { trend: 'down', trendValue: previous - current }
+  return { trend: 'flat', trendValue: 0 }
+}
 
 /** 导出任务读取时惰性结算（替代 setTimeout 硬改 completed，可确定性 + 失败态可观测）：
  * generating 满 3s → completed（附下载链接/大小，24h 失效）；超 24h 仍未完成 → failed（自愈，不永久卡生成中） */
@@ -2431,21 +2446,26 @@ policies: retentionPolicies,
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count)
       const now = new Date()
-      const joinedThisMonth = scopedMembers.filter((m) => {
-        const d = new Date(m.joinedAt)
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-      }).length
+      const monthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`
+      const joinedThisMonth = scopedMembers.filter((m) => monthKey(new Date(m.joinedAt)) === monthKey(now)).length
+      const joinedLastMonth = scopedMembers.filter((m) => monthKey(new Date(m.joinedAt)) === monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))).length
       const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === clubId && a.status === 'in_progress' && (!scope || a.departments.some((d) => d.name === scope))).length
       const pending = rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted' && (!scope || a.preferences[0]?.departmentName === scope)).length
+      // P2-017：趋势按周期对比真实计算（此前四项 trend 全硬编码 flat/0，趋势信息退化）：
+      // 总成员数 = 本月净增（active 无退出时间戳，净增即本月入社数）；本月新增 = 本月 vs 上月入社
+      // 活跃招新 = 进行中 vs 近 30 天已结束；待处理申请 = 当前挂起 vs 挂起已逾 30 天（上期遗留量）
+      const since30d = Date.now() - 30 * DAY_MS
+      const completedRecent = rdb.recruitmentActivities.filter((a) => a.clubId === clubId && a.completedAt !== null && Date.parse(a.completedAt) >= since30d && (!scope || a.departments.some((d) => d.name === scope))).length
+      const pendingPrev = rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted' && a.submittedAt !== null && Date.parse(a.submittedAt) < since30d && (!scope || a.preferences[0]?.departmentName === scope)).length
       const dept = scope ? distribution.find((d) => d.name === scope) : undefined
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: scopedMembers.length, trend: 'flat', trendValue: 0 },
-            { label: '本月新增', value: joinedThisMonth, trend: 'flat', trendValue: 0 },
-            { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
-            { label: '待处理申请', value: pending, trend: 'flat', trendValue: 0 },
+            { label: '总成员数', value: scopedMembers.length, ...trendOf(scopedMembers.length, scopedMembers.length - joinedThisMonth) },
+            { label: '本月新增', value: joinedThisMonth, ...trendOf(joinedThisMonth, joinedLastMonth) },
+            { label: '活跃招新', value: activeRec, ...trendOf(activeRec, completedRecent) },
+            { label: '待处理申请', value: pending, ...trendOf(pending, pendingPrev) },
           ],
           departmentDistribution: scope ? (dept ? [dept] : []) : distribution,
         },
@@ -2642,6 +2662,9 @@ policies: retentionPolicies,
         // P3-2：ISO 时间字符串（+08:00 与 Z 混用）用 localeCompare 字典序不可靠，改时间戳差值
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, 6)
+      // P2-017：统计前先结算任务队列，避免 seed 中逾期未完成的生成中任务（如 exp-002）永久计入 pending
+      exportTasks.forEach(settleExportTask)
+      adminExportTasks.forEach(settleExportTask)
       const allExportTasks = [...exportTasks, ...adminExportTasks]
       return {
         code: 0,
@@ -2685,7 +2708,18 @@ policies: retentionPolicies,
     response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
       if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
       // P2-3：落内存库并回读（重进页面不还原），与 permissionTemplates 持久化方式一致
-      Object.assign(platformConfig, body.input || {})
+      // P2-017：白名单逐字段校验后再合并，未知字段/类型不符直接拒绝（防原型污染与类型损坏）
+      const input = body.input ?? {}
+      for (const key of Object.keys(input)) {
+        // hasOwnProperty 判定而非 in：__proto__/constructor 沿原型链在对象上恒为真，in 会被绕过
+        if (!Object.prototype.hasOwnProperty.call(CONFIG_FIELD_TYPES, key)) return businessError(`未知配置字段：${key}`)
+        const value = input[key]
+        const expected = CONFIG_FIELD_TYPES[key as keyof PlatformConfig]
+        if (expected === 'number' ? typeof value !== 'number' : typeof value !== expected) {
+          return businessError(`配置字段 ${key} 需为 ${expected} 类型`)
+        }
+      }
+      Object.assign(platformConfig, input)
       platformConfigVersion += 1
       return { code: 0, data: { ...platformConfig, version: platformConfigVersion, savedAt: new Date().toISOString() } }
     },

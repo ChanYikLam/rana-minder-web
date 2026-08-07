@@ -342,4 +342,12 @@ describe('辞职申请（create / decide）', () => {
     expect(triggerMemberExternalChange('club-001', 'mem-zzz')).toMatchObject({ ok: false, error: '未找到该成员' })
     expect(triggerMemberExternalChange('club-001', 'mem-005')).toMatchObject({ ok: false, error: '仅活跃成员可触发外部变更检测' })
   })
+
+  it('triggerMemberExternalChange：批量触发 id 唯一（P2-017，同毫秒不再重复，MemberProfilePage 以 an.id 作 v-for key）', () => {
+    const mem = members.find((m) => m.id === 'mem-001')!
+    for (let i = 0; i < 5; i++) triggerMemberExternalChange('club-001', 'mem-001')
+    const ids = mem.anomalies.slice(0, 5).map((a) => a.id)
+    expect(ids.every((id) => id.startsWith('anm-'))).toBe(true)
+    expect(new Set(ids).size).toBe(5)
+  })
 })

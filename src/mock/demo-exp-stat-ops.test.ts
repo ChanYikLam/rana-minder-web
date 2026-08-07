@@ -147,4 +147,87 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     expect(clubByLabel['待处理申请']).toBe(5)
     expect(clubByLabel['活跃招新']).toBe(rdb.recruitmentActivities.filter((a) => a.clubId === 'club-001' && a.status === 'in_progress').length)
   })
+
+  it('P2-017：admin config 白名单——未知字段/原型键拒绝，类型不符拒绝', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    // 模拟 JSON 报文携带 __proto__ 键（JSON.parse 产生自有属性），白名单必须拒绝并不得污染原型
+    const proto = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', JSON.parse('{"input":{"__proto__":{"polluted":1}}}'))
+    expect(proto.statusCode).toBe(422)
+    expect((proto.body as { message: string }).message).toContain('未知配置字段')
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+
+    const unknown = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', {
+      input: { evil: 1, clubName: 'A' },
+    })
+    expect(unknown.statusCode).toBe(422)
+    expect((unknown.body as { message: string }).message).toContain('未知配置字段')
+
+    const badType = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', {
+      input: { maxMembers: 'abc' },
+    })
+    expect(badType.statusCode).toBe(422)
+    expect((badType.body as { message: string }).message).toContain('需为 number 类型')
+
+    const badBool = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', {
+      input: { allowSelfExit: 'yes' },
+    })
+    expect(badBool.statusCode).toBe(422)
+    expect((badBool.body as { message: string }).message).toContain('需为 boolean 类型')
+  })
+
+  it('P2-017：admin config 白名单——合法字段仍可落库且拒绝后不影响已存值', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { clubName: 'RanaMinder 平台' } })
+    const good = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { maxMembers: 600 } })
+    expect(good.statusCode).toBe(200)
+    expect((good.body.data as { maxMembers: number; clubName: string }).maxMembers).toBe(600)
+    expect((good.body.data as { clubName: string }).clubName).toBe('RanaMinder 平台')
+  })
+
+  it('P2-017：ops-status 统计前结算任务队列——逾期生成中任务不再计入 pending（exp-002 → failed）', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const out = await invokeHandler('/api/admin/ops-status', 'get', '/api/admin/ops-status')
+    expect(out.statusCode).toBe(200)
+    const queue = (out.body.data as { taskQueue: { pending: number; processing: number; failed: number } }).taskQueue
+    expect(queue.pending).toBe(0)
+    expect(queue.failed).toBeGreaterThanOrEqual(1)
+    // 结算写回共享状态机：社团导出清单中 exp-002 同样呈现失败而非生成中
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const exports = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const items = (exports.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.find((t) => t.id === 'exp-002')?.status).toBe('failed')
+  })
+
+  it('P2-017：统计 trend 按周期对比真实计算（不再四项全 flat/0）', async () => {
+    db.members.push({
+      id: 'mem-stats-2', clubId: 'club-001', studentId: '20990002',
+      name: '趋势新人', email: 'trend@example.edu.cn', phone: '13800000088',
+      status: 'active', joinedAt: new Date().toISOString(), exitedAt: null,
+      positions: [{ id: 'pos-stats-2', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, status: 'active' }],
+      tenures: [], departmentHistory: [], anomalies: [],
+    })
+
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const out = await invokeHandler('/api/org/:clubId/stats', 'get', '/api/org/club-001/stats')
+    const byLabel = Object.fromEntries(
+      ((out.body.data as { summary: { label: string; trend: string; trendValue: number }[] }).summary).map((s) => [s.label, s]),
+    )
+    // 总成员数：本月净增 1 → up/1
+    expect(byLabel['总成员数']).toMatchObject({ trend: 'up', trendValue: 1 })
+    // 本月新增：本月 1 vs 上月 0 → up/1
+    expect(byLabel['本月新增']).toMatchObject({ trend: 'up', trendValue: 1 })
+    // 活跃招新：进行中 1（act-001，club-001）vs 近 30 天已结束 0 → up/1
+    expect(byLabel['活跃招新']).toMatchObject({ trend: 'up', trendValue: 1 })
+    // 待处理申请：当前 5 vs 上期遗留 5（种子均提交逾 30 天）→ flat/0
+    expect(byLabel['待处理申请']).toMatchObject({ trend: 'flat', trendValue: 0 })
+
+    resolveMockUser('/api/auth/session?_mock_user=deptleader')
+    const deptOut = await invokeHandler('/api/org/:clubId/stats', 'get', '/api/org/club-001/stats')
+    const deptByLabel = Object.fromEntries(
+      ((deptOut.body.data as { summary: { label: string; trend: string; trendValue: number }[] }).summary).map((s) => [s.label, s]),
+    )
+    // 部门口径：注入新人本月入社（技术部）→ 总成员数 up/1；进行中 1 vs 已结束 0 → 活跃招新 up/1
+    expect(deptByLabel['总成员数']).toMatchObject({ trend: 'up', trendValue: 1 })
+    expect(deptByLabel['活跃招新']).toMatchObject({ trend: 'up', trendValue: 1 })
+  })
 })

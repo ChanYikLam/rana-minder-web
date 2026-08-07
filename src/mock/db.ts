@@ -21,6 +21,9 @@ export function resolveMemberId(userId: string, clubId: string): string | null {
   return MEMBER_BY_USER[userId]?.[clubId] ?? null
 }
 
+/** 成员级异常 id 单调序列：同毫秒批量触发时保证唯一（MemberProfilePage 以 an.id 作 v-for key） */
+let anomalySeq = 0
+
 /**
  * 成员级外部变更触发点（P2-015：与社团级 triggerGroupLost 对称）：
  * 模拟对账检测到成员在统一身份认证侧的信息变更，向该成员登记数据异常
@@ -37,7 +40,7 @@ export function triggerMemberExternalChange(
   const message = kind === 'casdoor_mismatch'
     ? '对账检测到成员在统一身份认证侧信息不一致（如部门/学籍），已登记待人工核验'
     : '对账检测到成员外部信息变更（如学籍/姓名/部门调整），已登记待人工确认'
-  member.anomalies.unshift({ id: 'anm-' + Date.now(), kind, message, createdAt: new Date().toISOString() })
+  member.anomalies.unshift({ id: 'anm-' + Date.now() + '-' + anomalySeq++, kind, message, createdAt: new Date().toISOString() })
   return { ok: true, data: member }
 }
 
