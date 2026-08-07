@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import * as db from './db'
-import { getGroupDetail, searchGroups } from './db-organization'
+import { getGroupDetail, searchGroups, clubAccesses, groupSyncTraces } from './db-organization'
 import {
   cancelAppointmentCommand,
   confirmInvitationSync,
@@ -361,13 +361,49 @@ describe('职位 Group 成员同步（ORG-001/017）', () => {
     expect(getGroupDetail(newGroup.id)!.members.some((m) => m.id === 'mem-005')).toBe(true)
   })
 
-  it('辞职批准：同步移除职位 Group 成员', () => {
-    // mem-006（active，运营部部长）此前经调岗用例同步进入「部长」职位 Group
+  it('辞职批准：同步移除职位 Group 成员（自带前置数据，不依赖调岗用例副作用）', () => {
+    // 前置：it4 自行任命 mem-005 / mem-006 为「运营部部长」并入「部长」职位 Group，
+    // 不再依赖 it3（调岗）或任命域用例的残留成员，具备独立可运行性。
+    const appointed: string[] = []
+    for (const m of [
+      { memberId: 'mem-005', memberName: '刘子豪' },
+      { memberId: 'mem-006', memberName: '林晓薇' },
+    ]) {
+      const created = createAppointmentCommand('club-001', {
+        action: 'appoint', memberId: m.memberId, memberName: m.memberName, departmentId: 'dept-004', departmentName: '运营部', title: '部长', scheduledAt: null, actorName: '系统',
+      })
+      executeAppointmentCommand(created.command!.id)
+      expect(executeAppointmentCommand(created.command!.id).ok).toBe(true)
+      appointed.push(created.command!.id)
+    }
+    const group = searchGroups('部长').find((g) => g.purpose === 'position')!
+    expect(getGroupDetail(group.id)!.members.map((m) => m.id)).toEqual(expect.arrayContaining(['mem-005', 'mem-006']))
+
+    // mem-006 辞职批准：移出「部长」职位 Group；mem-005 仍保留——验证的是辞职同步结果而非调岗残留
     const req = createResignationRequest('club-001', 'mem-006', '林晓薇', '运营部', '部长', '毕业离校')
     expect(decideResignationRequest(req.id, 'approve', '系统').ok).toBe(true)
-    const group = searchGroups('部长').find((g) => g.purpose === 'position')!
     const detail = getGroupDetail(group.id)!
     expect(detail.members.some((m) => m.id === 'mem-006')).toBe(false)
     expect(detail.members.some((m) => m.id === 'mem-005')).toBe(true)
+    // 未因承诺而退让 mem-006 之外的组外成员
+    expect(appointed).toHaveLength(2)
+  })
+
+  it('同步失败留痕：负责人 Group 配置悬空时任命 ok 但 cmd.syncWarning 与 groupSyncTraces 记录「职位已写入、Group 未同步」', () => {
+    const access = clubAccesses.find((c) => c.clubId === 'club-001')!
+    const prevLeader = access.leaderGroupId
+    access.leaderGroupId = 'grp-lead-ghost'
+    try {
+      const created = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-005', memberName: '刘子豪', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', scheduledAt: null, actorName: '系统' })
+      executeAppointmentCommand(created.command!.id)
+      const retry = executeAppointmentCommand(created.command!.id)
+      expect(retry.ok).toBe(true)
+      expect(retry.command?.syncWarning).toBe('负责人职位 Group 不存在或已失效')
+      expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-001', memberId: 'mem-005', title: '负责人', active: true, error: '负责人职位 Group 不存在或已失效' })
+      // 职位仍按任命写入（宽容语义），但留痕可观测补偿点
+      expect(findMember('club-001', 'mem-005')!.positions.some((p) => p.title === '负责人' && p.status === 'active')).toBe(true)
+    } finally {
+      access.leaderGroupId = prevLeader
+    }
   })
 })

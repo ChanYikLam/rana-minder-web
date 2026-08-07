@@ -136,6 +136,8 @@ export interface MockAppointmentCommand {
   /** 演示：执行失败策略 none=恒成功, first=首次失败 */
   execFailOn: 'none' | 'first'
   execRetried: boolean
+  /** ORG-001/017：职位 Group 成员同步失败留痕（职位已写入但 Group 未同步的可观测提示） */
+  syncWarning?: string
 }
 
 export interface MockResignationRequest {
@@ -668,7 +670,8 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
           pos.status = 'ended'
         }
         // ORG-001/017：免职同步移除职位 Group 成员
-        syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: pos.departmentName, title: pos.title, active: false })
+        const sync = syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: pos.departmentName, title: pos.title, active: false })
+        if (!sync.ok && sync.error) cmd.syncWarning = sync.error
       }
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: pos?.departmentName || '', title: pos?.title || '', startDate: pos?.startDate || '', endDate: new Date().toISOString().slice(0, 10), endReason: '免职' })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: pos?.departmentName || '', at: now })
@@ -683,7 +686,8 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
             oldPos.status = 'ended'
           }
           // ORG-001/017：调岗同步移除原职位 Group 成员
-          syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: oldPos.departmentName, title: oldPos.title, active: false })
+          const syncRemove = syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: oldPos.departmentName, title: oldPos.title, active: false })
+          if (!syncRemove.ok && syncRemove.error) cmd.syncWarning = syncRemove.error
           member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: oldPos.departmentName, title: oldPos.title, startDate: oldPos.startDate, endDate: oldPos.endDate, endReason: '调岗' })
         }
       }
@@ -692,7 +696,8 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
         title: cmd.title || '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active',
       })
       // ORG-001/017：任命/调岗生效同步加入职位 Group 成员
-      syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: cmd.departmentName || null, title: cmd.title || '成员', active: true })
+      const syncAdd = syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: cmd.departmentName || null, title: cmd.title || '成员', active: true })
+      if (!syncAdd.ok && syncAdd.error) cmd.syncWarning = syncAdd.error
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: cmd.departmentName || '', title: cmd.title || '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, endReason: null })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: cmd.action === 'transfer' ? 'transfer' : 'join', departmentName: cmd.departmentName || '', at: now })
     }

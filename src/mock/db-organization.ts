@@ -270,23 +270,68 @@ function resolvePositionGroup(clubGroup: GroupSeed, departmentGroup: GroupSeed |
 /**
  * ORG-001/017：Group 为当前关系权威——任命/免职/换届执行后同步职位 Group 成员，positions 不得独立于 Group 变动。
  * 职位 Group 解析：title=负责人 → 社团负责人职位 Group（leaderGroupId）；其余 → 部门 Group 下的同名职位 Group（部门 Group 缺失时挂社团 Group 下），无则自动建立。
- * 宽容语义：移除操作不自动建组（未命中既有职位 Group 视为无事可做）；社团未接入/未绑定 Group 时返回 ok:false 但不阻断任命流程（调用方忽略结果）。
+ * 宽容语义：移除操作不自动建组（未命中既有职位 Group 视为无事可做，不记录失败）；社团未接入/未绑定 Group 时返回 ok:false 但不阻断任命流程（调用方忽略结果）。
+ * 失败留痕：所有 ok:false 写入 groupSyncTraces，避免「职位已写入但 Group 未同步」静默发生；负责人 Group 配置悬空（leaderGroupId 指向不存在）视为配置损坏，
+ * 即使移除也返回明确错误并入留痕，不再静默吞错。
  */
-export function syncPositionMembership(input: {
+export interface PositionSyncInput {
   clubId: string
   memberId: string
   memberName: string
   departmentName: string | null
   title: string
   active: boolean
-}): { ok: boolean; error?: string; groupId?: string } {
+}
+
+export interface GroupSyncTrace {
+  id: string
+  at: string
+  ok: boolean
+  clubId: string
+  memberId: string
+  memberName: string
+  departmentName: string | null
+  title: string
+  active: boolean
+  error: string
+}
+
+/** ORG-001/017 同步失败留痕（最近失败在前；调用方可据此观测/补偿，AppointmentCommand.syncWarning 同步可见） */
+export const groupSyncTraces: GroupSyncTrace[] = []
+
+let groupSyncTraceSeq = 0
+
+function groupSyncFail(input: PositionSyncInput, error: string): { ok: false; error: string } {
+  groupSyncTraceSeq += 1
+  groupSyncTraces.unshift({
+    id: `gs-${groupSyncTraceSeq}`,
+    at: nowIso(),
+    ok: false,
+    clubId: input.clubId,
+    memberId: input.memberId,
+    memberName: input.memberName,
+    departmentName: input.departmentName,
+    title: input.title,
+    active: input.active,
+    error,
+  })
+  return { ok: false, error }
+}
+
+export function syncPositionMembership(input: PositionSyncInput): { ok: boolean; error?: string; groupId?: string } {
   const access = clubAccesses.find((c) => c.clubId === input.clubId)
-  if (!access) return { ok: false, error: '社团未接入' }
+  if (!access) return groupSyncFail(input, '社团未接入')
   const clubGroup = access.groupId ? groups.find((g) => g.id === access.groupId) : undefined
-  if (!clubGroup) return { ok: false, error: '社团未绑定 Group' }
+  if (!clubGroup) return groupSyncFail(input, '社团未绑定 Group')
   let target: GroupSeed | null
   if (input.title === '负责人') {
-    target = access.leaderGroupId ? (groups.find((g) => g.id === access.leaderGroupId) ?? null) : null
+    if (access.leaderGroupId) {
+      target = groups.find((g) => g.id === access.leaderGroupId) ?? null
+      // leaderGroupId 为空时非目标（社团接入向导未配置负责人 Group）不视为错误；配置了却不存在则视为配置损坏，不静默吞错
+      if (!target) return groupSyncFail(input, '负责人职位 Group 不存在或已失效')
+    } else {
+      target = null
+    }
   } else if (input.active) {
     target = resolvePositionGroup(clubGroup, findDepartmentGroup(clubGroup, input.departmentName), input.title)
   } else {
@@ -294,7 +339,9 @@ export function syncPositionMembership(input: {
     target = groups.find((g) => g.parentId === parent.id && g.purpose === 'position' && g.name === input.title) ?? null
   }
   if (!target) {
-    return input.active ? { ok: false, error: '未找到对应职位 Group' } : { ok: true }
+    if (input.active) return groupSyncFail(input, '未找到对应职位 Group')
+    // 移除宽容：负责人无配置或非负责人职位从未建组/从未入组，视为无事可做，不记录失败
+    return { ok: true }
   }
   const idx = target.members.indexOf(input.memberId)
   if (input.active) {

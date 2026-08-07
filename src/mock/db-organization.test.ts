@@ -22,6 +22,8 @@ import {
   syncPositionMembership,
   triggerGroupLost,
   validateGroupForBinding,
+  clubAccesses,
+  groupSyncTraces,
 } from './db-organization'
 
 describe('effectiveChars 有效字符门槛', () => {
@@ -180,13 +182,30 @@ describe('syncPositionMembership 职位 Group 成员同步（ORG-001/017：Group
     expect(detail).toMatchObject({ name: '部长', purpose: 'position', path: '/学校学生组织/计算机协会/部长' })
   })
 
-  it('社团未接入/未绑定 Group：返回 ok:false（宽容不阻断任命）', () => {
+  it('社团未接入/未绑定 Group：返回 ok:false（宽容不阻断任命）+ 失败留痕', () => {
     expect(syncPositionMembership({ clubId: 'club-ghost', memberId: 'mem-001', memberName: 'x', departmentName: null, title: '干事', active: true })).toMatchObject({ ok: false, error: '社团未接入' })
+    expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-ghost', title: '干事', active: true, error: '社团未接入' })
     expect(syncPositionMembership({ clubId: 'club-004', memberId: 'mem-001', memberName: 'x', departmentName: null, title: '干事', active: true })).toMatchObject({ ok: false, error: '社团未绑定 Group' })
+    expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-004', title: '干事', active: true, error: '社团未绑定 Group' })
   })
 
-  it('负责人任命但社团未配置负责人 Group：返回 ok:false', () => {
+  it('负责人任命但社团未配置负责人 Group：返回 ok:false + 失败留痕', () => {
     expect(syncPositionMembership({ clubId: 'club-003', memberId: 'mem-201', memberName: '郑浩宇', departmentName: null, title: '负责人', active: true })).toMatchObject({ ok: false, error: '未找到对应职位 Group' })
+    expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-003', memberId: 'mem-201', title: '负责人', active: true, error: '未找到对应职位 Group' })
+  })
+
+  it('负责人免职 + leaderGroupId 悬空：返回明确错误并留痕（不静默吞错）', () => {
+    const access = clubAccesses.find((c) => c.clubId === 'club-001')!
+    const prev = access.leaderGroupId
+    access.leaderGroupId = 'grp-lead-ghost'
+    try {
+      const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-004', memberName: '张明远', departmentName: null, title: '负责人', active: false })
+      expect(r.ok).toBe(false)
+      expect(r.error).toBe('负责人职位 Group 不存在或已失效')
+      expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-001', memberId: 'mem-004', title: '负责人', active: false, error: '负责人职位 Group 不存在或已失效' })
+    } finally {
+      access.leaderGroupId = prev
+    }
   })
 })
 
