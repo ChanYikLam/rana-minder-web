@@ -14,7 +14,7 @@ import { useLastLeaderGuard } from '@/composables/useLastLeaderGuard'
 import type { PageState } from '@/types/machine'
 import { Crown, ArrowRightLeft, UserMinus, AlertTriangle, CalendarClock, RefreshCw } from '@lucide/vue'
 
-interface AppointMember { id: string; name: string; studentId: string; department: string; title: string; status: string }
+interface AppointMember { id: string; name: string; studentId: string; department: string; title: string; status: string; isMember?: boolean; previousMemberId?: string | null }
 interface Dept { id: string; name: string }
 interface Command {
   id: string; action: 'appoint' | 'transfer' | 'dismiss'
@@ -30,6 +30,7 @@ const session = useSessionViewStore()
 const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const members = ref<AppointMember[]>([])
+const candidates = ref<AppointMember[]>([])
 const departments = ref<Dept[]>([])
 const titles = ref<string[]>([])
 const commands = ref<Command[]>([])
@@ -42,6 +43,7 @@ const scheduledAt = ref('')
 const submitting = ref(false)
 const actingId = ref<string | null>(null)
 const showDismissConfirm = ref(false)
+const candidateSearch = ref('')
 
 const actions = [
   { key: 'appoint' as const, label: '任命', icon: Crown, desc: '为成员分配新职位' },
@@ -52,9 +54,10 @@ const actions = [
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const result = await get<{ items: AppointMember[]; departments: Dept[]; titles: string[]; commands: Command[] }>(`/org/${clubId}/members/appointments`)
+  const result = await get<{ items: AppointMember[]; candidates: AppointMember[]; departments: Dept[]; titles: string[]; commands: Command[] }>(`/org/${clubId}/members/appointments`)
   if (result.kind === 'completed') {
     members.value = result.data.items
+    candidates.value = result.data.candidates ?? []
     departments.value = result.data.departments
     titles.value = result.data.titles
     commands.value = result.data.commands
@@ -70,24 +73,42 @@ async function loadData() {
 
 function selectMember(m: AppointMember) {
   selectedMember.value = m
-  const first = departments.value.find((d) => d.name === m.department)
-  targetDept.value = first?.id ?? departments.value[0]?.id ?? ''
-  targetTitle.value = m.title
+  if (!m.isMember) {
+    // 非成员候选人（MEM-003）：仅可任命，默认落在首个部门与最低职位
+    action.value = 'appoint'
+    targetDept.value = departments.value[0]?.id ?? ''
+    targetTitle.value = titles.value[0] ?? ''
+  } else {
+    const first = departments.value.find((d) => d.name === m.department)
+    targetDept.value = first?.id ?? departments.value[0]?.id ?? ''
+    targetTitle.value = m.title
+  }
   scheduledAt.value = ''
 }
 
+const filteredCandidates = computed(() => {
+  const kw = candidateSearch.value.trim()
+  if (!kw) return candidates.value
+  return candidates.value.filter((c) => c.name.includes(kw) || c.studentId === kw)
+})
+
 // 不能免职自己
-const isSelf = computed(() => selectedMember.value?.id === session.workspace?.memberId)
+const isSelf = computed(() => selectedMember.value?.isMember && selectedMember.value?.id === session.workspace?.memberId)
 
 // 末位负责人不可免职（需先交接）
 const { isLastLeader: isLastLeaderGuard } = useLastLeaderGuard(members)
 const isLastLeader = computed(() => {
   if (!selectedMember.value || action.value !== 'dismiss') return false
+  if (!selectedMember.value.isMember) return false
   return isLastLeaderGuard(selectedMember.value)
 })
 
 const canExecute = computed(() => {
   if (!selectedMember.value) return false
+  // 非成员候选人（MEM-003）：仅可任命，需选好部门与职位
+  if (!selectedMember.value.isMember) {
+    return action.value === 'appoint' && !!targetDept.value && !!targetTitle.value && (!isScheduled.value || !!scheduledAt.value)
+  }
   if (isSelf.value) return false
   if (isLastLeader.value) return false
   if (isScheduled.value && !scheduledAt.value) return false
@@ -114,6 +135,7 @@ async function handleExecute() {
     departmentId: action.value === 'dismiss' ? null : targetDept.value,
     title: action.value === 'dismiss' ? null : targetTitle.value,
     scheduledAt: isScheduled.value ? new Date(scheduledAt.value).toISOString() : null,
+    candidateStudentId: selectedMember.value.isMember ? null : selectedMember.value.studentId,
   })
   submitting.value = false
   if (r.kind === 'completed') {
@@ -190,6 +212,8 @@ onMounted(loadData)
           :key="a.key"
           class="rounded-lg border p-4 text-center transition-colors"
           :class="action === a.key ? 'border-primary bg-primary-subtle' : 'border-border hover:border-border-strong'"
+          :disabled="!!(selectedMember && !selectedMember.isMember && a.key !== 'appoint')"
+          :title="selectedMember && !selectedMember.isMember && a.key !== 'appoint' ? '非成员候选人仅支持任命' : undefined"
           @click="action = a.key"
         >
           <component :is="a.icon" :size="20" class="mx-auto mb-1" :class="action === a.key ? 'text-primary' : 'text-text-secondary'" />
@@ -202,7 +226,7 @@ onMounted(loadData)
         <Card>
           <p class="text-sm font-medium text-text-primary mb-3">选择成员</p>
           <div v-if="members.length === 0" class="text-center py-6 text-sm text-text-secondary">无可操作成员</div>
-          <div v-else class="space-y-1 max-h-96 overflow-y-auto">
+          <div v-else class="space-y-1 max-h-72 overflow-y-auto">
             <button
               v-for="m in members"
               :key="m.id"
@@ -217,6 +241,34 @@ onMounted(loadData)
               <span class="text-xs text-text-secondary">{{ m.department }} · {{ m.title }}</span>
             </button>
           </div>
+
+          <!-- 非成员候选人（MEM-003：组合任命支持非成员候选人） -->
+          <template v-if="candidates.length > 0">
+            <p class="text-sm font-medium text-text-primary pt-3 border-t border-border flex items-center gap-1.5">
+              <Crown :size="14" /> 非成员候选人（组合任命）
+            </p>
+            <input
+              v-model="candidateSearch"
+              class="w-full h-8 px-2 rounded-md border border-border bg-elevated text-sm text-text-primary"
+              placeholder="按姓名/学号搜索候选人"
+            />
+            <div class="space-y-1 max-h-48 overflow-y-auto">
+              <button
+                v-for="c in filteredCandidates"
+                :key="c.id"
+                class="w-full flex items-center justify-between rounded-lg p-2.5 text-left transition-colors"
+                :class="selectedMember?.id === c.id ? 'bg-primary-subtle' : 'hover:bg-subtle'"
+                @click="selectMember(c)"
+              >
+                <div>
+                  <span class="text-sm text-text-primary">{{ c.name }}</span>
+                  <span class="text-xs text-text-secondary ml-2">{{ c.studentId }}</span>
+                  <span v-if="c.previousMemberId" class="ml-2 text-xs text-warning">历史成员重新加入</span>
+                </div>
+                <span class="text-xs text-text-secondary">非成员</span>
+              </button>
+            </div>
+          </template>
         </Card>
 
         <!-- 操作面板 -->
@@ -240,6 +292,10 @@ onMounted(loadData)
 
           <div v-else-if="action === 'dismiss'" class="rounded-lg bg-danger-subtle p-3 mb-3">
             <p class="text-xs text-danger">免职后该成员将不再担任当前职位，但保留社团成员身份。</p>
+          </div>
+
+          <div v-if="selectedMember && !selectedMember.isMember && selectedMember.previousMemberId" class="rounded-lg bg-warning-subtle p-3 mb-3">
+            <p class="text-xs text-warning flex items-center gap-1"><AlertTriangle :size="13" /> 该候选人为历史成员，任命后将以新成员身份加入社团。</p>
           </div>
 
           <!-- 预约执行 -->

@@ -15,7 +15,7 @@ import {
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
-import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox } from './notifications'
+import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox, pushNotification, userIdOfMember } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 import { correctionsDb, type CorrectionRecord, type CorrectionAuditEntry } from './db-corrections'
 import { auditLogsDb, writeAuditLog } from './db-audit'
@@ -24,6 +24,30 @@ import * as formdb from './db-forms'
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
 const REAUTH_TTL_MS = 10 * 60 * 1000
 const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
+
+/** 任期到期提醒投递去重（MEM-004）：按「职位 × 提醒间隔桶」去重，模拟周期触发而非每次访问重复轰炸 */
+const termRemindSent = new Set<string>()
+
+/** 任期到期提醒（MEM-004）：派生 upcomingTermEnd 并投递站内通知，间隔桶去重 */
+function deliverTermEndReminders(clubId: string) {
+  const remindDays = platformConfig.termRemindDays
+  const interval = Math.max(1, platformConfig.termRemindIntervalDays)
+  if (remindDays <= 0) return
+  for (const u of db.upcomingTermEnd(clubId, remindDays)) {
+    const bucket = Math.floor(u.daysLeft / interval)
+    const key = `term-remind:${u.position.id}:${bucket}`
+    if (termRemindSent.has(key)) continue
+    termRemindSent.add(key)
+    const uid = userIdOfMember(u.memberId)
+    if (uid) {
+      pushNotification(
+        [uid], 'member',
+        { body: `您的「${u.position.departmentName}·${u.position.title}」任期将于 ${u.position.plannedEndDate} 到期（剩 ${u.daysLeft} 天），请提前准备交接或续任安排` },
+        { clubId },
+      )
+    }
+  }
+}
 
 /** 事实纠错共享内存库见 db-corrections.ts（社团/个人中心/管理员共用） */
 
@@ -215,12 +239,16 @@ interface PlatformConfig {
   academicYearStart: number
   academicYear: string
   cohort: string
+  /** 任期到期提醒（MEM-004）：到期前提前天数 + 重复提醒间隔（天），0=关闭 */
+  termRemindDays: number
+  termRemindIntervalDays: number
 }
 const platformConfig: PlatformConfig = {
   clubName: 'RanaMinder 平台', clubDescription: '社团招新管理平台',
   requireEmailVerification: true, requireProfileComplete: true,
   maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
   academicYear: '2026—2027', cohort: '2026级',
+  termRemindDays: 30, termRemindIntervalDays: 7,
 }
 /** 平台配置字段白名单（P2-017：POST 仅接受白名单字段并按期望类型校验，拒绝未知键/类型越界） */
 const CONFIG_FIELD_TYPES: Record<keyof PlatformConfig, 'string' | 'boolean' | 'number'> = {
@@ -228,6 +256,7 @@ const CONFIG_FIELD_TYPES: Record<keyof PlatformConfig, 'string' | 'boolean' | 'n
   requireEmailVerification: 'boolean', requireProfileComplete: 'boolean',
   maxMembers: 'number', allowSelfExit: 'boolean',
   academicYearStart: 'number', academicYear: 'string', cohort: 'string',
+  termRemindDays: 'number', termRemindIntervalDays: 'number',
 }
 let platformConfigVersion = 1
 
@@ -1310,6 +1339,8 @@ const memberHandlers: MockMethod[] = [
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       const scope = departmentScopeFor(user, query.clubId)
+      // MEM-004：任期到期提醒（派生投递，interval 桶去重——模拟时钟驱动，管理端拉取时交付）
+      deliverTermEndReminders(query.clubId)
       const all = db.listMembers(query.clubId)
       const list = scope
         ? all.filter((m) => m.positions.some((p) => p.status === 'active' && p.departmentName === scope))
@@ -1321,6 +1352,13 @@ const memberHandlers: MockMethod[] = [
       const activeMembers = list.filter((m) => m.status === 'active')
       const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
       const deptSource = scope ? db.departments.filter((d) => d.name === scope) : db.departments
+      // MEM-004：任期提醒派生（memberId → 最近到期日），供列表红点提示
+      const termEndByMember = new Map<string, string>()
+      for (const u of db.upcomingTermEnd(query.clubId, platformConfig.termRemindDays)) {
+        const end = u.position.plannedEndDate as string
+        const cur = termEndByMember.get(u.memberId)
+        if (!cur || end < cur) termEndByMember.set(u.memberId, end)
+      }
       const byDepartment = deptSource.map((d) => ({
         id: d.id,
         name: d.name,
@@ -1350,6 +1388,7 @@ const memberHandlers: MockMethod[] = [
               title: activePositions[0]?.title || '成员',
               status: m.status, joinedAt: m.joinedAt.slice(0, 10),
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
+              termEndAt: termEndByMember.get(m.id) ?? null,
             }
           }),
           stats: {
@@ -1414,14 +1453,15 @@ const memberHandlers: MockMethod[] = [
     method: 'post',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      const actor = actorMemberId(user, query.clubId)
       const app = db.departmentApplications.find((a) => a.id === query.applicationId)
       if (!app) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '申请不存在', supportId: 'MOCK' } }
-      if (app.status !== 'under_review') return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '仅待审批的申请可撤回', supportId: 'MOCK' } }
-      const actor = actorMemberId(user, query.clubId)
       const isApplicant = actor === app.applicantId
       if (!isApplicant && !canManageMembers(user, query.clubId)) return forbidden()
-      app.status = 'withdrawn'
-      return { code: 0, data: { id: app.id, status: app.status } }
+      // 撤回走 SM-MEM-003 状态机，与审批互斥：任一方先行，另一方必被拒绝
+      const r = db.withdrawDepartmentApplication(query.applicationId, actor ?? '', !isApplicant)
+      if (!r.ok) return { statusCode: 422, body: { code: 'IFC-ERR-006', message: r.error || '撤回失败', supportId: 'MOCK' } }
+      return { code: 0, data: { id: r.app?.id, status: r.app?.status } }
     },
   },
   // 审批部门关系申请（批准/驳回）
@@ -1629,15 +1669,25 @@ const memberHandlers: MockMethod[] = [
       const candidates = scope
         ? all.filter((m) => m.positions.some((p) => p.status === 'active' && p.departmentName === scope))
         : all
+      // MEM-003：组合任命支持非成员候选人（cand 档案，含历史成员前前任期）
+      const picked = db.searchAppointmentCandidates(query.clubId, query.search || '')
+      const nonMemberItems = picked.nonMembers.map((c) => ({
+        id: c.id, name: c.name, studentId: c.studentId,
+        department: '-', title: '-', status: 'candidate' as const,
+        isMember: false, previousMemberId: c.previousMemberId,
+      }))
       return {
         code: 0,
         data: {
-          items: candidates
-            .filter((m) => m.status === 'active')
-            .map((m) => {
-              const active = m.positions.find((p) => p.status === 'active')
-              return { id: m.id, name: m.name, studentId: m.studentId, department: active?.departmentName || '-', title: active?.title || '成员', status: m.status }
-            }),
+          items: [ // 在职成员
+            ...candidates
+              .filter((m) => m.status === 'active')
+              .map((m) => {
+                const active = m.positions.find((p) => p.status === 'active')
+                return { id: m.id, name: m.name, studentId: m.studentId, department: active?.departmentName || '-', title: active?.title || '成员', status: m.status, isMember: true, previousMemberId: null as string | null }
+              }),
+          ],
+          candidates: nonMemberItems,
           departments: scope ? db.departments.filter((d) => d.name === scope) : db.departments,
           titles,
           commands: db.appointmentCommands.filter((c) => c.clubId === query.clubId && (!scope || c.departmentName === scope)).map((c) => ({
@@ -1654,34 +1704,46 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/appointments',
     method: 'post',
-    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null } } }) => {
+response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null; candidateStudentId?: string | null } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
       if (!member || !canAppointments(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const clubRole = user.roles.find((r) => r.clubId === query.clubId)?.role
+      const candidateStudentId = body.input?.candidateStudentId || null
       const target = db.findMember(query.clubId, body.input?.memberId)
-      if (!target) return businessError('目标成员不存在')
-      if (scope) {
+      // MEM-003：非成员组合任命——目标为无成员记录的候选人（按学号定位档案，含历史成员重新加入）
+      let targetName = target?.name || ''
+      if (!target) {
+        if (body.input?.action !== 'appoint' || !candidateStudentId) return businessError('目标成员不存在')
+        const candidate = db.candidates.find((c) => c.studentId === candidateStudentId && !c.isMember)
+        if (!candidate) return businessError('目标候选人不存在，请先在档案库中确认')
+        targetName = candidate.name
+      }
+      if (target && scope) {
         const inScope = target.positions.some((p) => p.status === 'active' && p.departmentName === scope)
         if (!inScope) return forbidden()
         if (body.input?.title && body.input.title !== '干事') return businessError('部门负责人仅可任命普通职位')
       }
+      // 部门负责人仅可任命本部门普通职位；非成员任命（无本部门关系）不予授权
+      if (scope && !target && body.input?.title && body.input.title !== '干事') return businessError('部门负责人仅可任命普通职位')
       // 人事管理员只能在正式换届流程中确认负责人变更，不得通过任命命令产生负责人级职位
       if (clubRole === 'hr' && body.input?.title && ['负责人', '副负责人'].includes(body.input.title)) {
         return businessError('人事管理员不能任命负责人级职位')
       }
       const r = db.createAppointmentCommand(query.clubId, {
         action: body.input?.action as 'appoint' | 'transfer' | 'dismiss',
-        memberId: target.id, memberName: target.name,
+        memberId: target?.id || (candidateStudentId ? `cand-new:${candidateStudentId}` : ''),
+        memberName: targetName,
         departmentId: body.input?.departmentId || null,
         departmentName: db.departments.find((d) => d.id === body.input?.departmentId)?.name || null,
         title: body.input?.title || null,
         scheduledAt: body.input?.scheduledAt || null,
         actorName: member.name,
+        candidateStudentId,
       })
-      if (!r.ok) return businessError(r.error || '操作失败')
+if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { id: r.command?.id, status: r.command?.status } }
     },
   },
@@ -1724,7 +1786,7 @@ const memberHandlers: MockMethod[] = [
       return { code: 0, data: { id: r.command?.id, status: r.command?.status, failed: false } }
     },
   },
-  // 辞职申请列表（含审批）
+  // 辞职申请列表（含审批）；逾期标记为派生字段，审批人视角可甄别待办
   {
     url: '/api/org/:clubId/members/resignation',
     method: 'get',
@@ -1735,7 +1797,8 @@ const memberHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
-          items: db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope)),
+          items: db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope))
+            .map((r) => ({ ...r, overdue: db.isProcessingOverdue(r.status, r.dueAt, ['under_review']) })),
           nextCursor: null,
         },
       }
@@ -1784,17 +1847,41 @@ const memberHandlers: MockMethod[] = [
       return { code: 0, data: { id: query.requestId, status: decision === 'approve' ? 'approved' : 'rejected' } }
     },
   },
-  // 成员退出列表（含辞职审批、主动退出）
+  // 撤回辞职申请（成员本人，仅审批前，MEM-002）
+  {
+    url: '/api/org/:clubId/members/resignation/:requestId/withdraw',
+    method: 'post',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const actor = actorMemberId(user, query.clubId)
+      if (!actor) return forbidden()
+      const r = db.withdrawResignationRequest(query.requestId, actor)
+      if (!r.ok) return businessError(r.error || '撤回失败')
+      return { code: 0, data: { id: query.requestId, status: 'withdrawn' } }
+    },
+  },
+  // 成员退出与移除（管理端 / 成员自视角）——含主动退出申请与辞职申请（逾期标记）
   {
     url: '/api/org/:clubId/members/exit',
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembers(user, query.clubId)) return forbidden()
+      const actor = actorMemberId(user, query.clubId)
+      const isManager = canManageMembers(user, query.clubId)
       const scope = departmentScopeFor(user, query.clubId)
-      const list = db.listMembers(query.clubId).filter((m) =>
-        !scope || m.positions.some((p) => p.departmentName === scope),
+      if (!isManager && !actor) return forbidden()
+      // 普通成员自视角：仅返回本人信息、本人退出申请、本人辞职申请（可撤回/可二次确认）
+      const selfOnly = !isManager
+      const base = db.listMembers(query.clubId)
+      const list = (selfOnly ? base.filter((m) => m.id === actor) : base).filter(
+        (m) => !scope || m.positions.some((p) => p.departmentName === scope),
       )
+      const exitList = isManager
+        ? (scope ? [] : db.listExitRequests(query.clubId))
+        : db.exitRequestsOfMember(query.clubId, actor ?? '')
+      const resignationList = (isManager
+        ? db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope))
+        : db.resignationRequestsOfMember(query.clubId, actor ?? ''))
       return {
         code: 0,
         data: {
@@ -1807,36 +1894,134 @@ const memberHandlers: MockMethod[] = [
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
             }
           }),
-          resignations: canApproveResignation(user, query.clubId)
-            ? db.resignationRequests.filter((r) => r.clubId === query.clubId && (!scope || r.departmentName === scope))
-            : [],
+          resignations: resignationList.map((r) => ({
+            id: r.id, memberId: r.memberId, memberName: r.memberName,
+            departmentName: r.departmentName, title: r.title, reason: r.reason,
+            status: r.status, submittedAt: r.submittedAt, decidedAt: r.decidedAt, decidedBy: r.decidedBy,
+            dueAt: r.dueAt,
+            overdue: db.isProcessingOverdue(r.status, r.dueAt, ['under_review']),
+            withdrawAvailable: r.memberId === actor && r.status === 'under_review',
+          })),
+          exitRequestsWithFlags: exitList.map((r) => ({
+            id: r.id, clubId: r.clubId, memberId: r.memberId, memberName: r.memberName,
+            reason: r.reason, status: r.status, submittedAt: r.submittedAt,
+            decidedAt: r.decidedAt, decidedBy: r.decidedBy, confirmedAt: r.confirmedAt, dueAt: r.dueAt,
+            overdue: db.isProcessingOverdue(r.status, r.dueAt, ['under_review', 'approved']),
+            canWithdraw: r.memberId === actor && r.status === 'under_review',
+            canConfirm: r.memberId === actor && r.status === 'approved',
+          })),
           nextCursor: null,
         },
       }
     },
   },
-  // 移除成员（管理员）
+  // 移除成员 / 标记退出（管理员）——按 action 区分语义：
+  //   remove：硬移除（SM-MEM-001 active→exiting→exited，结束职位 + 通知「被移出」，MEM-006）
+  //   mark_exit：软退出（仅记 exitedAt，保留职位档案，无「被移出」通知）
   {
     url: '/api/org/:clubId/members/exit',
     method: 'post',
-    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; reason?: string } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; action?: string; reason?: string } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user, query.clubId)
       if (!actor || !canManageMembers(user, query.clubId)) return forbidden()
       const memberId = body.input?.memberId
-      if (!body.input?.reason?.trim()) return businessError('移除成员必须填写原因')
-      if (memberId === actor) return businessError('不能移除自己')
+      const action = body.input?.action === 'mark_exit' ? 'mark_exit' : 'remove'
+      if (!body.input?.reason?.trim()) return businessError(action === 'mark_exit' ? '标记退出必须填写原因' : '移除成员必须填写原因')
       const member = db.findMember(query.clubId, memberId)
       if (!member) return businessError('成员不存在')
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden()
-      if (db.isLastLeader(query.clubId, memberId)) return businessError('最后一名负责人不能无交接离任，请先安排交接')
-      member.status = 'removed'
-      member.exitedAt = new Date().toISOString()
-      member.positions.forEach((p) => {
-        if (p.status === 'active') { p.status = 'ended'; p.endDate = new Date().toISOString().slice(0, 10) }
-      })
-      return { code: 0, data: { memberId, status: member.status } }
+      if (action === 'mark_exit') {
+        // 标记退出：软退出，保留档案；不通知「被移出」
+        const res = db.markMemberExit(query.clubId, actor, memberId)
+        if (!res.ok) return businessError(res.error || '标记退出失败')
+        return { code: 0, data: { memberId, action, status: res.member?.status } }
+      }
+      const res = db.directRemoveMember(query.clubId, actor, memberId)
+      if (!res.ok) return businessError(res.error || '移除失败')
+      // 通知被移除成员（member 通知族）
+      const removedUserId = userIdOfMember(memberId)
+      if (removedUserId) pushNotification([removedUserId], 'member', { body: `您已被移出「计算机协会」，原因：${body.input.reason}` }, { clubId: query.clubId })
+      return { code: 0, data: { memberId, action, status: res.member?.status } }
+    },
+  },
+  // 主动退出申请（成员自发起，MEM-001）：进入审批队列，待负责人/人事批准
+  {
+    url: '/api/org/:clubId/members/exit-requests',
+    method: 'post',
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { reason: string } } }) => {
+      const user = resolveMockUser(url)
+      const actor = actorMemberId(user, query.clubId)
+      const member = actor ? db.findMember(query.clubId, actor) : undefined
+      if (!member) return forbidden()
+      if (member.status !== 'active') return businessError('仅在职成员可申请退出')
+      if (!body.input?.reason?.trim()) {
+        return {
+          statusCode: 422,
+          body: {
+            code: 'IFC-ERR-006', message: '退出必须填写原因',
+            fieldErrors: { reason: ['请填写退出原因'] },
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          },
+        }
+      }
+      const r = db.createExitRequest(query.clubId, { memberId: member.id, memberName: member.name, reason: body.input.reason, allowSelfExit: platformConfig.allowSelfExit })
+      if (!r.ok) return businessError(r.error || '发起退出申请失败')
+      return { code: 0, data: { id: r.request?.id, status: r.request?.status, submittedAt: r.request?.submittedAt, dueAt: r.request?.dueAt } }
+    },
+  },
+  // 审批退出申请（负责人/人事）；批准后成员进入 exiting、结束全部职位，等待本人二次确认
+  {
+    url: '/api/org/:clubId/members/exit-requests/:requestId/decide',
+    method: 'post',
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { decision: string } } }) => {
+      const user = resolveMockUser(url)
+      const actor = actorMemberId(user, query.clubId)
+      const member = actor ? db.findMember(query.clubId, actor) : undefined
+      // 退出审批仅负责人/人事，部门负责人无权（与辞职审批区分）
+      if (!canManageMembersFull(user, query.clubId)) return forbidden()
+      if (!member) return forbidden()
+      const req = db.exitRequests.find((r) => r.id === query.requestId)
+      if (!req || req.clubId !== query.clubId) return businessError('申请不存在')
+      const decision = body.input?.decision === 'approve' ? 'approve' : 'reject'
+      const r = db.decideExitRequest(query.requestId, decision, { id: member.id, name: member.name })
+      if (!r.ok) return businessError(r.error || '操作失败')
+      const applicantUid = userIdOfMember(req.memberId)
+      if (applicantUid) {
+        pushNotification(
+          [applicantUid], 'member',
+          { body: decision === 'approve' ? '您的退出申请已批准，请登录后在个人中心完成二次确认' : '您的退出申请已被驳回' },
+          { clubId: query.clubId },
+        )
+      }
+      return { code: 0, data: { id: query.requestId, status: decision === 'approve' ? 'approved' : 'rejected' } }
+    },
+  },
+  // 成员本人撤回退出申请（仅审批前；审批后经审批人处理）
+  {
+    url: '/api/org/:clubId/members/exit-requests/:requestId/withdraw',
+    method: 'post',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const actor = actorMemberId(user, query.clubId)
+      if (!actor) return forbidden()
+      const r = db.withdrawExitRequest(query.requestId, actor)
+      if (!r.ok) return businessError(r.error || '撤回失败')
+      return { code: 0, data: { id: query.requestId, status: 'withdrawn' } }
+    },
+  },
+  // 成员本人二次确认：approved → 正式离社（SM-MEM-001 exiting → exited）
+  {
+    url: '/api/org/:clubId/members/exit-requests/:requestId/confirm',
+    method: 'post',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      const actor = actorMemberId(user, query.clubId)
+      if (!actor) return forbidden()
+      const r = db.confirmExitRequest(query.requestId, actor)
+      if (!r.ok) return businessError(r.error || '确认失败')
+      return { code: 0, data: { id: query.requestId, status: 'exited', confirmedAt: r.request?.confirmedAt } }
     },
   },
   // 换届信息（可编辑方案 + 执行结果）
@@ -1958,6 +2143,8 @@ const memberHandlers: MockMethod[] = [
           tenures: member.tenures,
           departmentHistory: member.departmentHistory,
           anomalies: member.anomalies,
+          // MEM-007：历史成员分段（同学生账号的过往经历，供"重新加入"时间线还原）
+          historyMemberships: db.historyMembershipsOf(query.clubId, member.studentId, member.id),
         },
       }
     },

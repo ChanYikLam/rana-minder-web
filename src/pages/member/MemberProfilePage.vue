@@ -16,6 +16,7 @@ interface MemberDetail {
   tenures: { id: string; departmentName: string; title: string; startDate: string; endDate: string | null; endReason: string | null }[]
   departmentHistory: { id: string; action: string; departmentName: string; at: string }[]
   anomalies: { id: string; kind: string; message: string; createdAt: string }[]
+  historyMemberships: { id: string; name: string; joinedAt: string; exitedAt: string | null; status: string }[]
 }
 
 const route = useRoute()
@@ -149,6 +150,22 @@ onMounted(loadData)
               {{ formatDate(tenure.startDate) }} - {{ tenure.endDate ? formatDate(tenure.endDate) : '至今' }}
             </p>
             <p v-if="tenure.endReason" class="text-xs text-text-secondary mt-0.5">原因：{{ tenure.endReason }}</p>
+          </div>
+        </div>
+      </Card>
+
+      <!-- MEM-007: 历史成员分段（同学生账号的过往经历，供重新加入时间线还原） -->
+      <Card v-if="(member.historyMemberships ?? []).length > 0" class="mt-4 border-warning">
+        <h2 class="text-base font-medium text-warning mb-3 flex items-center gap-2">
+          <History :size="16" /> 历史成员身份
+        </h2>
+        <p class="text-xs text-text-secondary mb-3">同学生账号在社团中的历史成员记录（分段存档，不并入当前任期）。</p>
+        <div class="space-y-2">
+          <div v-for="h in member.historyMemberships" :key="h.id" class="flex items-center justify-between rounded-lg border border-border p-3">
+            <div>
+              <p class="text-sm text-text-primary">{{ h.name }} <StateTag :status="h.status" class="ml-2" /></p>
+              <p class="text-xs text-text-secondary mt-0.5">加入于 {{ formatDate(h.joinedAt) }}{{ h.exitedAt ? ` · 退出于 ${formatDate(h.exitedAt)}` : '' }}</p>
+            </div>
           </div>
         </div>
       </Card>

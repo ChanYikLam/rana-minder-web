@@ -23,6 +23,7 @@ export const WORKSPACE_PERMISSIONS: Record<string, string | string[]> = {
   'P-MEM': 'club:member:manage',
   'P-MEM-03-manage': 'club:invite:manage',
   'P-MEM-04': 'club:appointment:manage',
+  'P-MEM-05': ['club:member:manage', 'club:member:view-self'],
   'P-MEM-06': 'club:transition:manage',
   'P-FORM': 'club:form:design',
   'P-STAT': 'club:stats:view',
