@@ -3,6 +3,7 @@ import { departments, candidates, members, departmentApplications, membershipInv
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
 import { correctionsDb } from './db-corrections'
 import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
+export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
 
 const seed = {
