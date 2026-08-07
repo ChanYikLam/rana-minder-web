@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, mockPush } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPush: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { clubId: 'club-004' } }),
+  useRouter: () => ({ push: mockPush }),
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
@@ -41,7 +42,7 @@ describe('ClubAccessWizardPage 社团接入向导', () => {
     })
     const wrapper = mount(ClubAccessWizardPage, { global: { stubs: wizardStubs } })
     await flushPromises()
-    expect(mockGet).toHaveBeenCalledWith('/admin/casdoor/groups')
+    expect(mockGet).toHaveBeenCalledWith('/admin/groups')
     expect(mockGet).toHaveBeenCalledWith('/admin/clubs')
     // 向导步骤一渲染
     expect(wrapper.text()).toContain('选择社团 Casdoor Group')
@@ -53,7 +54,7 @@ describe('ClubAccessWizardPage 社团接入向导', () => {
     mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     const wrapper = mount(ClubAccessWizardPage, { global: { stubs: wizardStubs } })
     await flushPromises()
-    expect(mockGet).toHaveBeenCalledWith('/admin/casdoor/groups')
+    expect(mockGet).toHaveBeenCalledWith('/admin/groups')
     expect(wrapper.text()).toContain('下一步')
     wrapper.unmount()
   })
