@@ -37,9 +37,9 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: ExportTask[] } }).data.items
     state.value = 'normal'
-    // 启动轮询：仅轮询状态为 generating 的任务
+    // 启动轮询：仅轮询进行中的任务（generating 排队待调度 / processing 生成中）
     items.value.forEach((t) => {
-      if (t.status === 'generating' && !pollingTimers.has(t.id)) {
+      if ((t.status === 'generating' || t.status === 'processing') && !pollingTimers.has(t.id)) {
         startPolling(t.id, apiScope.prefix)
       }
     })
@@ -94,7 +94,7 @@ async function handleCreate() {
     if (task) {
       // 立即把任务插入列表并启动轮询；不在此处立即"完成"
       items.value = [task, ...items.value]
-      if (task.status === 'generating') {
+      if (task.status === 'generating' || task.status === 'processing') {
         startPolling(task.id, apiScope.prefix)
       } else if (task.status === 'completed') {
         toast.success('导出已生成完成，可点击下载')
@@ -198,6 +198,7 @@ onBeforeUnmount(stopAllPolling)
             <div class="text-xs text-text-secondary">
               <span v-if="task.completedAt" class="flex items-center gap-1"><CheckCircle2 :size="12" /> 完成于 {{ formatTime(task.completedAt) }}</span>
               <span v-else-if="task.status === 'generating'" class="flex items-center gap-1 text-warning"><Clock :size="12" /> 生成中...</span>
+              <span v-else-if="task.status === 'processing'" class="flex items-center gap-1 text-warning"><Clock :size="12" /> 处理中...</span>
               <span v-if="task.expiredAt && task.status === 'completed'">截止 {{ formatTime(task.expiredAt) }}</span>
             </div>
             <button
