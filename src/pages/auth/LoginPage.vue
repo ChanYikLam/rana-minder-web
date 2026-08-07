@@ -68,7 +68,8 @@ async function handleLogin() {
 
     await router.push(resolveTargetAfterLogin())
   } catch {
-    loginError.value = '登录失败，请稍后重试'
+    // 兜底：优先透出会话层具体原因（如账号禁用），再退化为通用文案
+    loginError.value = session.lastError || '登录失败，请稍后重试'
   } finally {
     loggingIn.value = false
   }

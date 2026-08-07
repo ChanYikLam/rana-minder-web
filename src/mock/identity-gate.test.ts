@@ -5,7 +5,7 @@ import { resolveMockUser, clearMockSession, resetMockUsers, getMockDegraded } fr
 /** 走 mock 真实分发路径（与 form-save-conflict.test.ts 同款） */
 function invoke(urlPattern: string, method: string, reqUrl: string, body: unknown = {}): {
   code?: number
-  data?: { degraded?: boolean; degradedSince?: string | null; profileGate?: { complete: boolean; emailVerified: boolean }; version?: number }
+  data?: { degraded?: boolean; degradedSince?: string | null; profileGate?: { complete: boolean; emailVerified: boolean }; version?: number; workspace?: { clubId: string; memberId?: string } | null }
   statusCode?: number
   body?: { code?: string; message?: string; supportId?: string; currentData?: unknown }
 } {
@@ -52,6 +52,16 @@ describe('P1-006 身份域演示身份：资料不完整/邮箱未验证/账号�
 
     const normal = invoke('/api/auth/session', 'get', '/api/auth/session?_mock_user=member')
     expect(normal.data?.profileGate).toEqual({ complete: true, emailVerified: true })
+  })
+
+  it('新身份已登记成员映射：currentClubId=club-001 时 workspace.memberId 可解析（P3-1）', () => {
+    const incomplete = invoke('/api/auth/session', 'get', '/api/auth/session?_mock_user=incomplete')
+    expect(incomplete.data?.workspace?.clubId).toBe('club-001')
+    expect(incomplete.data?.workspace?.memberId).toBe('mem-007')
+
+    const unverified = invoke('/api/auth/session', 'get', '/api/auth/session?_mock_user=unverified')
+    expect(unverified.data?.workspace?.clubId).toBe('club-001')
+    expect(unverified.data?.workspace?.memberId).toBe('mem-008')
   })
 
   it('session：禁用账号返回 403 + IFC-ERR-011，拒绝建立会话', () => {
@@ -123,12 +133,23 @@ describe('P1-006 资料保存乐观锁：expectedVersion 与最新版本比对',
     expect(out.data?.version).toBe(2)
   })
 
-  it('旧版本提交（如另一标签页已保存后）：409 + IFC-ERR-008，不再走 expectedVersion<1 死条件', () => {
+  it('连续两次提交 expectedVersion=1：版本比对通过即登记新版本，第二次起一律 409（P2-2 原子一致）', () => {
     invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
     const stale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
     expect(stale.statusCode).toBe(409)
     expect(stale.body?.code).toBe('IFC-ERR-008')
     expect(stale.body?.currentData).toBeTruthy()
+    // 第三次仍携带旧版本：同样 409，不会因「版本登记滞后于保存生效」被放行
+    const stillStale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
+    expect(stillStale.statusCode).toBe(409)
+  })
+
+  it('GET /api/auth/profile 返回当前版本号（P2-3：页面乐观锁以响应版本为准）', () => {
+    const first = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
+    expect(first.data?.version).toBe(1)
+    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
+    const after = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
+    expect(after.data?.version).toBe(2)
   })
 
   it('带上最新版本可继续保存（版本追上后不再冲突）', () => {

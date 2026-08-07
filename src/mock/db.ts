@@ -14,6 +14,9 @@ export const MEMBER_BY_USER: Record<string, Record<string, string>> = {
   'user-interviewer-001': { 'club-001': 'mem-002' },
   'user-member-001': { 'club-001': 'mem-001' },
   'user-deptleader-001': { 'club-001': 'mem-006' },
+  // 新身份（P3-1）：资料不完整/邮箱未验证用户同样按「用户 × 社团」登记，避免 currentClubId 已设但成员 id 解析为 null
+  'user-incomplete-001': { 'club-001': 'mem-007' },
+  'user-unverified-001': { 'club-001': 'mem-008' },
 }
 
 /** 按「用户 × 社团」解析成员 id；该用户在目标社团无成员身份（或数据未种子）时返回 null */
@@ -269,6 +272,24 @@ export const members: MockMember[] = [
     departmentHistory: [
       { id: 'dhis-007', action: 'join', departmentName: '技术部', at: '2022-09-01T10:00:00+08:00' },
     ],
+    anomalies: [],
+  },
+  {
+    id: 'mem-007', clubId: 'club-001', studentId: '20240201',
+    name: '赵雨萌', email: 'incomplete@example.edu.cn', phone: '13800000021',
+    status: 'active', joinedAt: '2025-09-01T00:00:00+08:00', exitedAt: null,
+    positions: [],
+    tenures: [],
+    departmentHistory: [],
+    anomalies: [],
+  },
+  {
+    id: 'mem-008', clubId: 'club-001', studentId: '20240202',
+    name: '孙雅静', email: 'unverified@example.edu.cn', phone: '13800000022',
+    status: 'active', joinedAt: '2025-09-01T00:00:00+08:00', exitedAt: null,
+    positions: [],
+    tenures: [],
+    departmentHistory: [],
     anomalies: [],
   },
   {

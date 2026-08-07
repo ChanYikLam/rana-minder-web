@@ -91,8 +91,9 @@ export const useSessionViewStore = defineStore('sessionView', () => {
         lastLoadedAt.value = Date.now()
         syncClock()
       } else {
-        lastError.value = 'error' in result && result.error ? result.error.message : null
+        // 先清空旧会话，再写入失败原因：clearSession 会重置 lastError，顺序颠倒会使失败提示永远无法暴露
         clearSession()
+        lastError.value = 'error' in result && result.error ? result.error.message : null
       }
     } finally {
       loading.value = false

@@ -335,6 +335,8 @@ const identityHandlers: MockMethod[] = [
       return {
         code: 0,
         data: {
+          // 返回当前版本号：页面乐观锁以响应版本为准（P2-3：资料门翻转与版本号联动）
+          version: profileLatestVersion[user.id] ?? 1,
           studentId: user.studentId,
           name: user.name,
           email: user.email,
@@ -372,12 +374,14 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      // 版本登记先于保存生效：比对一旦通过即占用新版本号，后续同版本提交必然 409，
+      // 保证「保存生效与版本登记」原子一致（连续两次 expectedVersion=1 时第二次不会重复落库）
+      profileLatestVersion[user.id] = currentVersion + 1
       const input = body.input || {}
       // 保存生效：白名单字段更新 + 资料补齐（资料门联动 profileComplete）
       if (typeof input.email === 'string' && input.email) user.email = input.email
       if (typeof input.phone === 'string' && input.phone) user.phone = input.phone
       markProfileComplete(user.id)
-      profileLatestVersion[user.id] = currentVersion + 1
       return {
         code: 0,
         data: {
