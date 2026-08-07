@@ -143,6 +143,11 @@ const groups: GroupSeed[] = [
     id: 'grp-dept-004', name: '摄影协会创作部', stableId: 'G-PHOTO-DEPT-001', path: '/学校学生组织/摄影协会/创作部',
     parentId: 'grp-004', purpose: 'department', boundClubId: null, leaderGroupId: null, members: [],
   },
+  // 同名后缀种子（与 grp-dept-001 以「技术部」结尾）：用于验证 suffix 匹配在「社团名+部门名」约定下的精确解析优先级
+  {
+    id: 'grp-dept-002', name: '计算机协会信息技术部', stableId: 'G-COMP-DEPT-002', path: '/学校学生组织/计算机协会/信息技术部',
+    parentId: 'grp-001', purpose: 'department', boundClubId: 'club-001', leaderGroupId: null, members: [],
+  },
 ]
 
 const memberNames: Record<string, string> = {
@@ -335,6 +340,128 @@ function listPositionGroups(parentId: string, excludeBound = true): GroupNode[] 
 }
 
 /** Group 详情：基本信息 + 已有成员 + 可用负责人职位 Group（向导步骤 1/2 使用） */
+let positionGroupSeq = 0
+
+/** 部门 Group 解析：社团 Group 下 purpose=department 的 Group。解析优先级——①精确名；②「社团名+部门名」拼接（种子命名约定，如 计算机协会技术部）；
+ * ③名称后缀匹配（同后缀多候选时取命名最短者，最贴近部门名），避免同后缀歧义时 find 取到首个非目标 Group */
+function findDepartmentGroup(clubGroup: GroupSeed, departmentName: string | null): GroupSeed | null {
+  if (!departmentName) return null
+  const candidates = groups.filter((g) => g.parentId === clubGroup.id && g.purpose === 'department')
+  return (
+    candidates.find((g) => g.name === departmentName) ??
+    candidates.find((g) => g.name === clubGroup.name + departmentName) ??
+    candidates.filter((g) => g.name.endsWith(departmentName)).sort((a, b) => a.name.length - b.name.length)[0] ??
+    null
+  )
+}
+
+/** 职位 Group 定位/建立：部门职位挂在部门 Group 下（部门 Group 缺失时挂社团 Group 下），同名职位 Group 已存在则复用 */
+function resolvePositionGroup(clubGroup: GroupSeed, departmentGroup: GroupSeed | null, title: string): GroupSeed {
+  const parent = departmentGroup ?? clubGroup
+  const existing = groups.find((g) => g.parentId === parent.id && g.purpose === 'position' && g.name === title)
+  if (existing) return existing
+  positionGroupSeq += 1
+  const node: GroupSeed = {
+    id: `grp-pos-${positionGroupSeq}`,
+    name: title,
+    stableId: `G-POS-${positionGroupSeq}`,
+    path: `${parent.path}/${title}`,
+    parentId: parent.id,
+    purpose: 'position',
+    boundClubId: clubGroup.boundClubId,
+    leaderGroupId: null,
+    members: [],
+  }
+  groups.push(node)
+  return node
+}
+
+/**
+ * ORG-001/017：Group 为当前关系权威——任命/免职/换届执行后同步职位 Group 成员，positions 不得独立于 Group 变动。
+ * 职位 Group 解析：title=负责人 → 社团负责人职位 Group（leaderGroupId）；其余 → 部门 Group 下的同名职位 Group（部门 Group 缺失时挂社团 Group 下），无则自动建立。
+ * 宽容语义：移除操作不自动建组（未命中既有职位 Group 视为无事可做，不记录失败）；社团未接入/未绑定 Group 时返回 ok:false 但不阻断任命流程（调用方忽略结果）。
+ * 失败留痕：所有 ok:false 写入 groupSyncTraces，避免「职位已写入但 Group 未同步」静默发生；负责人 Group 配置悬空（leaderGroupId 指向不存在）视为配置损坏，
+ * 即使移除也返回明确错误并入留痕，不再静默吞错。
+ */
+export interface PositionSyncInput {
+  clubId: string
+  memberId: string
+  memberName: string
+  departmentName: string | null
+  title: string
+  active: boolean
+}
+
+export interface GroupSyncTrace {
+  id: string
+  at: string
+  ok: boolean
+  clubId: string
+  memberId: string
+  memberName: string
+  departmentName: string | null
+  title: string
+  active: boolean
+  error: string
+}
+
+/** ORG-001/017 同步失败留痕（最近失败在前；调用方可据此观测/补偿，AppointmentCommand.syncWarning 同步可见） */
+export const groupSyncTraces: GroupSyncTrace[] = []
+
+let groupSyncTraceSeq = 0
+
+function groupSyncFail(input: PositionSyncInput, error: string): { ok: false; error: string } {
+  groupSyncTraceSeq += 1
+  groupSyncTraces.unshift({
+    id: `gs-${groupSyncTraceSeq}`,
+    at: nowIso(),
+    ok: false,
+    clubId: input.clubId,
+    memberId: input.memberId,
+    memberName: input.memberName,
+    departmentName: input.departmentName,
+    title: input.title,
+    active: input.active,
+    error,
+  })
+  return { ok: false, error }
+}
+
+export function syncPositionMembership(input: PositionSyncInput): { ok: boolean; error?: string; groupId?: string } {
+  const access = clubAccesses.find((c) => c.clubId === input.clubId)
+  if (!access) return groupSyncFail(input, '社团未接入')
+  const clubGroup = access.groupId ? groups.find((g) => g.id === access.groupId) : undefined
+  if (!clubGroup) return groupSyncFail(input, '社团未绑定 Group')
+  let target: GroupSeed | null
+  if (input.title === '负责人') {
+    if (access.leaderGroupId) {
+      target = groups.find((g) => g.id === access.leaderGroupId) ?? null
+      // leaderGroupId 为空时非目标（社团接入向导未配置负责人 Group）不视为错误；配置了却不存在则视为配置损坏，不静默吞错
+      if (!target) return groupSyncFail(input, '负责人职位 Group 不存在或已失效')
+    } else {
+      target = null
+    }
+  } else if (input.active) {
+    target = resolvePositionGroup(clubGroup, findDepartmentGroup(clubGroup, input.departmentName), input.title)
+  } else {
+    const parent = findDepartmentGroup(clubGroup, input.departmentName) ?? clubGroup
+    target = groups.find((g) => g.parentId === parent.id && g.purpose === 'position' && g.name === input.title) ?? null
+  }
+  if (!target) {
+    if (input.active) return groupSyncFail(input, '未找到对应职位 Group')
+    // 移除宽容：负责人无配置或非负责人职位从未建组/从未入组，视为无事可做，不记录失败
+    return { ok: true }
+  }
+  const idx = target.members.indexOf(input.memberId)
+  if (input.active) {
+    if (idx === -1) target.members.push(input.memberId)
+    if (!memberNames[input.memberId]) memberNames[input.memberId] = input.memberName
+  } else if (idx !== -1) {
+    target.members.splice(idx, 1)
+  }
+  return { ok: true, groupId: target.id }
+}
+
 export function getGroupDetail(groupId: string): {
   id: string
   name: string

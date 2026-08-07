@@ -1,7 +1,8 @@
-import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, APPLICANT_PROFILES } from './db-recruitment'
+import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, jointReviewExtras, APPLICANT_PROFILES } from './db-recruitment'
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
-import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
+import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
+import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
 export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
 
@@ -17,6 +18,7 @@ const seed = {
   jointConclusions: structuredClone(jointConclusions),
   jointInvitations: structuredClone(jointInvitations),
   jointSlots: structuredClone(jointSlots),
+  jointReviewExtras: structuredClone(jointReviewExtras),
   departments: structuredClone(departments),
   candidates: structuredClone(candidates),
   members: structuredClone(members),
@@ -28,6 +30,7 @@ const seed = {
   sysNotifications: structuredClone(sysNotifications),
   notificationSeq: notificationSeqBase,
   correctionsDb: structuredClone(correctionsDb),
+  auditLogsDb: structuredClone(auditLogsDb) as AuditLogEntry[],
   applicantProfiles: structuredClone(APPLICANT_PROFILES),
 } as const
 
@@ -43,6 +46,7 @@ export function resetRecruitmentDB(): void {
   jointConclusions.splice(0, jointConclusions.length, ...structuredClone(seed.jointConclusions))
   jointInvitations.splice(0, jointInvitations.length, ...structuredClone(seed.jointInvitations))
   jointSlots.splice(0, jointSlots.length, ...structuredClone(seed.jointSlots))
+  jointReviewExtras.splice(0, jointReviewExtras.length, ...structuredClone(seed.jointReviewExtras))
   Object.keys(APPLICANT_PROFILES).forEach((k) => { if (k.startsWith('u-auto-')) delete APPLICANT_PROFILES[k] })
   resetForms()
 }
@@ -61,8 +65,21 @@ export function resetDb(): void {
 export function resetNotifications(): void {
   sysNotifications.splice(0, sysNotifications.length, ...structuredClone(seed.sysNotifications))
   setNotificationSeq(seed.notificationSeq)
+  // P1-009：重置紧急关闭、去重、偏好、邮件 outbox、SMTP 配置
+  setNotificationKillSwitch({ active: false })
+  Object.assign(notificationKillSwitch, structuredClone(killSwitchInitial))
+  resetClubKillSwitches()
+  resetNotificationDedup()
+  resetNotificationPreferences()
+  resetEmailOutbox()
+  resetEmailConfigs()
 }
 
 export function resetCorrections(): void {
   correctionsDb.splice(0, correctionsDb.length, ...structuredClone(seed.correctionsDb))
+}
+
+export function resetAuditLogs(): void {
+  auditLogsDb.splice(0, auditLogsDb.length, ...structuredClone(seed.auditLogsDb))
+  setAuditLogSeq(1000)
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, afterEach } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
-import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, saveApplicationDraft, closeChannel, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews } from './db-recruitment'
+import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, saveApplicationDraft, closeChannel, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews, jointReviewExtras, upsertJointReviewExtra } from './db-recruitment'
 import { resetRecruitmentDB } from './reset'
 
 beforeEach(() => {
@@ -226,6 +226,46 @@ describe('评价提交链路（REC-014/015）', () => {
     expect(locked.error).toContain('关闭')
     const okOpen = submitReview('act-001', 'u-004', { comment: '未关闭轮次评价', rating: 4, authorId: 'mem-c', authorName: '作者丙', authorRole: 'club_leader', roundId: 'rd-001' })
     expect(okOpen.ok).toBe(true)
+  })
+})
+
+describe('联合评价提交链路（JNT-012 覆盖写保留修改历史）', () => {
+  it('种子记录 history 初始化为空数组，修改时追加旧值且保留原版本号', () => {
+    const seed = jointReviewExtras.find((e) => e.jointId === 'jnt-001' && e.applicantId === 'u-006' && e.clubId === 'club-002')!
+    expect(seed.history).toEqual([])
+    const extra = upsertJointReviewExtra('jnt-001', 'u-006', 'club-002', {
+      rating: 5, comment: '修改后评语', authorName: '林晓峰', authorRole: 'club_leader',
+    })
+    expect(extra.history.length).toBe(1)
+    expect(extra.history[0]).toMatchObject({ rating: 4, comment: '编程基础扎实，沟通表达清晰，建议优先考虑。', version: 1 })
+    expect(extra.history[0].updatedAt).toBeTruthy()
+    expect(extra.version).toBe(2)
+    expect(extra.rating).toBe(5)
+    expect(extra.comment).toBe('修改后评语')
+  })
+
+  it('首次新建记录初始化 history: []，且不写入历史', () => {
+    const extra = upsertJointReviewExtra('jnt-001', 'u-001', 'club-003', {
+      rating: 3, comment: '初次评价', authorName: '王教练', authorRole: 'club_leader',
+    })
+    expect(extra.history).toEqual([])
+    expect(extra.version).toBe(1)
+    expect(jointReviewExtras.some((e) => e.jointId === 'jnt-001' && e.applicantId === 'u-001' && e.clubId === 'club-003')).toBe(true)
+  })
+
+  it('多次修改累积多轮 history，按时间顺序保留每次旧值', () => {
+    upsertJointReviewExtra('jnt-001', 'u-006', 'club-002', {
+      rating: 2, comment: '第一次修改', authorName: '林晓峰', authorRole: 'club_leader',
+    })
+    const extra = upsertJointReviewExtra('jnt-001', 'u-006', 'club-002', {
+      rating: 1, comment: '第二次修改', authorName: '林晓峰', authorRole: 'club_leader',
+    })
+    expect(extra.history.length).toBe(2)
+    expect(extra.history[0].comment).toBe('编程基础扎实，沟通表达清晰，建议优先考虑。')
+    expect(extra.history[0].version).toBe(1)
+    expect(extra.history[1].comment).toBe('第一次修改')
+    expect(extra.history[1].version).toBe(2)
+    expect(extra.version).toBe(3)
   })
 })
 
