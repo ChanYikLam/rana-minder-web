@@ -9,6 +9,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Download, Plus, FileText, Clock, CheckCircle2 } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
+import { formatSize, formatTime } from './exportFormat'
 import { openAuthorizedDownload } from '@/services/download'
 import { toast } from 'vue-sonner'
 
@@ -78,17 +79,6 @@ function stopPolling(taskId: string) {
 function stopAllPolling() {
   pollingTimers.forEach((handle) => clearInterval(handle))
   pollingTimers.clear()
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '-'
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 async function handleCreate() {

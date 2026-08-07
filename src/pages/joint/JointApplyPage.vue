@@ -8,6 +8,17 @@ import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { ArrowLeft, Users, Send, Save, CheckCircle2, Upload, FileWarning, ChevronUp, ChevronDown, X, Archive } from '@lucide/vue'
 import { applicationStatusLabel, isEditableStatus } from '@/lib/recruitment-status'
+import {
+  buildSubmitPayload,
+  channelStatusMeta,
+  clubNamesOf as jointClubNamesOf,
+  movePreference as jointMovePreference,
+  renderAnswerValue as renderAnswer,
+  restoreDraftState,
+  togglePreference as jointTogglePreference,
+  toggleVolunteer as jointToggleVolunteer,
+  validateJointForm,
+} from './jointApplyLogic'
 
 interface JointDetail {
   title: string
@@ -42,24 +53,11 @@ interface MyApplication {
   submittedAt?: string | null
 }
 
-/** 联合申请通道状态 → 文案与色调（ChannelStatus: not_open/open/paused/closed） */
-const CHANNEL_STATUS_META: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
-  open: { label: '报名通道开放中', tone: 'success' },
-  paused: { label: '报名通道已暂停', tone: 'warning' },
-  not_open: { label: '报名通道未开放', tone: 'neutral' },
-  closed: { label: '报名通道已关闭', tone: 'danger' },
-}
-
 const CHANNEL_STATUS_TONE_CLASS: Record<string, string> = {
   success: 'bg-success-subtle text-success',
   warning: 'bg-warning-subtle text-warning',
   danger: 'bg-danger-subtle text-danger',
   neutral: 'bg-subtle text-text-secondary',
-}
-
-function channelStatusMeta(status?: string) {
-  const meta = status ? CHANNEL_STATUS_META[status] : undefined
-  return meta || { label: '报名通道状态未知', tone: 'neutral' as const }
 }
 
 const route = useRoute()
@@ -186,74 +184,34 @@ async function loadMyApplication(): Promise<boolean> {
 
 /** 已有草稿时回填表单内容，支持继续修改 */
 function restoreDraft(app: MyApplication) {
-  if (app.status !== 'draft') return
-  if (app.answers) {
-    for (const [fieldId, value] of Object.entries(app.answers)) {
-      if (typeof value !== 'string') continue
-      formData[fieldId] = value
-      const field = formFields.value.find((f) => f.id === fieldId)
-      if (field?.type === 'file' && value) {
-        formFiles[fieldId] = { fileId: value, name: '已上传附件', size: 0, checking: false, error: false }
-      }
-    }
+  const restored = restoreDraftState(app, formFields.value)
+  Object.assign(formData, restored.answers)
+  for (const [fieldId, fileId] of Object.entries(restored.fileIds)) {
+    formFiles[fieldId] = { fileId, name: '已上传附件', size: 0, checking: false, error: false }
   }
-  if (Array.isArray(app.volunteerClubIds)) {
-    volunteerClubIds.value = app.volunteerClubIds
-  }
-  if (app.preferences) {
-    preferences.value = app.preferences.map((p) => ({ departmentId: p.departmentId, departmentName: p.departmentName }))
-  }
-  consented.value = app.consented ?? false
-  allowJointAdjustment.value = app.allowJointAdjustment ?? false
-}
-
-function departmentsOfClub(clubId: string): { id: string; name: string }[] {
-  return detail.value?.clubs?.find((c) => c.id === clubId)?.departments || []
+  volunteerClubIds.value = restored.volunteerClubIds
+  preferences.value = restored.preferences
+  consented.value = restored.consented
+  allowJointAdjustment.value = restored.allowJointAdjustment
 }
 
 function toggleVolunteer(clubId: string) {
-  const selected = volunteerClubIds.value.includes(clubId)
-  if (!selected) {
-    volunteerClubIds.value.push(clubId)
-  } else {
-    volunteerClubIds.value = volunteerClubIds.value.filter((id) => id !== clubId)
-    const keptDeptIds = new Set(
-      volunteerClubIds.value.flatMap((cid) => departmentsOfClub(cid).map((d) => d.id)),
-    )
-    preferences.value = preferences.value.filter((p) => keptDeptIds.has(p.departmentId))
-  }
+  const next = jointToggleVolunteer(volunteerClubIds.value, preferences.value, detail.value?.clubs || [], clubId)
+  volunteerClubIds.value = next.volunteerClubIds
+  preferences.value = next.preferences
 }
 
 function togglePreference(dept: { id: string; name: string }) {
-  const idx = preferences.value.findIndex((p) => p.departmentId === dept.id)
-  if (idx >= 0) preferences.value.splice(idx, 1)
-  else preferences.value.push({ departmentId: dept.id, departmentName: dept.name })
+  preferences.value = jointTogglePreference(preferences.value, { departmentId: dept.id, departmentName: dept.name })
 }
 
 function movePreference(index: number, direction: 'up' | 'down') {
-  const target = direction === 'up' ? index - 1 : index + 1
-  if (target < 0 || target >= preferences.value.length) return
-  const temp = preferences.value[index]
-  preferences.value[index] = preferences.value[target]
-  preferences.value[target] = temp
+  preferences.value = jointMovePreference(preferences.value, index, direction)
 }
 
 async function handleSubmit() {
   if (!showApplyForm.value) return
-  formErrors.value = {}
-  for (const field of formFields.value) {
-    if (field.required && !formData[field.id]) {
-      formErrors.value[field.id] = `${field.label}为必填项`
-    }
-    if (field.type === 'file') {
-      const f = formFiles[field.id]
-      if (f?.checking) {
-        formErrors.value[field.id] = '文件安全检查中，请稍候再提交'
-      } else if (f?.error) {
-        formErrors.value[field.id] = '文件上传失败，请重新上传'
-      }
-    }
-  }
+  formErrors.value = validateJointForm(formFields.value, formData, formFiles)
   if (Object.keys(formErrors.value).length > 0) return
 
   submitting.value = true
@@ -268,17 +226,15 @@ async function handleSubmit() {
         return
       }
     }
-    // 空意向社团时同步清空部门意向，避免"意向社团=[]、部门意向残留"的数据不一致
-    const clubIds = volunteerClubIds.value ?? []
-    const prefs = clubIds.length === 0 ? [] : preferences.value
 
-    const result = await post(`/activity/joint/${route.params.jointId}/apply`, {
+    const payload = buildSubmitPayload({
       consented: consented.value,
       allowJointAdjustment: allowJointAdjustment.value,
-      volunteerClubIds: clubIds,
-      preferences: prefs,
+      volunteerClubIds: volunteerClubIds.value ?? [],
+      preferences: preferences.value,
       answers: { ...formData },
     })
+    const result = await post(`/activity/joint/${route.params.jointId}/apply`, payload)
     if (result.kind === 'completed') {
       toast.success('联合报名已提交')
       router.push('/me/ongoing')
@@ -331,13 +287,9 @@ function formatDateTime(iso?: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** 提交详情只读回显：表单字段值（文件字段显示「已上传附件」），空值不展示 */
 /** 提交详情只读回显：表单字段值按类型渲染（数组 join、结构化对象 JSON、文件显示「已上传附件」），空值不展示 */
 function renderAnswerValue(v: unknown): string {
-  if (v == null || v === '') return ''
-  if (Array.isArray(v)) return v.map(renderAnswerValue).filter(Boolean).join('、')
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
+  return renderAnswer(v)
 }
 
 function answersOf(fieldId: string): string {
@@ -350,11 +302,7 @@ function answersOf(fieldId: string): string {
 
 /** 意向社团 id → 名称（详情接口参与社团与部门列表同源，取任一可用的名称） */
 function clubNamesOf(ids?: string[]): string[] {
-  if (!ids || ids.length === 0) return []
-  if (myApplication.value?.volunteerClubSnapshot?.length) return myApplication.value.volunteerClubSnapshot
-  return ids.map((id) => detail.value?.participants?.find((p) => p.id === id)?.name
-    || detail.value?.clubs?.find((c) => c.id === id)?.name
-    || id)
+  return jointClubNamesOf(ids, myApplication.value?.volunteerClubSnapshot, detail.value?.participants || [], detail.value?.clubs || [])
 }
 
 /** 撤销联合报名提交：先点击进入确认态，5 秒内再次点击才执行（避免 iframe/沙箱环境禁用 window.confirm 导致无反应） */
