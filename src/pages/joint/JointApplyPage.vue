@@ -18,7 +18,7 @@ import {
   togglePreference as jointTogglePreference,
   toggleVolunteer as jointToggleVolunteer,
   validateJointForm,
-} from './jointApplyLogic'
+} from '@/lib/jointApplyLogic'
 
 interface JointDetail {
   title: string

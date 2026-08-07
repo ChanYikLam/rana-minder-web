@@ -33,7 +33,10 @@ const commonStubs = {
   EmptyState: { template: '<div><slot />{{ title }}</div>', props: ['type', 'title'] },
   PermissionGuard: { template: '<div><slot /></div>' },
   StateTag: { template: '<span />' },
-  HighRiskConfirm: { template: '<div class="hrc"><slot /></div>' },
+  HighRiskConfirm: {
+    props: ['open', 'confirmLabel', 'executing', 'errorMessage'],
+    template: '<div class="hrc" v-if="open"><slot />{{ errorMessage }}<button class="hrc-confirm" :disabled="executing" @click="$emit(\'confirm\')">{{ confirmLabel || \'确认\' }}</button></div>',
+  },
 }
 
 const generatingTask = {
@@ -133,6 +136,12 @@ describe('ExportPage 任务列表与轮询', () => {
     expect(wrapper.text()).not.toContain('成员名单')
   })
 
+  async function openCreateConfirm(wrapper: ReturnType<typeof mountPage>) {
+    await wrapper.findAll('button').find((b) => b.text().includes('新建导出'))!.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.hrc').exists()).toBe(true)
+  }
+
   it('创建导出成功：任务插入列表并对已完成任务提示', async () => {
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
     mockPost.mockResolvedValueOnce({
@@ -144,12 +153,39 @@ describe('ExportPage 任务列表与轮询', () => {
     await flushPromises()
     await nextTick()
 
-    expect(mockPost).not.toHaveBeenCalled()
-    expect(mockPost).toBeDefined()
+    await openCreateConfirm(wrapper)
+    await wrapper.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/exports', { type: '成员名单' })
+    expect(toast.success).toHaveBeenCalledWith('导出已生成完成，可点击下载')
+    // 任务插入列表并展示尺寸
+    expect(wrapper.text()).toContain('成员名单')
+    expect(wrapper.text()).toContain('1.0 KB')
+    expect(wrapper.text()).toContain('完成于')
     wrapper.unmount()
   })
 
-  it('下载未完成任务：toast 提示稍候', async () => {
+  it('创建导出失败：弹窗展示错误信息且不插入任务', async () => {
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    mockPost.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: '导出服务异常' } })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await openCreateConfirm(wrapper)
+    await wrapper.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.hrc').text()).toContain('导出服务异常')
+    expect(wrapper.text()).not.toContain('成员名单')
+    wrapper.unmount()
+  })
+
+  it('下载按钮仅对已完成的导出任务展示', async () => {
     vi.useFakeTimers()
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [generatingTask] } })
 
@@ -157,13 +193,31 @@ describe('ExportPage 任务列表与轮询', () => {
     await flushPromises()
     await nextTick()
 
-    const downloadBtn = wrapper.findAll('button').find((b) => b.text().includes('下载'))
-    if (downloadBtn) {
-      await downloadBtn.trigger('click')
-      await nextTick()
+    // 生成中任务不展示下载按钮
+    expect(wrapper.findAll('button').some((b) => b.text().includes('下载'))).toBe(false)
+    expect(wrapper.text()).toContain('生成中...')
+    wrapper.unmount()
+  })
+
+  it('下载已完成任务：请求下载地址并提示开始下载', async () => {
+    const completedTask = {
+      id: 'exp-003', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
+      completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-08-08T04:00:00Z',
+      downloadUrl: '/files/3.xlsx', fileSize: 2048,
     }
-    // 未完成任务不展示下载按钮（downloadUrl 为 null），仅验证无异常
-    expect(toast.info).not.toHaveBeenCalled()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [completedTask] } })
+    mockPost.mockResolvedValueOnce({ kind: 'completed', data: { downloadUrl: '/files/3.xlsx' } })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('下载'))!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/exports/exp-003/download', {})
+    expect(toast.success).toHaveBeenCalledWith('已开始下载')
     wrapper.unmount()
   })
 })

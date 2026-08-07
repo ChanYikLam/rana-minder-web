@@ -9,7 +9,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Download, Plus, FileText, Clock, CheckCircle2 } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
-import { formatSize, formatTime } from './exportFormat'
+import { formatSize, formatTime } from '@/lib/exportFormat'
 import { openAuthorizedDownload } from '@/services/download'
 import { toast } from 'vue-sonner'
 

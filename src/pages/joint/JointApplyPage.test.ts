@@ -36,9 +36,9 @@ const mockDetail = {
 }
 const mockFormFields = [{ id: 'f1', type: 'text', label: '姓名', description: null, required: true, readonly: false, permission: 'read_write', options: null }]
 
-function setupGetMocks(application: unknown = null) {
+function setupGetMocks(application: unknown = null, detailOverrides: Record<string, unknown> = {}) {
   mockGet.mockReset()
-  mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDetail })
+  mockGet.mockResolvedValueOnce({ kind: 'completed', data: { ...mockDetail, ...detailOverrides } })
   mockGet.mockResolvedValueOnce({ kind: 'completed', data: { versions: [{ fields: mockFormFields }] } })
   if (application) {
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: application })
@@ -174,12 +174,31 @@ describe('JointApplyPage 交互流程', () => {
     expect(mockPush).not.toHaveBeenCalled()
   })
 
-  it('通道关闭态展示红色提示', async () => {
+  it('通道开放态展示绿色提示', async () => {
     setupGetMocks()
     const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
     await flushPromises()
     await nextTick()
 
     expect(wrapper.text()).toContain('报名通道开放中')
+  })
+
+  it('通道关闭态展示关闭提示（danger 色调类）', async () => {
+    setupGetMocks(null, { channelStatus: 'closed' })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('报名通道已关闭')
+    expect(wrapper.html()).toContain('bg-danger-subtle text-danger')
+  })
+
+  it('未知通道状态回退中性提示', async () => {
+    setupGetMocks(null, { channelStatus: 'weird' })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('报名通道状态未知')
   })
 })
