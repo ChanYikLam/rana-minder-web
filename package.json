@@ -40,8 +40,8 @@
       "vue-demi"
     ],
     "overrides": {
-      "esbuild": ">=0.28.1",
-      "fast-uri": ">=3.1.5"
+      "esbuild": "0.28.1",
+      "fast-uri": "3.1.5"
     }
   },
   "devDependencies": {

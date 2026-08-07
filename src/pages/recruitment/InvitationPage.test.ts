@@ -18,6 +18,7 @@ function makeDetail() {
   return {
     id: 'inv-1', activityId: 'act-1', activityTitle: '秋季招新', clubName: '计算机协会',
     applicantName: '张三', status: 'sent', sentAt: '2026-08-01T04:00:00Z', expiredAt: '2026-08-08T04:00:00Z', departmentName: '技术部',
+    casdoorSync: 'none',
   }
 }
 
@@ -68,5 +69,33 @@ describe('InvitationPage 招新邀请', () => {
     const wrapper = mount(InvitationPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('秋季招新')
+  })
+
+  // 新-2：已接受且同步中展示「确认生效」按钮，点击后调用申请人侧 sync-confirm
+  it('已接受同步中：展示确认生效按钮并调用 sync-confirm', async () => {
+    const detail = makeDetail()
+    detail.status = 'accepted'
+    detail.casdoorSync = 'processing'
+    mockGet.mockResolvedValue({ kind: 'completed', data: detail })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(InvitationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('确认生效'))
+    expect(confirmBtn, '同步中应渲染确认生效按钮').toBeTruthy()
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/me/invitations/recruitment/inv-1/sync-confirm')
+    expect(wrapper.text()).toContain('已生效，欢迎加入')
+  })
+
+  it('已确认生效：不再渲染确认生效按钮', async () => {
+    const detail = makeDetail()
+    detail.status = 'accepted'
+    detail.casdoorSync = 'confirmed'
+    mockGet.mockResolvedValue({ kind: 'completed', data: detail })
+    const wrapper = mount(InvitationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('确认生效'))).toBe(false)
+    expect(wrapper.text()).toContain('已生效，欢迎加入')
   })
 })

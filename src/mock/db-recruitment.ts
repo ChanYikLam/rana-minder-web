@@ -88,6 +88,8 @@ export interface RecDeptPath {
   status: DeptPathStatus
   decided: 'admit' | 'not_admit' | null
   labelSetBy: string | null
+  /** 标签设置者的可通知用户 id（REC-039/改判通知用；显式存储避免按姓名反查同名歧义） */
+  labelSetByUserId: string | null
   waitlist: boolean
   holdDeadline: string | null
   publishedAt: string | null
@@ -261,6 +263,8 @@ export interface JointActivity {
   channelStatus: ChannelStatus
   channelPausedBefore: ChannelStatus | null
   pauseStartAt: string | null
+  /** 报名通道首次开放时间（JNT-029） */
+  channelOpenedAt: string | null
   deadline: string
   deadlineVersion: number
   window: { seq: number; deadline: string }
@@ -366,6 +370,8 @@ export interface JointReviewExtra {
   authorName: string
   authorRole: string
   version: number
+  /** JNT-012：修改时保留旧值、新值、时间（与 RecReview.history 契约一致，updatedAt 供跨社互见展示修改时间） */
+  history: { rating: number | null; comment: string; concludedAt: string | null; version: number; updatedAt: string }[]
 }
 
 // ================= 种子数据 =================
@@ -471,8 +477,8 @@ export const recruitmentApplications: RecApplication[] = [
     ],
     allowAdjustment: true, formVersion: 1, answers: {},
     paths: {
-      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
-      'dept-003': { departmentId: 'dept-003', departmentName: '设计部', order: 2, source: 'volunteer', status: 'pending', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
+      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
+      'dept-003': { departmentId: 'dept-003', departmentName: '设计部', order: 2, source: 'volunteer', status: 'pending', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
     },
     submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
@@ -484,7 +490,7 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
     paths: {
-      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
+      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
     },
     submittedAt: daysFromNow(-31), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
@@ -496,7 +502,7 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-001', departmentName: '技术部' }],
     allowAdjustment: false, formVersion: 1, answers: {},
     paths: {
-      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'waitlist', decided: null, labelSetBy: '李思颖', waitlist: true, holdDeadline: null, publishedAt: null, labelHistory: [], version: 2 },
+      'dept-001': { departmentId: 'dept-001', departmentName: '技术部', order: 1, source: 'volunteer', status: 'waitlist', decided: null, labelSetBy: '李思颖', labelSetByUserId: 'user-hr-001', waitlist: true, holdDeadline: null, publishedAt: null, labelHistory: [], version: 2 },
     },
     submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
@@ -508,7 +514,7 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: false, formVersion: 1, answers: {},
     paths: {
-      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'published', decided: 'not_admit', labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: daysFromNow(-28), labelHistory: [], version: 2 },
+      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'published', decided: 'not_admit', labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: daysFromNow(-28), labelHistory: [], version: 2 },
     },
     submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
@@ -520,7 +526,7 @@ export const recruitmentApplications: RecApplication[] = [
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
     paths: {
-      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
+      'dept-002': { departmentId: 'dept-002', departmentName: '运营部', order: 1, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 },
     },
     submittedAt: daysFromNow(-32), withdrawnAt: null, recoveryWindowDeadline: null, adjustmentDeadline: null, adjustmentReason: null, notQualifiedReason: null, identityAnomalyAt: null, eligibilitySnapshot: null,
     version: 1,
@@ -591,7 +597,7 @@ export const jointActivities: JointActivity[] = [
     confirmRound: 1, confirmDeadline: daysFromNow(10),
     sharedAgreement: { version: 1, text: '您的报名资料将在两个参与社团之间共享，用于联合面试与选拔。您可以在提交前选择是否同意共享；拒绝共享则不能参加本次联合活动。' },
     formId: 'form-001', formVersion: 1,
-    channelStatus: 'open', channelPausedBefore: null, pauseStartAt: null,
+    channelStatus: 'open', channelPausedBefore: null, pauseStartAt: null, channelOpenedAt: daysFromNow(-26),
     deadline: daysFromNow(10), deadlineVersion: 1,
     window: { seq: 1, deadline: daysFromNow(10) },
     publishedAt: daysFromNow(-26), firstInviteAt: null, closedAt: null, forceClosedAt: null,
@@ -646,6 +652,7 @@ export const jointReviewExtras: JointReviewExtra[] = [
     jointId: 'jnt-001', applicantId: 'u-006', clubId: 'club-002',
     rating: 4, comment: '编程基础扎实，沟通表达清晰，建议优先考虑。',
     concludedAt: daysFromNow(-2), authorName: '林晓峰', authorRole: 'club_leader', version: 1,
+    history: [],
   },
 ]
 
@@ -656,6 +663,11 @@ export function findJointReviewExtra(jointId: string, applicantId: string, clubI
 export function upsertJointReviewExtra(jointId: string, applicantId: string, clubId: string, input: { rating: number; comment: string; authorName: string; authorRole: string }): JointReviewExtra {
   const existing = findJointReviewExtra(jointId, applicantId, clubId)
   if (existing) {
+    // JNT-012：修改时保留旧值、新值、时间 → 写入 history
+    existing.history = [
+      ...(existing.history || []),
+      { rating: existing.rating, comment: existing.comment, concludedAt: existing.concludedAt, version: existing.version, updatedAt: existing.concludedAt || new Date().toISOString() },
+    ]
     existing.rating = input.rating
     existing.comment = input.comment
     existing.concludedAt = new Date().toISOString()
@@ -670,6 +682,7 @@ export function upsertJointReviewExtra(jointId: string, applicantId: string, clu
     concludedAt: new Date().toISOString(),
     authorName: input.authorName, authorRole: input.authorRole,
     version: 1,
+    history: [],
   }
   jointReviewExtras.push(extra)
   return extra
@@ -1255,6 +1268,8 @@ export function withdrawApplicationSubmission(activityId: string, applicantId: s
   app.status = 'draft'
   app.submittedAt = null
   app.withdrawnAt = null
+  // 撤销提交回到草稿：资格快照须同步清空，避免草稿态残留已失效的「提交时快照」
+  app.eligibilitySnapshot = null
   app.version += 1
   return ok(app)
 }
@@ -1320,15 +1335,16 @@ export function submitApplication(activityId: string, applicantId: string, input
   app.notQualifiedReason = null
   app.version += 1
   // 保存资格快照（REC-035：提交时固化，审计/回放使用；深拷贝防后续变更污染）
+  // 注意：使用 structuredClone 而非浅展开——answers 可能含嵌套对象/数组，浅拷贝会共享引用
   app.eligibilitySnapshot = {
-    answers: { ...(input.answers || {}) },
-    preferences: app.preferences.map((p) => ({ ...p })),
+    answers: structuredClone(input.answers || {}),
+    preferences: structuredClone(app.preferences),
     submittedAt: app.submittedAt!,
     formVersion: a.formVersion,
   }
   for (const p of app.preferences) {
     if (!app.paths[p.departmentId]) {
-      app.paths[p.departmentId] = { departmentId: p.departmentId, departmentName: p.departmentName, order: p.order, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 }
+      app.paths[p.departmentId] = { departmentId: p.departmentId, departmentName: p.departmentName, order: p.order, source: 'volunteer', status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false, holdDeadline: null, publishedAt: null, labelHistory: [], version: 1 }
     }
   }
   return ok(app)
@@ -1422,16 +1438,7 @@ export function publishNotQualified(activityId: string, applicantId: string, rea
 
 // ================= REC 评价/路径/结论 =================
 
-/** 按展示姓名反查前端用户 id（通知「原设置者」用，避免循环依赖 notifications 模块） */
-function userIdOfName(name: string): string | null {
-  if (!name) return null
-  for (const user of Object.values(mockUsers)) {
-    if (user.name === name) return user.id
-  }
-  return null
-}
-
-export function setDeptLabel(activityId: string, applicantId: string, departmentId: string, label: boolean, actorId: string, actorName: string, actorRole: string, isDeptLeader: boolean, actorUserId?: string | null): { ok: boolean; error?: string; data?: { override: boolean; prevLabelBy: string | null; prevUserId: string | null } } {
+export function setDeptLabel(activityId: string, applicantId: string, departmentId: string, label: boolean, actorId: string, actorName: string, actorRole: string, isDeptLeader: boolean, actorUserId?: string | null): { ok: boolean; error?: string; data?: { override: boolean; prevLabelBy: string | null; prevLabelByUserId: string | null; prevUserId: string | null } } {
   void actorRole
   const app = findApplication(activityId, applicantId)
   if (!app) return err('申请不存在')
@@ -1445,23 +1452,28 @@ export function setDeptLabel(activityId: string, applicantId: string, department
   if (!path.labelHistory) path.labelHistory = []
   // 检测是否为改判：设置标签且已有其他设置者
   const override = !!label && !!path.labelSetBy && path.labelSetBy !== actorName
+  // 原设置者直接取已固化的 userId（REC-039 存 labelSetByUserId），避免按姓名反查同名歧义
   const prevLabelBy = path.labelSetBy
-  const prevUserId = prevLabelBy ? userIdOfName(prevLabelBy) : null
+  const prevLabelByUserId = path.labelSetByUserId
+  const prevUserId = prevLabelByUserId
   if (label) {
     path.status = 'decided'
     path.decided = 'admit'
     path.labelSetBy = actorName
+    // 显式固化设置者 userId（可与姓名一致地用于后续改判通知；无则回退 null，不再按姓名猜测）
+    path.labelSetByUserId = actorUserId ?? null
     path.labelHistory.push({ actorName, actorId, action: override ? 'override' : 'set', timestamp: now() })
   } else {
     path.decided = null
     path.labelSetBy = null
+    path.labelSetByUserId = null
     path.labelHistory.push({ actorName, actorId, action: 'clear', timestamp: now() })
     if (path.waitlist) path.status = 'waitlist'
     else path.status = 'evaluating'
   }
   path.version += 1
   app.version += 1
-  return ok({ override, prevLabelBy, prevUserId })
+  return ok({ override, prevLabelBy, prevLabelByUserId, prevUserId })
 }
 
 /** 调剂路径创建（REC-036：管理员为申请人添加 source='adjustment' 的部门路径） */
@@ -1470,13 +1482,15 @@ export function addAdjustmentPath(activityId: string, applicantId: string, depar
   if (!app) return err('申请不存在')
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
+  // 仅「已提交」的申请可被调剂（草稿/已退出/资格失效/已录取等均不可）
+  if (app.status !== 'submitted') return err('仅已提交的申请可创建调剂路径')
   if (app.paths[departmentId]) return err('该部门路径已存在')
   if (!a.departments.some((d) => d.id === departmentId)) return err('部门不在本次招新范围内')
   if (!reason.trim()) return err('必须填写调剂原因')
   const maxOrder = Math.max(0, ...Object.values(app.paths).map((p) => p.order))
   app.paths[departmentId] = {
     departmentId, departmentName, order: maxOrder + 1, source: 'adjustment',
-    status: 'evaluating', decided: null, labelSetBy: null, waitlist: false,
+    status: 'evaluating', decided: null, labelSetBy: null, labelSetByUserId: null, waitlist: false,
     holdDeadline: null, publishedAt: null, labelHistory: [], version: 1,
   }
   app.version += 1
@@ -1690,7 +1704,7 @@ export function createJointActivity(clubId: string, clubName: string, actorName:
     confirmRound: 1, confirmDeadline: input.confirmDeadline,
     sharedAgreement: { version: 1, text: input.sharedAgreement || '您的报名资料将在全部参与社团之间共享，用于联合面试与选拔。' },
     formId: 'form-001', formVersion: 1,
-    channelStatus: 'not_open', channelPausedBefore: null, pauseStartAt: null,
+    channelStatus: 'not_open', channelPausedBefore: null, pauseStartAt: null, channelOpenedAt: null,
     deadline: daysFromNow(10), deadlineVersion: 1, window: { seq: 1, deadline: daysFromNow(10) },
     publishedAt: null, firstInviteAt: null, closedAt: null, forceClosedAt: null,
     cancelConfirmRound: 0, cancelConfirmDeadline: null, cancelConfirmations: {},
@@ -1758,7 +1772,17 @@ export function publishJointActivity(jointId: string): { ok: boolean; error?: st
   if (!ja.clubs.every((c) => c.status === 'accepted')) return err('全部拟参与社团确认后才能首次公布')
   ja.status = 'published'
   ja.publishedAt = now()
+  ja.channelOpenedAt = now()
   ja.clubs.forEach((c) => (c.status = 'locked'))
+  // 自动推进渠道状态: 已发布后若渠道仍为 not_open，则自动开放
+  if (ja.channelStatus === 'not_open') {
+    const tc = assertTransition('SM-JNT-006', ja.channelStatus, 'open', 'first_open')
+    if (tc.ok) {
+      ja.channelStatus = 'open'
+      ja.deadlineVersion += 1
+      ja.window = { seq: ja.window.seq + 1, deadline: ja.deadline }
+    }
+  }
   ja.version += 1
   return ok()
 }
@@ -2066,15 +2090,43 @@ export function reviewJointConclusion(jointId: string, applicantId: string, club
         status: 'pending_acceptance', sentAt: now(), expiredAt: daysFromNow(7), acceptedAt: null,
         reviewFlag: false, frozenRemainingMs: null, casdoorSync: 'none', version: 1,
       }
+      // SM-JNT-005：invite_pending 先回退 evaluating（invite_terminal），再 evaluating→invite_pending（create_invite）
+      if (con.status === 'invite_pending') {
+        const mv0 = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+        if (!mv0.ok) return err(mv0.reason || '结论状态不可回退')
+      }
+      const mv = moveJointConclusion(con, 'create_invite', 'invite_pending')
+      if (!mv.ok) return err(mv.reason || '结论状态不可发送邀请')
       jointInvitations.unshift(inv)
       con.inviteId = inv.id
     } else {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）或保持 evaluating
+      if (con.status === 'invite_pending') {
+        const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+        if (!mv.ok) return err(mv.reason || '结论状态不可回退')
+      }
       con.inviteId = null
     }
     con.reviewFlag = false
   }
   con.version += 1
   return ok()
+}
+
+/** SM-JNT-005 结论状态机守卫写入：断言通过才落库。
+ * 新提交产生的结论从 pending 起步，写入非 evaluating 目标前先补 create（pending→evaluating）
+ * （createJointInvitation 对未设结论的 pending 结论发 join 调剂邀请时同样适用）。 */
+function moveJointConclusion(con: JointConclusion, event: string, toStatus: JointConclusionStatus): { ok: boolean; reason?: string } {
+  let from = con.status
+  if (from === 'pending' && toStatus !== 'evaluating') {
+    const t0 = assertTransition('SM-JNT-005', from, 'evaluating', 'create')
+    if (!t0.ok) return t0
+    from = 'evaluating'
+  }
+  const t = assertTransition('SM-JNT-005', from, toStatus, event)
+  if (!t.ok) return t
+  con.status = toStatus
+  return { ok: true }
 }
 
 export function setJointConclusion(jointId: string, applicantId: string, clubId: string, conclusion: 'admit' | 'not_admit', actorName: string, actorRole: string): { ok: boolean; error?: string; data?: JointConclusion } {
@@ -2086,7 +2138,10 @@ export function setJointConclusion(jointId: string, applicantId: string, clubId:
     const inv = jointInvitations.find((x) => x.id === con.inviteId)
     if (inv && inv.status === 'pending_acceptance') return err('存在待处理邀请，请先撤回或等待处理')
   }
-  const t = assertTransition('SM-JNT-005', con.status, 'evaluating', 'modify')
+  // SM-JNT-005：pending 首次写入走 create、invite_pending 邀请终态后重设走 invite_terminal、其余走 modify
+  const fromStatus = con.status
+  const event = fromStatus === 'pending' ? 'create' : fromStatus === 'invite_pending' ? 'invite_terminal' : 'modify'
+  const t = assertTransition('SM-JNT-005', fromStatus, 'evaluating', event)
   if (!t.ok) return err(t.reason || '当前结论状态不可修改')
   con.status = 'evaluating'
   con.conclusion = conclusion
@@ -2115,8 +2170,14 @@ export function createJointInvitation(jointId: string, applicantId: string, club
   }
   jointInvitations.unshift(inv)
   if (con) {
+    // SM-JNT-005：evaluating→invite_pending（create_invite）；pending 未设结论时先 create→evaluating
+    const move = moveJointConclusion(con, 'create_invite', 'invite_pending')
+    if (!move.ok) {
+      const ci = jointInvitations.findIndex((x) => x.id === inv.id)
+      if (ci >= 0) jointInvitations.splice(ci, 1)
+      return err(move.reason || '当前结论状态不可发送邀请')
+    }
     con.inviteId = inv.id
-    con.status = 'invite_pending'
     con.version += 1
   }
   if (!ja.firstInviteAt) {
@@ -2137,9 +2198,11 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
     inv.status = 'rejected'
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+      const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+      if (!mv.ok) return err(mv.reason || '结论状态不可回退')
       con.reviewFlag = false
       con.inviteId = null
-      con.status = 'evaluating'
       con.version += 1
     }
     inv.version += 1
@@ -2151,8 +2214,10 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
     inv.status = 'expired'
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+      const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+      if (!mv.ok) return err(mv.reason || '结论状态不可回退')
       con.inviteId = null
-      con.status = 'evaluating'
       con.version += 1
     }
     return err('邀请已过期')
@@ -2163,7 +2228,9 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
     inv.casdoorSync = 'processing'
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
-      con.status = 'accepted_locked'
+      // SM-JNT-005：invite_pending→accepted_locked（accepted）
+      const mv = moveJointConclusion(con, 'accepted', 'accepted_locked')
+      if (!mv.ok) return err(mv.reason || '结论状态不可锁定')
       con.conclusion = 'admit'
       con.reviewFlag = false
       con.version += 1
@@ -2171,8 +2238,10 @@ export function respondJointInvitation(invitationId: string, action: 'accept' | 
   } else {
     const con = jointConclusions.find((c) => c.inviteId === inv.id)
     if (con) {
+      // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+      const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+      if (!mv.ok) return err(mv.reason || '结论状态不可回退')
       con.inviteId = null
-      con.status = 'evaluating'
       con.version += 1
     }
   }
@@ -2188,8 +2257,10 @@ export function withdrawJointInvitation(invitationId: string): { ok: boolean; er
   inv.status = 'withdrawn'
   const con = jointConclusions.find((c) => c.inviteId === inv.id)
   if (con) {
+    // SM-JNT-005：invite_pending→evaluating（invite_terminal）
+    const mv = moveJointConclusion(con, 'invite_terminal', 'evaluating')
+    if (!mv.ok) return err(mv.reason || '结论状态不可回退')
     con.inviteId = null
-    con.status = 'evaluating'
     con.version += 1
   }
   inv.version += 1
@@ -2242,6 +2313,7 @@ export function openJointChannel(jointId: string, deadline: string): { ok: boole
   ja.channelStatus = 'open'
   ja.deadline = deadline
   ja.deadlineVersion += 1
+  if (!ja.channelOpenedAt) ja.channelOpenedAt = now()
   ja.version += 1
   return ok()
 }
@@ -2251,6 +2323,8 @@ export function pauseJointChannel(jointId: string): { ok: boolean; error?: strin
   if (!ja) return err('联合活动不存在')
   const t = assertTransition('SM-JNT-006', ja.channelStatus, 'paused', 'pause')
   if (!t.ok) return err(t.reason || '联合报名通道当前不可暂停')
+  // 暂停时记录起点，恢复时把暂停时长顺延到截止（对齐 resumeActivity 语义）
+  ja.pauseStartAt = now()
   ja.channelStatus = 'paused'
   ja.version += 1
   return ok()
@@ -2262,10 +2336,18 @@ export function resumeJointChannel(jointId: string, newDeadline: string): { ok: 
   const t = assertTransition('SM-JNT-006', ja.channelStatus, 'open', 'resume_with_deadline')
   if (!t.ok) return err(t.reason || '联合报名通道当前不可恢复')
   if (new Date(newDeadline).getTime() <= Date.now()) return err('新截止必须严格晚于当前时刻')
+  // 若传入新截止则采用新截止；否则将暂停时长顺延到原截止（对齐 resumeActivity 语义）
+  let nextDeadline = newDeadline
+  if (!nextDeadline && ja.pauseStartAt) {
+    const pausedMs = Date.now() - new Date(ja.pauseStartAt).getTime()
+    nextDeadline = new Date(new Date(ja.deadline).getTime() + pausedMs).toISOString()
+  }
+  if (new Date(nextDeadline).getTime() <= Date.now()) return err('恢复后的截止必须严格晚于当前时刻')
   ja.channelStatus = 'open'
   ja.deadlineVersion += 1
-  ja.window = { seq: ja.window.seq + 1, deadline: newDeadline }
-  ja.deadline = newDeadline
+  ja.window = { seq: ja.window.seq + 1, deadline: nextDeadline }
+  ja.deadline = nextDeadline
+  ja.pauseStartAt = null
   ja.version += 1
   return ok()
 }
@@ -2332,6 +2414,51 @@ export function cancelJointActivity(jointId: string, clubId: string, actorName: 
   return ok()
 }
 
+/**
+ * 自动推进联合活动期限: 检测当前时刻与 deadline 的关系，推进状态机。
+ * 不新增定时任务，在每次状态读取时调用（lazy evaluation）。
+ * 到期推进前校验业务前置条件，避免跳过邀请/结束确认环节。
+ */
+export function autoAdvanceJointDeadlines(jointId: string): { ok: boolean; error?: string; changed?: boolean } {
+  const ja = findJoint(jointId)
+  if (!ja) return err('联合活动不存在')
+  const nowMs = Date.now()
+  let changed = false
+
+  // 通道 deadline 已过: 自动关闭 open 状态的通道
+  if (ja.channelStatus === 'open' && new Date(ja.deadline).getTime() <= nowMs) {
+    const tc = assertTransition('SM-JNT-006', ja.channelStatus, 'closed', 'deadline_reached')
+    if (tc.ok) {
+      ja.channelStatus = 'closed'
+      ja.version += 1
+      changed = true
+    }
+  }
+
+  // 活动 deadline 已过且从未发出邀请: 直接结束（SM-JNT-001 deadline_expired）
+  if (ja.status === 'published' && !ja.firstInviteAt && new Date(ja.deadline).getTime() <= nowMs) {
+    const ta = assertTransition('SM-JNT-001', ja.status, 'closed', 'deadline_expired')
+    if (ta.ok) {
+      ja.status = 'closed'
+      ja.closedAt = now()
+      ja.version += 1
+      changed = true
+    }
+  }
+
+  return { ok: true, changed }
+}
+
+/** 批量推进所有联合活动期限（按实际发生变更统计） */
+export function autoAdvanceAllJointDeadlines(): number {
+  let advanced = 0
+  for (const ja of jointActivities) {
+    const r = autoAdvanceJointDeadlines(ja.id)
+    if (r.ok && r.changed) advanced++
+  }
+  return advanced
+}
+
 export function startJointEndConfirm(jointId: string, clubId: string, actorName: string): { ok: boolean; error?: string } {
   void clubId
   void actorName
@@ -2371,7 +2498,11 @@ export function submitJointEndConfirm(jointId: string, clubId: string, actorName
     if (it.jointId === ja.id && it.status === 'completed') it.status = 'completed_archived'
   }
   for (const con of jointConclusions) {
-    if (con.jointId === ja.id && con.status !== 'accepted_locked') con.status = 'archived'
+    // SM-JNT-005：evaluating/invite_pending→archived（activity_final）；accepted_locked 保持锁定
+    if (con.jointId === ja.id && con.status !== 'accepted_locked') {
+      const mv = moveJointConclusion(con, 'activity_final', 'archived')
+      if (!mv.ok) return err(mv.reason || '结论状态不可归档')
+    }
   }
   expireActivityTasks(jointId)
   ja.version += 1
@@ -2399,8 +2530,11 @@ export function forceCloseJointActivity(jointId: string, reason: string): { ok: 
     }
   }
   for (const con of jointConclusions) {
+    // SM-JNT-005：evaluating/invite_pending→archived（activity_final 或 force_invalidated）；accepted_locked 保持锁定
     if (con.jointId === ja.id && con.status !== 'accepted_locked') {
-      con.status = 'archived'
+      const event = con.status === 'invite_pending' ? 'force_invalidated' : 'activity_final'
+      const mv = moveJointConclusion(con, event, 'archived')
+      if (!mv.ok) return err(mv.reason || '结论状态不可归档')
       con.reviewFlag = false
     }
   }

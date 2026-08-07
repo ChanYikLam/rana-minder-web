@@ -310,6 +310,7 @@ export function resetGovernanceState(): void {
   accessEvents.length = 0
   anomalyAlerts.length = 0
   anomalySeq = 0
+  reauthProofs.clear()
   realDataSwitch.useRealData = false
   realDataSwitch.updatedAt = null
   realDataSwitch.updatedBy = null

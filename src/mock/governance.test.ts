@@ -202,8 +202,11 @@ describe('P1-011 治理安全机制', () => {
       resolveMockUser('/api/auth/session?_mock_user=admin')
       const alerts = await invokeHandler('/api/admin/governance/anomaly-access', 'get', '/api/admin/governance/anomaly-access?_mock_user=admin')
       expect(alerts.statusCode).toBe(200)
-      const data = alerts.body.data as { items: { kind: string; actorName: string }[] }
-      expect(data.items.some((a) => a.kind === 'forbidden_attempt' && a.actorName === '张明远')).toBe(true)
+      const data = alerts.body.data as { items: { kind: string; actorName: string; path: string; detail: string }[] }
+      const forbiddenAlert = data.items.find((a) => a.kind === 'forbidden_attempt' && a.actorName === '张明远')
+      expect(forbiddenAlert).toBeTruthy()
+      // P1-011 审计修复：GET 端点 403 采集的 method 应为 get（此前硬编码 post）
+      expect(forbiddenAlert?.detail).toContain('get /api/admin/governance/high-risk-commands')
       expect(auditLogsDb.some((l) => l.action === '异常访问检测')).toBe(true)
     })
 

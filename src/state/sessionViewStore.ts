@@ -18,6 +18,8 @@ export const useSessionViewStore = defineStore('sessionView', () => {
   const workspace = ref<WorkspaceInfo | null>(null)
   const loading = ref(false)
   const lastLoadedAt = ref<number | null>(null)
+  /** 最近一次会话加载的失败信息（登录页据此展示具体原因，如账号禁用） */
+  const lastError = ref<string | null>(null)
 
   /** SRS-FAIL-001 最小白名单窗口：15 分钟 */
   const DEGRADED_WINDOW_MS = 15 * 60 * 1000
@@ -69,6 +71,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
 
   async function loadSession() {
     loading.value = true
+    lastError.value = null
     try {
       const result = await getSession()
 
@@ -88,7 +91,9 @@ export const useSessionViewStore = defineStore('sessionView', () => {
         lastLoadedAt.value = Date.now()
         syncClock()
       } else {
+        // 先清空旧会话，再写入失败原因：clearSession 会重置 lastError，顺序颠倒会使失败提示永远无法暴露
         clearSession()
+        lastError.value = 'error' in result && result.error ? result.error.message : null
       }
     } finally {
       loading.value = false
@@ -103,6 +108,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     permissions.value = []
     workspace.value = null
     lastLoadedAt.value = null
+    lastError.value = null
     stopClock()
   }
 
@@ -138,6 +144,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     workspace,
     loading,
     lastLoadedAt,
+    lastError,
     isAuthenticated,
     isProfileComplete,
     needsProfileGate,

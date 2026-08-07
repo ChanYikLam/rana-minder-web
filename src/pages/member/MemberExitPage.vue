@@ -10,19 +10,27 @@ import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/err
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { useSessionViewStore } from '@/state/sessionViewStore'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useLastLeaderGuard } from '@/composables/useLastLeaderGuard'
 import type { PageState } from '@/types/machine'
 import { UserMinus, LogOut, AlertTriangle, FileText, CheckCircle2, XCircle } from '@lucide/vue'
 
 interface ExitMember { id: string; name: string; studentId: string; department: string; title: string; status: string; joinedAt: string; exitedAt: string | null }
 interface Resignation { id: string; memberId: string; memberName: string; departmentName: string; title: string; reason: string; status: string; submittedAt: string; decidedAt: string | null; decidedBy: string | null }
+interface ExitRequestRow { id: string; memberId: string; memberName: string; reason: string; status: string; submittedAt: string; decidedAt: string | null; decidedBy: string | null; confirmedAt: string | null; dueAt: string; overdue?: boolean; canWithdraw?: boolean; canConfirm?: boolean }
 
 const route = useRoute()
 const session = useSessionViewStore()
+const workspace = useWorkspaceContextStore()
+// P2：退出审批仅社团负责人/人事（canManageMembersFull），部门负责人虽有 club:member:manage 但必 403
+const canApproveExit = computed(() =>
+  workspace.hasPermission('club:member:manage') && workspace.currentRole !== 'department_leader',
+)
 const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<ExitMember[]>([])
 const resignations = ref<Resignation[]>([])
+const exitRequests = ref<ExitRequestRow[]>([])
 
 // 移除/标记退出确认（标记退出用自定义弹窗；移除走高风险确认流）
 const actingId = ref<string | null>(null)
@@ -40,10 +48,11 @@ const removeError = ref('')
 async function loadData() {
   state.value = 'loading'
   const clubId = route.params.clubId as string
-  const result = await get<{ items: ExitMember[]; resignations: Resignation[] }>(`/org/${clubId}/members/exit`)
+  const result = await get<{ items: ExitMember[]; resignations: Resignation[]; exitRequestsWithFlags?: ExitRequestRow[] }>(`/org/${clubId}/members/exit`)
   if (result.kind === 'completed') {
     items.value = result.data.items
-    resignations.value = result.data.resignations
+    resignations.value = result.data.resignations ?? []
+    exitRequests.value = result.data.exitRequestsWithFlags ?? []
     state.value = 'normal'
   } else if (result.kind === 'accepted') {
     state.value = 'loading'
@@ -57,6 +66,75 @@ async function loadData() {
 function formatDate(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}年${d.getMonth() + 1}月`
+}
+
+// ================= 主动退出申请（MEM-001：申请→审批→二次确认→离社） =================
+const exitOpen = ref(false)
+const exitReason = ref('')
+const exitError = ref('')
+const exitSubmitting = ref(false)
+
+async function handleSubmitExitRequest() {
+  if (!exitReason.value.trim()) {
+    exitError.value = '请填写退出原因'
+    return
+  }
+  exitSubmitting.value = true
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/exit-requests`, { reason: exitReason.value.trim() })
+  exitSubmitting.value = false
+  if (r.kind === 'completed') {
+    toast.success('退出申请已提交，等待负责人/人事审批')
+    exitOpen.value = false
+    exitReason.value = ''
+    await loadData()
+  } else if (r.kind === 'rejected' && r.error) {
+    exitError.value = (r.error as { message?: string }).message || '提交失败'
+  } else {
+    exitError.value = '提交失败，请稍后重试'
+  }
+}
+
+// 审批（负责人/人事）、本人撤回 / 二次确认
+const exitActingId = ref<string | null>(null)
+
+async function handleExitDecide(req: ExitRequestRow, decision: 'approve' | 'reject') {
+  exitActingId.value = req.id
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/exit-requests/${req.id}/decide`, { decision })
+  exitActingId.value = null
+  if (r.kind === 'completed') {
+    toast.success(decision === 'approve' ? '已批准，等待本人二次确认' : '已驳回退出申请')
+    await loadData()
+  } else {
+    toastError(r, '操作失败，请重试')
+  }
+}
+
+async function handleExitWithdraw(req: ExitRequestRow) {
+  exitActingId.value = req.id
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/exit-requests/${req.id}/withdraw`)
+  exitActingId.value = null
+  if (r.kind === 'completed') {
+    toast.success('已撤回退出申请')
+    await loadData()
+  } else {
+    toastError(r, '撤回失败，请重试')
+  }
+}
+
+async function handleExitConfirm(req: ExitRequestRow) {
+  exitActingId.value = req.id
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/exit-requests/${req.id}/confirm`)
+  exitActingId.value = null
+  if (r.kind === 'completed') {
+    toast.success('已确认退出，正式离社')
+    await loadData()
+  } else {
+    toastError(r, '确认失败，请重试')
+  }
 }
 
 // 操作者不能通过移除入口移除自己
@@ -111,12 +189,16 @@ async function handleConfirmAction() {
   }
 }
 
-async function handleConfirmRemove() {
+async function handleConfirmRemove(proof?: string) {
   if (!reason.value.trim()) {
     reasonError.value = '移除原因不能为空'
     return
   }
   if (!actingId.value) return
+  if (!proof) {
+    removeError.value = '身份验证失败，请重试'
+    return
+  }
   actingSubmitting.value = true
   removeSucceeded.value = false
   removeError.value = ''
@@ -126,6 +208,7 @@ async function handleConfirmRemove() {
     memberId: targetId,
     action: 'remove',
     reason: reason.value.trim(),
+    reauthProof: proof,
   })
   actingSubmitting.value = false
   if (r.kind === 'completed') {
@@ -228,6 +311,103 @@ onMounted(loadData)
         </div>
       </Card>
 
+      <!-- 本人主动退出申请（MEM-001：申请 → 负责人/人事审批 → 本人二次确认 → 离社） -->
+      <Card class="mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <p class="text-sm font-medium text-text-primary flex items-center gap-1.5"><LogOut :size="15" /> 申请主动退出</p>
+            <p class="text-xs text-text-secondary mt-0.5">以本人身份提交，由负责人/人事审批，批准后需本人二次确认方可离社</p>
+          </div>
+          <button
+            class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle"
+            @click="exitOpen = true; exitReason = ''; exitError = ''"
+          >
+            <LogOut :size="14" /> 申请退出
+          </button>
+        </div>
+        <div v-if="exitOpen" class="pt-3 border-t border-border space-y-3">
+          <textarea
+            v-model="exitReason"
+            rows="3"
+            class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            placeholder="请填写退出原因（必填）"
+          />
+          <p v-if="exitError" class="text-xs text-danger">{{ exitError }}</p>
+          <div class="flex gap-2">
+            <button
+              class="flex-1 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+              @click="exitOpen = false"
+            >
+              取消
+            </button>
+            <button
+              class="flex-1 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="exitSubmitting"
+              @click="handleSubmitExitRequest"
+            >
+              {{ exitSubmitting ? '提交中...' : '确认提交' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 退出申请列表：本人撤回/二次确认 + 管理端审批 -->
+        <div v-if="exitRequests.length > 0" class="mt-4 pt-3 border-t border-border space-y-3">
+          <p class="text-xs font-medium text-text-secondary">退出申请记录</p>
+          <Card v-for="req in exitRequests" :key="req.id" class="!p-3">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <p class="text-sm font-medium text-text-primary">
+                  {{ req.memberName }}
+                  <span v-if="req.overdue" class="ml-2 text-xs text-danger">已超处理期限</span>
+                </p>
+                <p class="text-xs text-text-secondary mt-0.5">原因：{{ req.reason }}</p>
+                <p class="text-xs text-text-secondary mt-0.5">提交于 {{ formatDate(req.submittedAt) }} · 处理期限 {{ req.dueAt?.slice(0, 10) }}</p>
+              </div>
+              <StateTag :status="req.status" />
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <!-- 本人：审批前撤回 / 批准后二次确认 -->
+              <button
+                v-if="req.status === 'under_review' && req.canWithdraw"
+                class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border text-xs text-text-secondary hover:bg-subtle"
+                :disabled="exitActingId === req.id"
+                @click="handleExitWithdraw(req)"
+              >
+                撤回申请
+              </button>
+              <button
+                v-if="req.status === 'approved' && req.canConfirm"
+                class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90"
+                :disabled="exitActingId === req.id"
+                @click="handleExitConfirm(req)"
+              >
+                二次确认退出
+              </button>
+              <!-- 管理端：审批（仅社团负责人/人事，与后端 canManageMembersFull 一致） -->
+              <template v-if="req.status === 'under_review' && canApproveExit">
+                <button
+                  class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90"
+                  :disabled="exitActingId === req.id"
+                  @click="handleExitDecide(req, 'approve')"
+                >
+                  <CheckCircle2 :size="13" /> 批准
+                </button>
+                <button
+                  class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle"
+                  :disabled="exitActingId === req.id"
+                  @click="handleExitDecide(req, 'reject')"
+                >
+                  <XCircle :size="13" /> 驳回
+                </button>
+              </template>
+              <p v-else-if="req.status === 'approved' && req.decidedBy" class="text-xs text-success self-center">由 {{ req.decidedBy }} 批准，待本人二次确认</p>
+              <p v-else-if="req.status === 'rejected' && req.decidedBy" class="text-xs text-text-secondary self-center">由 {{ req.decidedBy }} 驳回</p>
+              <p v-else-if="req.status === 'exited'" class="text-xs text-text-secondary self-center">已确认离社</p>
+            </div>
+          </Card>
+        </div>
+      </Card>
+
       <!-- 辞职审批（仅社团负责人/人事可见） -->
       <PermissionGuard permission="club:resignation:approve" scope="workspace">
         <div v-if="resignations.length > 0" class="mb-6">
@@ -297,7 +477,7 @@ onMounted(loadData)
             <AlertTriangle :size="20" class="text-warning" />
             <h3 class="text-base font-medium text-warning">确认标记退出</h3>
           </div>
-          <p class="text-sm text-text-secondary mb-3">此操作将记录该成员退出社团、所属部门和职位，请填写退出原因以便后续审计。</p>
+          <p class="text-sm text-text-secondary mb-3">此操作将该成员标记为已退出（保留部门/职位档案，不触发「被移出」通知），请填写退出原因以便后续审计。</p>
           <div v-if="actingMember" class="rounded-lg border border-border p-3 mb-3 text-sm">
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">目标成员</span><span class="text-text-primary">{{ actingMember.name }}</span></div>
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">学号</span><span class="text-text-primary">{{ actingMember.studentId }}</span></div>
