@@ -14,7 +14,11 @@ vi.mock('@/services/client', () => ({
 import JointInvitationPage from './JointInvitationPage.vue'
 
 // 工厂函数：组件 loadDetail 直接持有传入对象引用，共享 fixture 会被测试内操作改写（跨用例污染）
-function makeDetail() {
+function makeDetail(): {
+  id: string; jointId: string; jointTitle: string; clubName: string; applicantName: string
+  type: string; status: string; sentAt: string; expiredAt: string
+  reviewFlag: boolean; casdoorSync: string | null
+} {
   return {
     id: 'jinv-1', jointId: 'jnt-1', jointTitle: '联合招新', clubName: '网络协会',
     applicantName: '张三', type: 'joint', status: 'sent', sentAt: '2026-08-01T04:00:00Z',
@@ -61,5 +65,33 @@ describe('JointInvitationPage 联合邀请', () => {
     await rejectBtn!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('活动已结束')
+  })
+
+  // 新-2：已接受且同步中展示「确认生效」按钮，点击后调用申请人侧 sync-confirm
+  it('已接受同步中：展示确认生效按钮并调用 sync-confirm', async () => {
+    const detail = makeDetail()
+    detail.status = 'accepted'
+    detail.casdoorSync = 'processing'
+    mockGet.mockResolvedValue({ kind: 'completed', data: detail })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(JointInvitationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('确认生效'))
+    expect(confirmBtn, '同步中应渲染确认生效按钮').toBeTruthy()
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/me/invitations/joint/jinv-1/sync-confirm')
+    expect(wrapper.text()).toContain('已生效，欢迎加入')
+  })
+
+  it('已确认生效：不再渲染确认生效按钮', async () => {
+    const detail = makeDetail()
+    detail.status = 'accepted'
+    detail.casdoorSync = 'confirmed'
+    mockGet.mockResolvedValue({ kind: 'completed', data: detail })
+    const wrapper = mount(JointInvitationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('确认生效'))).toBe(false)
+    expect(wrapper.text()).toContain('已生效，欢迎加入')
   })
 })
