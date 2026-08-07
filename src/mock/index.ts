@@ -1678,6 +1678,7 @@ const memberHandlers: MockMethod[] = [
           canExecute: t.candidates.length + t.appointments.length > 0 && t.executedAt === null,
           executedAt: t.executedAt,
           results: t.results,
+          syncFailures: t.syncFailures,
           failOn: t.failOn,
         },
       }
@@ -1717,6 +1718,7 @@ const memberHandlers: MockMethod[] = [
       }
       t.results = results
       t.executedAt = new Date().toISOString()
+      t.syncFailures = []
       // 至少保留一名负责人：candidates 中的"负责人"全部成功后旧任保留
       const leaderCandidate = results.find((r) => r.targetTitle === '负责人')
       if (leaderCandidate && leaderCandidate.success) {
@@ -1726,10 +1728,15 @@ const memberHandlers: MockMethod[] = [
           if (pos) { pos.endDate = new Date().toISOString().slice(0, 10); pos.status = 'ended' }
           old.status = 'exited'
           old.exitedAt = new Date().toISOString()
+          // ORG-001/017：换届同步——旧任退出负责人职位 Group，新任加入
+          const oldSync = orgdb.syncPositionMembership({ clubId: query.clubId, memberId: old.id, memberName: old.name, departmentName: pos?.departmentName ?? null, title: '负责人', active: false })
+          if (!oldSync.ok && oldSync.error) t.syncFailures.push({ memberId: old.id, memberName: old.name, title: '负责人', active: false, error: oldSync.error })
           t.currentLeader = { id: leaderCandidate.memberId, name: leaderCandidate.name, title: leaderCandidate.targetTitle }
         }
+        const newSync = orgdb.syncPositionMembership({ clubId: query.clubId, memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, departmentName: null, title: '负责人', active: true })
+        if (!newSync.ok && newSync.error) t.syncFailures.push({ memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, title: '负责人', active: true, error: newSync.error })
       }
-      return { code: 0, data: { executedAt: t.executedAt, results, finishedAt: null } }
+      return { code: 0, data: { executedAt: t.executedAt, results, finishedAt: null, syncFailures: t.syncFailures } }
     },
   },
   // 换届失败项重试
