@@ -225,6 +225,7 @@ const recHandlers: MockMethod[] = [
     response: ({ query }: { query: Record<string, string> }) => {
       const j = rdb.findJoint(query.id || 'jnt-001')
       if (!j) return notFound('活动不存在')
+      rdb.autoAdvanceJointDeadlines(j.id)
       if (j.status !== 'published') return notFound('活动不存在或未开放')
       return ok({
         id: j.id, title: j.title, type: 'joint',
@@ -1052,6 +1053,7 @@ const jointHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageJoint(url, query.clubId)) return forbidden()
+      rdb.autoAdvanceAllJointDeadlines()
       return ok({
         items: rdb.jointActivities.filter((j) => j.clubs.some((c) => c.clubId === query.clubId)).map((j) => jointRow(j, query.clubId)),
         nextCursor: null,
@@ -1082,6 +1084,7 @@ const jointHandlers: MockMethod[] = [
       if (!canManageJoint(url, query.clubId)) return forbidden()
       const ja = rdb.findJoint(query.jointId)
       if (!ja) return notFound('联合活动不存在')
+      rdb.autoAdvanceJointDeadlines(ja.id)
       return ok({
         ...jointRow(ja, query.clubId),
         description: ja.description,
@@ -1287,6 +1290,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
+      rdb.autoAdvanceJointDeadlines(query.jointId)
       const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; answers?: Record<string, unknown> }
       const r = rdb.submitJointApplication(query.jointId, applicantId, input)
       return result(r)
@@ -1299,6 +1303,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
+      rdb.autoAdvanceJointDeadlines(query.jointId)
       const me = resolveMockUser(url)
       const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId)
       return result(r)
@@ -1311,6 +1316,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
+      rdb.autoAdvanceJointDeadlines(query.jointId)
       const app = rdb.findJointApplication(query.jointId, applicantId)
       if (!app) return notFound('尚未提交联合申请')
       return ok(app)
