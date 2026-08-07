@@ -153,6 +153,27 @@ describe('JointApplyPage 交互流程', () => {
     expect((wrapper.findAll('input[type="checkbox"]')[0].element as HTMLInputElement).checked).toBe(true)
   })
 
+  it('已提交态：image 附件字段只读回显为占位文案，而非 FileMeta 原始 JSON', async () => {
+    const imageField = { id: 'img', type: 'image', label: '证件照', description: null, required: false, readonly: false, permission: 'read_write', options: null }
+    const imageMeta = { id: 'joint-image-001', name: 'p.jpg', size: 1024, mimeType: 'image/jpeg', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDetail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { versions: [{ fields: [...mockFormFields, imageField] }] } })
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { status: 'submitted', answers: { f1: '张三', img: [imageMeta] }, volunteerClubIds: ['club-001'], preferences: [], allowJointAdjustment: true, consented: true, submittedAt: '2026-08-07T00:00:00Z' },
+    })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('您已提交联合报名')
+    expect(wrapper.text()).toContain('证件照')
+    expect(wrapper.text()).toContain('已上传附件')
+    expect(wrapper.text()).not.toContain('joint-image-001')
+    expect(wrapper.text()).not.toContain('p.jpg')
+  })
+
   it('提交被拒绝：展示服务端错误且不跳转', async () => {
     setupGetMocks()
     const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })

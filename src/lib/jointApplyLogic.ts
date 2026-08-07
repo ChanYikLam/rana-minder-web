@@ -3,7 +3,7 @@
  * 与 recruitment-status 同模式：页面仅做状态编排，决策/计算集中于此。
  */
 
-import { fileBlockingError } from './formFile'
+import { fileBlockingError, isFieldFilled, restoredFieldValue } from './formFile'
 
 export interface JointFormField {
   id: string
@@ -106,9 +106,7 @@ export function validateJointForm(
   for (const field of fields) {
     const value = formData[field.id]
     if (field.required) {
-      const filled = field.type === 'file' || field.type === 'image'
-        ? Array.isArray(value) && value.length > 0
-        : typeof value === 'string' && value.trim() !== ''
+      const filled = isFieldFilled(value, field.type)
       if (!filled) {
         // 必填缺失直接收口该字段，避免后续附件错误覆盖必填错误
         errors[field.id] = `${field.label}为必填项`
@@ -156,7 +154,7 @@ export interface RestorableApplication {
   consented?: boolean
 }
 
-/** 草稿回填纯化：仅 draft 态恢复；文件字段兼容 fileId 字符串与 FileMeta[] 两种形态 */
+/** 草稿回填纯化：仅 draft 态恢复；文件字段兼容 fileId 字符串与 FileMeta[] 两种形态，其余按字段类型归一（number/数组不再被静默清空） */
 export function restoreDraftState(
   app: RestorableApplication,
   fields: { id: string; type: string }[],
@@ -182,7 +180,8 @@ export function restoreDraftState(
         }
         continue
       }
-      if (typeof value === 'string') answers[fieldId] = value
+      const restored = restoredFieldValue(value, field?.type ?? '')
+      if (restored !== undefined) answers[fieldId] = restored
     }
   }
   return {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fileBlockingError, isFileFieldFilled, restoredFileMeta } from './formFile'
+import { fileBlockingError, isFieldFilled, isFileFieldFilled, restoredFieldValue, restoredFileMeta } from './formFile'
 
 const baseFile = { name: 'a.pdf', size: 1, mimeType: 'application/pdf', uploadedAt: '', checkedAt: null as string | null, downloadUrl: null as string | null }
 
@@ -41,6 +41,67 @@ describe('isFileFieldFilled 必填判定', () => {
     expect(isFileFieldFilled(undefined)).toBe(false)
     expect(isFileFieldFilled('file-001')).toBe(false)
     expect(isFileFieldFilled([{ ...baseFile, id: 'z', status: 'approved' as const }])).toBe(true)
+  })
+})
+
+describe('isFieldFilled 按类型必填判定', () => {
+  it('字符串类型：非空字符串视为已填', () => {
+    expect(isFieldFilled('x', 'text')).toBe(true)
+    expect(isFieldFilled('', 'text')).toBe(false)
+    expect(isFieldFilled('   ', 'textarea')).toBe(false)
+    expect(isFieldFilled(0, 'select')).toBe(false)
+  })
+
+  it('number：任意数值视为已填，空/未填视为缺失', () => {
+    expect(isFieldFilled(42, 'number')).toBe(true)
+    expect(isFieldFilled(0, 'number')).toBe(true)
+    expect(isFieldFilled('0', 'number')).toBe(true)
+    expect(isFieldFilled('', 'number')).toBe(false)
+    expect(isFieldFilled(undefined, 'number')).toBe(false)
+    expect(isFieldFilled(null, 'number')).toBe(false)
+  })
+
+  it('multi_select/checkbox/array：非空数组视为已填', () => {
+    expect(isFieldFilled(['a'], 'multi_select')).toBe(true)
+    expect(isFieldFilled(['a'], 'checkbox')).toBe(true)
+    expect(isFieldFilled([{ x: 1 }], 'array')).toBe(true)
+    expect(isFieldFilled([], 'multi_select')).toBe(false)
+    expect(isFieldFilled([], 'array')).toBe(false)
+    expect(isFieldFilled(undefined, 'checkbox')).toBe(false)
+    expect(isFieldFilled(true, 'checkbox')).toBe(true)
+  })
+
+  it('file/image：附件数组非空为准', () => {
+    expect(isFieldFilled([{ ...baseFile, id: 'z', status: 'approved' as const }], 'image')).toBe(true)
+    expect(isFieldFilled([], 'file')).toBe(false)
+  })
+})
+
+describe('restoredFieldValue 非附件值归一', () => {
+  it('number：归一为数字，空串保持空串，不可解析返回 undefined', () => {
+    expect(restoredFieldValue(42, 'number')).toBe(42)
+    expect(restoredFieldValue('42', 'number')).toBe(42)
+    expect(restoredFieldValue('', 'number')).toBe('')
+    expect(restoredFieldValue('abc', 'number')).toBeUndefined()
+  })
+
+  it('multi_select/checkbox：数组原样、历史字符串包一层、空为 []', () => {
+    expect(restoredFieldValue(['a', 'b'], 'multi_select')).toEqual(['a', 'b'])
+    expect(restoredFieldValue('a', 'multi_select')).toEqual(['a'])
+    expect(restoredFieldValue('', 'multi_select')).toEqual([])
+    expect(restoredFieldValue(true, 'checkbox')).toEqual([])
+  })
+
+  it('array：数组原样、非数组回空数组', () => {
+    const rows = [{ _uid: 'u1', name: '甲' }]
+    expect(restoredFieldValue(rows, 'array')).toEqual(rows)
+    expect(restoredFieldValue('x', 'array')).toEqual([])
+  })
+
+  it('字符串类型：字符串原样保留，其他值返回 undefined（调用方忽略）', () => {
+    expect(restoredFieldValue('文本', 'text')).toBe('文本')
+    expect(restoredFieldValue({ a: 1 }, 'text')).toBeUndefined()
+    expect(restoredFieldValue(42, 'text')).toBeUndefined()
   })
 })
 

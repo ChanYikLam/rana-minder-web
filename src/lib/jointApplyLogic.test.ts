@@ -158,6 +158,27 @@ describe('validateJointForm 表单校验', () => {
   it('通过时无错误', () => {
     expect(validateJointForm(fields, { f1: 'x', f2: approved })).toEqual({})
   })
+
+  it('必填 number/checkbox/multi_select/array 按类型判空，不误报', () => {
+    const typed = [
+      { id: 'n', type: 'number', label: '年级', required: true },
+      { id: 'c', type: 'checkbox', label: '特长', required: true },
+      { id: 'm', type: 'multi_select', label: '渠道', required: true },
+      { id: 'a', type: 'array', label: '经历', required: true },
+    ]
+    expect(validateJointForm(typed, {})).toEqual({
+      n: '年级为必填项',
+      c: '特长为必填项',
+      m: '渠道为必填项',
+      a: '经历为必填项',
+    })
+    expect(validateJointForm(typed, { n: 0, c: ['编程'], m: ['校内'], a: [{ _uid: 'u1' }] })).toEqual({})
+    expect(validateJointForm(typed, { n: 2, c: [], m: [], a: [] })).toEqual({
+      c: '特长为必填项',
+      m: '渠道为必填项',
+      a: '经历为必填项',
+    })
+  })
 })
 
 describe('buildSubmitPayload 提交载荷', () => {
@@ -226,6 +247,31 @@ describe('restoreDraftState 草稿回填', () => {
     )
     expect(restored.answers).toEqual({ f2: fileMeta })
     expect(restored.fileIds).toEqual({})
+  })
+
+  it('draft 态：number 归一并回填（不再被静默清空）', () => {
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { n: '2024' } },
+      [{ id: 'n', type: 'number' }],
+    )
+    expect(restored.answers).toEqual({ n: 2024 })
+  })
+
+  it('draft 态：multi_select/checkbox/array 草稿重开原样恢复', () => {
+    const rows = [{ _uid: 'u1', course: '高数' }]
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { m: ['a', 'b'], c: ['编程'], a: rows } },
+      [{ id: 'm', type: 'multi_select' }, { id: 'c', type: 'checkbox' }, { id: 'a', type: 'array' }],
+    )
+    expect(restored.answers).toEqual({ m: ['a', 'b'], c: ['编程'], a: rows })
+  })
+
+  it('draft 态：历史 multi_select 字符串归一为数组', () => {
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { m: 'a' } },
+      [{ id: 'm', type: 'multi_select' }],
+    )
+    expect(restored.answers).toEqual({ m: ['a'] })
   })
 
   it('缺省字段使用默认值', () => {

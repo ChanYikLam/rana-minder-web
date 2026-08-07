@@ -13,7 +13,7 @@ import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
 import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
 import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
 import type { FormField } from '@/types/domain/form'
-import { fileBlockingError, isFileFieldFilled, restoredFileMeta as restoredFileMetaFromLib } from '@/lib/formFile'
+import { fileBlockingError, isFieldFilled, restoredFieldValue, restoredFileMeta as restoredFileMetaFromLib } from '@/lib/formFile'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string; allowAdjustmentDefault?: boolean }
 interface MyApplication {
@@ -89,7 +89,7 @@ function answersOf(fieldId: string): string {
   const v = myApplication.value?.answers?.[fieldId]
   if (v == null || v === '') return ''
   const field = formFields.value.find((f) => f.id === fieldId)
-  if (field?.type === 'file') return '已上传附件'
+  if (field?.type === 'file' || field?.type === 'image') return '已上传附件'
   return renderAnswerValue(v)
 }
 
@@ -165,9 +165,10 @@ function restoreDraft(app: MyApplication) {
       const field = formFields.value.find((f) => f.id === fieldId)
       if (field?.type === 'file' || field?.type === 'image') {
         formData.value[fieldId] = restoredFileMeta(value)
-      } else if (typeof value === 'string') {
-        formData.value[fieldId] = value
+        continue
       }
+      const restored = restoredFieldValue(value, field?.type ?? '')
+      if (restored !== undefined) formData.value[fieldId] = restored
     }
   }
   if (app.preferences) {
@@ -229,12 +230,9 @@ async function handleSaveDraft() {
   }
 }
 
-/** 必填判定按字段类型取值：file/image 以附件数组非空为准（逻辑见 src/lib/formFile），其余以非空字符串为准 */
+/** 必填判定按字段类型取值（逻辑见 src/lib/formFile）：file/image 以附件数组非空、number 以数值、multi_select/checkbox/array 以非空数组、其余以非空字符串为准 */
 function isFilled(value: unknown, field: FormField): boolean {
-  if (field.type === 'file' || field.type === 'image') {
-    return isFileFieldFilled(value)
-  }
-  return typeof value === 'string' && value.trim() !== ''
+  return isFieldFilled(value, field.type)
 }
 
 /** 附件状态拦截（逻辑见 src/lib/formFile）：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */

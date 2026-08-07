@@ -276,7 +276,7 @@ function answersOf(fieldId: string): string {
   const v = myApplication.value?.answers?.[fieldId]
   if (v == null || v === '') return ''
   const field = formFields.value.find((f) => f.id === fieldId)
-  if (field?.type === 'file') return '已上传附件'
+  if (field?.type === 'file' || field?.type === 'image') return '已上传附件'
   return renderAnswerValue(v)
 }
 

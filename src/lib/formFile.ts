@@ -23,6 +23,36 @@ export function isFileFieldFilled(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0
 }
 
+/** 表单字段必填判定（报名页/联合报名页共用）：按字段类型取值，杜绝仅认字符串误报必填 */
+export function isFieldFilled(value: unknown, type: string): boolean {
+  if (type === 'file' || type === 'image') return isFileFieldFilled(value)
+  if (type === 'number') return value !== undefined && value !== null && value !== ''
+  if (type === 'multi_select' || type === 'checkbox' || type === 'array') {
+    return (Array.isArray(value) && value.length > 0) || value === true
+  }
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+/**
+ * 草稿/已提交 answers 非附件值归一回填（按字段类型）：
+ * number 归一为数字、multi_select/checkbox/array 归一为数组、字符串类型原样保留；
+ * 无法解析的值返回 undefined（调用方忽略），避免「草稿重开静默清空」与非法类型漂移。
+ */
+export function restoredFieldValue(value: unknown, type: string): unknown {
+  if (type === 'number') {
+    if (value === '' || value === null || value === undefined) return ''
+    const n = typeof value === 'number' ? value : Number(value)
+    return Number.isNaN(n) ? undefined : n
+  }
+  if (type === 'multi_select' || type === 'checkbox') {
+    if (Array.isArray(value)) return value
+    return typeof value === 'string' && value !== '' ? [value] : []
+  }
+  if (type === 'array') return Array.isArray(value) ? value : []
+  if (typeof value !== 'string') return undefined
+  return value
+}
+
 /**
  * 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[]。
  * 混合数组中字符串元素按 fileId 形态生成中性占位 FileMeta（不递归取下标）。

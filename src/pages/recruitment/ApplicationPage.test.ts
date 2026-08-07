@@ -264,6 +264,35 @@ describe('ApplicationPage 状态渲染', () => {
     expect(wrapper.text()).not.toContain('意向方向')
     expect(wrapper.text()).not.toContain('报名表单')
   })
+
+  it('已提交态：image 附件字段只读回显为占位文案，而非 FileMeta 原始 JSON', async () => {
+    const imageField = { id: 'img', type: 'image', label: '证件照', description: null, required: false, readonly: false, permission: 'read_write', options: null }
+    const imageMeta = { id: 'image-meta-001', name: 'a.jpg', size: 1024, mimeType: 'image/jpeg', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }
+    setupGetMocks('submitted', { answers: { f1: '张三', img: [imageMeta] } }, [...mockFormFields, imageField])
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('证件照')
+    expect(wrapper.text()).toContain('已上传附件')
+    // 不再把 FileMeta[] 序列化成原始 JSON 展示
+    expect(wrapper.text()).not.toContain('image-meta-001')
+    expect(wrapper.text()).not.toContain('a.jpg')
+  })
+
+  it('草稿态：number 草稿值回填进数字输入框（不再被静默清空）', async () => {
+    const numberField = { id: 'n1', type: 'number', label: '年级', description: null, required: false, readonly: false, permission: 'read_write', options: null }
+    setupGetMocks('draft', { answers: { n1: 2024 } }, [...mockFormFields, numberField])
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    const numInput = wrapper.find('input[type="number"]')
+    expect((numInput.element as HTMLInputElement).value).toBe('2024')
+    wrapper.unmount()
+  }, 10_000)
 })
 
 describe('ApplicationPage 交互流程', () => {
