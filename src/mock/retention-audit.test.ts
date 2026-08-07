@@ -87,6 +87,13 @@ describe('保留策略执行器（P1-010 审计闭环）', () => {
     expect(arch?.executedCount).toBe(2) // rs-004/rs-005 归档；rs-006 未到期跳过
     expect(arch?.skippedCount).toBe(1)
 
+    // keep 策略按「命中即计入执行」口径计数（rs-007 超期但策略为保留，计入 executed、不处置）
+    const keep = data.results.find((r) => r.policyId === 'rp-003')
+    expect(keep?.action).toBe('keep')
+    expect(keep?.executedCount).toBe(1)
+    expect(keep?.skippedCount).toBe(0)
+    expect(retentionSubjects.find((s) => s.id === 'rs-007')?.state).toBe('active')
+
     // 实际状态已变更：删除/归档真实落库
     expect(retentionSubjects.find((s) => s.id === 'rs-001')?.state).toBe('deleted')
     expect(retentionSubjects.find((s) => s.id === 'rs-004')?.state).toBe('archived')
@@ -102,6 +109,9 @@ describe('保留策略执行器（P1-010 审计闭环）', () => {
     const del = results.find((r) => r.policyId === 'rp-001')
     expect(del?.executedCount).toBe(0)
     expect(del?.skippedCount).toBe(3)
+    // keep 策略仍按命中计数（rs-007 超期但策略为保留，每次执行都计 executed）
+    const keep = results.find((r) => r.policyId === 'rp-003')
+    expect(keep?.executedCount).toBe(1)
   })
 
   it('执行结果写入平台审计日志（逐策略 + 批量触发）', async () => {

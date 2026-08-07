@@ -211,5 +211,35 @@ describe('管理员事实纠错处置（decide 真实落库）', () => {
     const orgItems = (orgLogs.body.data as { items: Array<{ action: string; detail?: string }> }).items
     expect(orgItems.some((l) => l.action === '提交事实纠错' && l.detail?.includes?.('作用域隔离测试'))).toBe(true)
   })
+
+  it('已处置纠错再次处置返回 409（SM-AUD-001：approved 不可再批准/拒绝）', async () => {
+    const list = await invokeHandler(listPattern, 'get', listUrl)
+    const target = (list.body.data as { items: CorrectionItem[] }).items.find((i) => i.status === 'submitted')!
+    await invokeHandler(decidePattern, 'post', `${listUrl}/${target.id}/decide`, { input: { decision: 'approve' } })
+
+    const again = await invokeHandler(decidePattern, 'post', `${listUrl}/${target.id}/decide`, { input: { decision: 'reject' } })
+    expect(again.statusCode).toBe(409)
+    expect((again.body as { code?: string }).code).toBe('IFC-ERR-007')
+    // 状态与审计轨迹未被二次流转污染
+    const after = await invokeHandler(listPattern, 'get', listUrl)
+    const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === target.id)
+    expect(updated?.status).toBe('approved')
+    expect(updated?.auditTrail?.filter((e) => e.action === 'approve' || e.action === 'reject')).toHaveLength(1)
+  })
+
+  it('已处置纠错不可重复撤回（withdraw 409，auditTrail 不追加）', async () => {
+    const created = await invokeHandler(listPattern, 'post', listUrl, {
+      input: { targetType: '社团信息', targetId: 'club-001', reason: '重复撤回测试', evidence: '' },
+    })
+    const { id } = created.body.data as { id: string }
+    await invokeHandler(withdrawPattern, 'post', `${listUrl}/${id}/withdraw`)
+
+    const again = await invokeHandler(withdrawPattern, 'post', `${listUrl}/${id}/withdraw`)
+    expect(again.statusCode).toBe(409)
+    const after = await invokeHandler(listPattern, 'get', listUrl)
+    const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === id)
+    expect(updated?.status).toBe('withdrawn')
+    expect(updated?.auditTrail?.filter((e) => e.action === 'withdraw')).toHaveLength(1)
+  })
 })
 

@@ -30,6 +30,22 @@ function consumeReauthProof(proof: unknown, operatorId: string | undefined | nul
   return true
 }
 
+/** 纠错状态机守卫（SM-AUD-001）：仅 submitted（含 overdue 未处置）可被批准/拒绝/撤回， */
+function isCorrectionActable(record: CorrectionRecord): boolean {
+  return record.status === 'submitted' || record.status === 'overdue'
+}
+
+function correctionStateConflict(): { statusCode: number; body: { code: string; message: string; supportId: string } } {
+  return {
+    statusCode: 409,
+    body: {
+      code: 'IFC-ERR-007',
+      message: '对象状态已变化，请刷新后重新选择操作',
+      supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+    },
+  }
+}
+
 /** 纠错审计闭环辅助：向记录追加审计轨迹条目 */
 function appendCorrectionAudit(record: CorrectionRecord, entry: CorrectionAuditEntry): void {
   if (!record.auditTrail) record.auditTrail = []
@@ -247,7 +263,7 @@ function retentionExecutionRunId(): string {
   return 'RPX-' + Date.now()
 }
 
-function runRetentionExecutor(): RetentionExecutionResult[] {
+function runRetentionExecutor(runId: string): RetentionExecutionResult[] {
   const now = new Date().toISOString()
   const results: RetentionExecutionResult[] = []
   for (const policy of retentionPolicies) {
@@ -260,7 +276,7 @@ function runRetentionExecutor(): RetentionExecutionResult[] {
       if (subject.agedDays < policy.retentionDays) { skippedCount += 1; continue }
       if (policy.action === 'auto_delete') subject.state = 'deleted'
       else if (policy.action === 'archive') subject.state = 'archived'
-      else subject.state = 'active' // keep：仅计数，不做处置
+      // keep：保留，不处置
       executedCount += 1
     }
     results.push({
@@ -271,21 +287,21 @@ function runRetentionExecutor(): RetentionExecutionResult[] {
       executedCount,
       skippedCount,
       executedAt: now,
-      auditRef: retentionExecutionRunId(),
+      auditRef: runId,
     })
   }
   return results
 }
 
 function recordRetentionExecution(operatorName: string): { runId: string; executedAt: string; results: RetentionExecutionResult[] } {
-  const results = runRetentionExecutor()
   const runId = retentionExecutionRunId()
   const executedAt = new Date().toISOString()
+  const results = runRetentionExecutor(runId)
   lastRetentionExecution = { runId, executedAt, results }
   for (const r of results) {
     writeAuditLog({
       actorName: operatorName,
-      action: `执行保留策略（${r.action === 'auto_delete' ? '自动删除' : r.action === 'archive' ? '归档' : '保留'}）`,
+      action: `执行保留策略（${r.action === 'auto_delete' ? '自动删除' : r.action === 'archive' ? '归档' : '保留（keep）'}）`,
       targetType: '保留策略',
       targetId: r.policyId,
       detail: `「${r.scope}」处置 ${r.executedCount} 条 / 跳过 ${r.skippedCount} 条（保留 ${r.retentionDays} 天）`,
@@ -2246,6 +2262,7 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      if (!isCorrectionActable(record)) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
@@ -2268,6 +2285,7 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
+      if (!isCorrectionActable(record)) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
@@ -2328,6 +2346,7 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      if (!isCorrectionActable(record)) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
@@ -2350,6 +2369,7 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
+      if (!isCorrectionActable(record)) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
@@ -3120,6 +3140,7 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
+      if (!isCorrectionActable(record)) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
@@ -3142,6 +3163,7 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
+      if (!isCorrectionActable(record)) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
