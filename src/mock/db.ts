@@ -908,8 +908,10 @@ export function withdrawDepartmentApplication(appId: string, actorMemberId: stri
   return { ok: true, app }
 }
 
-/** 主动退出申请（成员视角）：创建退出申请进入审批队列，待负责人/人事批准（MEM-001） */
-export function createExitRequest(clubId: string, input: { memberId: string; memberName: string; reason: string }): { ok: boolean; error?: string; request?: MockExitRequest } {
+/** 主动退出申请（成员视角）：创建退出申请进入审批队列，待负责人/人事批准（MEM-001）。
+ * allowSelfExit=false 时拒绝发起（平台/社团配置项接入，避免配置形同虚设）。 */
+export function createExitRequest(clubId: string, input: { memberId: string; memberName: string; reason: string; allowSelfExit?: boolean }): { ok: boolean; error?: string; request?: MockExitRequest } {
+  if (input.allowSelfExit === false) return { ok: false, error: '当前社团不允许成员自行退出，请联系管理员' }
   const member = findMember(clubId, input.memberId)
   if (!member) return { ok: false, error: '成员不存在' }
   if (member.status !== 'active') return { ok: false, error: '仅在职成员可申请退出' }
@@ -1165,5 +1167,32 @@ export function directRemoveMember(clubId: string, byMemberId: string, memberId:
       target.departmentHistory.unshift({ id: 'dhis-' + Date.now() + '-' + Math.floor(Math.random() * 1000), action: 'leave', departmentName: p.departmentName, at: now })
     }
   }
+  return { ok: true, member: target }
+}
+
+/**
+ * 管理员标记成员退出（软退出，与「移除」语义区分）：
+ * - 只记录退出时间（exitedAt），保留成员/部门/职位档案（职位不结束、状态机不流转）
+ * - 不触发「被移出」通知、不做角色白名单硬移除，供审计回溯主动退出路径
+ * - 与 remove 共用管理端入口（action=mark_exit），但行为、文案、通知均不同
+ */
+export function markMemberExit(clubId: string, byMemberId: string, memberId: string): { ok: boolean; error?: string; member?: MockMember } {
+  if (memberId === byMemberId) return { ok: false, error: '不能标记自己退出' }
+  const target = findMember(clubId, memberId)
+  if (!target) return { ok: false, error: '成员不存在' }
+  if (target.status !== 'active') return { ok: false, error: '仅在职成员可标记退出' }
+  if (isLastLeader(clubId, memberId)) return { ok: false, error: '最后一名负责人不能无交接离社，请先安排交接' }
+  // 与 remove 一致的操作者白名单：部门负责人不能标记负责人/人事退出
+  const actorLevel = memberManagerRole(clubId, byMemberId)
+  const targetLevel = memberManagerRole(clubId, memberId)
+  const leaders = listMembers(clubId).filter(
+    (m) => m.status === 'active' && m.positions.some((p) => p.status === 'active' && (p.title === '负责人' || p.title === '副负责人')),
+  )
+  const actorIsLeader = actorLevel === 'club_leader' && leaders.some((m) => m.id === byMemberId)
+  const hasOtherLeader = leaders.filter((m) => m.id !== byMemberId).length > 0
+  const gate = canRemoveMember(actorLevel, targetLevel, actorIsLeader && hasOtherLeader)
+  if (!gate.ok) return { ok: false, error: gate.reason || '无权标记该成员退出' }
+  target.status = 'exited'
+  target.exitedAt = new Date().toISOString()
   return { ok: true, member: target }
 }

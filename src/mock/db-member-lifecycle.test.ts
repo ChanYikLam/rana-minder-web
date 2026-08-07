@@ -21,6 +21,7 @@ import {
   confirmExitRequest,
   createMemberFromAdmission,
   directRemoveMember,
+  markMemberExit,
   executeAppointmentCommand,
   executeDepartmentApplication,
   findMember,
@@ -530,15 +531,38 @@ describe('辞职/部门申请撤回与互斥（MEM-002）', () => {
 })
 
 describe('任期到期提醒（MEM-004）', () => {
-  it('upcomingTermEnd：仅统计 advanceDays 窗口内的在职在任职位，含 daysLeft 排序', () => {
-    // pos-004（mem-004 负责人，2026-08-20）在 30 天窗口内；pos-001（mem-001，2027-06-30）不在
-    const hits = upcomingTermEnd('club-001', 30)
-    expect(hits.some((h) => h.memberId === 'mem-004' && h.position.id === 'pos-004')).toBe(true)
-    expect(hits.some((h) => h.memberId === 'mem-001')).toBe(false)
-    // 宽窗口覆盖更远任期（pos-003/mem-003 人事部部长 2026-09-30）；已 ended 职位不参与
-    const wide = upcomingTermEnd('club-001', 2000)
-    expect(wide.some((h) => h.memberId === 'mem-003' && h.position.id === 'pos-003' && h.daysLeft > 30)).toBe(true)
-    expect(wide.filter((h) => h.memberId === 'mem-005')).toHaveLength(0)
+  it('upcomingTermEnd：仅统计 advanceDays 窗口内的在职在任职位，含 daysLeft 排序（时钟无关）', () => {
+    // 动态构造相对当前时间的任期，避免硬编码日期（2026-08-20 等）随真实时钟过期后 CI 必挂
+    const dayMs = 24 * 60 * 60 * 1000
+    const iso = (offsetDays: number) => new Date(Date.now() + offsetDays * dayMs).toISOString().slice(0, 10)
+    const freshMember = (id: string, name: string, plannedEndDate: string | null, status: 'active' | 'ended' = 'active') =>
+      db.members.push({
+        id, clubId: 'club-001', studentId: '20' + id.slice(-5), name,
+        email: id + '@example.edu.cn', phone: '13800000000',
+        status: 'active', joinedAt: '2024-09-01T00:00:00+08:00', exitedAt: null,
+        positions: [{ id: 'pos-' + id, departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2024-09-01', endDate: null, plannedEndDate, status: status as 'active' | 'ended' }],
+        tenures: [], departmentHistory: [], anomalies: [],
+      }) as unknown as void
+    // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
+    freshMember('mem-t1', '近任期', iso(10))
+    freshMember('mem-t2', '远任期', iso(300))
+    freshMember('mem-t3', '已结束', iso(10), 'ended')
+    try {
+      const hits = upcomingTermEnd('club-001', 30)
+      expect(hits.some((h) => h.memberId === 'mem-t1')).toBe(true)
+      expect(hits.some((h) => h.memberId === 'mem-t2')).toBe(false)
+      expect(hits.some((h) => h.memberId === 'mem-t3')).toBe(false)
+      // 宽窗口覆盖更远任期
+      const wide = upcomingTermEnd('club-001', 2000)
+      expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
+      // daysLeft 升序（近任期在前）
+      expect(hits[0].memberId).toBe('mem-t1')
+    } finally {
+      const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3'])
+      for (let i = members.length - 1; i >= 0; i--) {
+        if (ids.has(members[i].id)) members.splice(i, 1)
+      }
+    }
   })
 })
 
@@ -600,6 +624,79 @@ describe('移除成员与层级白名单（MEM-006）', () => {
     const r = directRemoveMember('club-001', 'mem-001', 'mem-004')
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/最后一名|另一名/)
+  })
+})
+
+describe('标记退出 vs 移除语义（markMemberExit）', () => {
+  // 直接 push 自定义 id 的成员，避免 createMemberFromAdmission 用 Date.now() 生成 id 在
+  // 同毫秒内与前置用例碰撞（本文件共享模块状态且无 reset）
+  function pushActiveMember(id: string, name: string, dept: string | null, title = '干事'): string {
+    members.push({
+      id, clubId: 'club-001', studentId: '20' + id, name,
+      email: id + '@example.edu.cn', phone: '13800000000',
+      status: 'active', joinedAt: '2024-09-01T00:00:00+08:00', exitedAt: null,
+      positions: dept ? [{ id: 'pos-' + id, departmentId: 'dept-001', departmentName: dept, title, startDate: '2024-09-01', endDate: null, plannedEndDate: null, status: 'active' }] : [],
+      tenures: [], departmentHistory: [], anomalies: [],
+    })
+    return id
+  }
+
+  it('markMemberExit：仅记 exitedAt，保留职位档案（软退出）', () => {
+    const memId = pushActiveMember('mem-mx-01', '标记退出测试', '技术部')
+    const r = markMemberExit('club-001', 'mem-004', memId)
+    expect(r.ok).toBe(true)
+    const member = findMember('club-001', memId)!
+    expect(member.status).toBe('exited')
+    expect(member.exitedAt).toBeTruthy()
+    // 与移除不同：职位仍 active（不结束档案）
+    expect(member.positions.every((p) => p.status === 'active')).toBe(true)
+  })
+
+  it('markMemberExit：自标/不存在/末位负责人守卫/非在职拒绝', () => {
+    expect(markMemberExit('club-001', 'mem-004', 'mem-004')).toMatchObject({ ok: false, error: '不能标记自己退出' })
+    expect(markMemberExit('club-001', 'mem-004', 'mem-zzz')).toMatchObject({ ok: false, error: '成员不存在' })
+    expect(markMemberExit('club-001', 'mem-001', 'mem-004')).toMatchObject({ ok: false, error: '最后一名负责人不能无交接离社，请先安排交接' })
+    // 非在职（exited）拒绝
+    const memId = pushActiveMember('mem-mx-02', '非在职', null)
+    markMemberExit('club-001', 'mem-004', memId)
+    expect(markMemberExit('club-001', 'mem-004', memId)).toMatchObject({ ok: false, error: '仅在职成员可标记退出' })
+  })
+
+  it('markMemberExit：操作者白名单——部门负责人不能标记人事/负责人退出', () => {
+    // mem-006 为部门负责人，mem-003 为人事 → 越级被拒
+    expect(markMemberExit('club-001', 'mem-006', 'mem-003')).toMatchObject({ ok: false, error: /人事管理员只能由社团负责人移除|无权/ })
+    expect(markMemberExit('club-001', 'mem-006', 'mem-004')).toMatchObject({ ok: false, error: /社团负责人只能由另一名现任负责人移除|无权/ })
+  })
+})
+
+describe('allowSelfExit 配置接入（P2）', () => {
+  function pushActiveMember(id: string, name: string): string {
+    members.push({
+      id, clubId: 'club-001', studentId: '20' + id, name,
+      email: id + '@example.edu.cn', phone: '13800000000',
+      status: 'active', joinedAt: '2024-09-01T00:00:00+08:00', exitedAt: null,
+      positions: [{ id: 'pos-' + id, departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2024-09-01', endDate: null, plannedEndDate: null, status: 'active' }],
+      tenures: [], departmentHistory: [], anomalies: [],
+    })
+    return id
+  }
+
+  it('allowSelfExit=false 时 createExitRequest 拒绝发起', () => {
+    const memId = pushActiveMember('mem-as-01', '自退A')
+    const blocked = createExitRequest('club-001', { memberId: memId, memberName: '自退A', reason: '深造', allowSelfExit: false })
+    expect(blocked).toMatchObject({ ok: false, error: /不允许成员自行退出/ })
+    // 默认缺省（true）可正常发起
+    const ok = createExitRequest('club-001', { memberId: memId, memberName: '自退A', reason: '深造' })
+    expect(ok.ok).toBe(true)
+    withdrawExitRequest(ok.request!.id, memId)
+  })
+
+  it('withdrawExitRequest 仅审批前可撤回（canWithdraw 契约：approved 不可撤回）', () => {
+    const memId = pushActiveMember('mem-as-02', '自退B')
+    const created = createExitRequest('club-001', { memberId: memId, memberName: '自退B', reason: '深造' })!
+    const reqId = created.request!.id
+    decideExitRequest(reqId, 'approve', { id: 'leader-x', name: '张明远' })
+    expect(withdrawExitRequest(reqId, memId)).toMatchObject({ ok: false, error: '仅待审批的退出申请可撤回' })
   })
 })
 

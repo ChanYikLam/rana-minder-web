@@ -16,6 +16,7 @@ vi.mock('vue-sonner', () => ({
 }))
 
 import { toast } from 'vue-sonner'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import MemberExitPage from './MemberExitPage.vue'
 
 const exitData = {
@@ -149,6 +150,34 @@ describe('MemberExitPage 成员退出与移除', () => {
 
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/members/exit-requests/ex-2/confirm')
     expect(toast.success).toHaveBeenCalledWith('已确认退出，正式离社')
+    wrapper.unmount()
+  })
+
+  it('退出审批仅社团负责人/人事可见（P2：部门负责人不显示批准/驳回按钮）', async () => {
+    // 部门负责人有 club:member:manage 但后端 canManageMembersFull=false → 前端隐藏审批按钮
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'department_leader', ['club:member:manage'], 'u-dept')
+    mockGet.mockResolvedValue({ kind: 'completed', data: exitData })
+    const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('赵子墨')
+    // 退出申请记录卡片内不显示「批准/驳回」按钮（仅描述文案含"批准"，需精确到按钮）
+    const exitCard = wrapper.findAll('.card').find((c) => c.text().includes('退出申请记录'))!
+    const exitButtons = exitCard.findAll('button').map((b) => b.text())
+    expect(exitButtons.some((t) => t.includes('批准') || t.includes('驳回'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('退出审批社团负责人可见（leader/hr 显示批准/驳回按钮）', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:member:manage'], 'u-leader')
+    mockGet.mockResolvedValue({ kind: 'completed', data: exitData })
+    const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('赵子墨')
+    expect(wrapper.findAll('button').some((b) => b.text().includes('批准'))).toBe(true)
     wrapper.unmount()
   })
 })

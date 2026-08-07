@@ -1907,7 +1907,7 @@ if (!r.ok) return businessError(r.error || '操作失败')
             reason: r.reason, status: r.status, submittedAt: r.submittedAt,
             decidedAt: r.decidedAt, decidedBy: r.decidedBy, confirmedAt: r.confirmedAt, dueAt: r.dueAt,
             overdue: db.isProcessingOverdue(r.status, r.dueAt, ['under_review', 'approved']),
-            canWithdraw: r.memberId === actor && (r.status === 'under_review' || r.status === 'approved'),
+            canWithdraw: r.memberId === actor && r.status === 'under_review',
             canConfirm: r.memberId === actor && r.status === 'approved',
           })),
           nextCursor: null,
@@ -1915,26 +1915,35 @@ if (!r.ok) return businessError(r.error || '操作失败')
       }
     },
   },
-  // 移除成员（管理员）——补被移除者角色白名单、另一名负责人校验并走 SM-MEM-001 状态机（MEM-006/MEM-001）
+  // 移除成员 / 标记退出（管理员）——按 action 区分语义：
+  //   remove：硬移除（SM-MEM-001 active→exiting→exited，结束职位 + 通知「被移出」，MEM-006）
+  //   mark_exit：软退出（仅记 exitedAt，保留职位档案，无「被移出」通知）
   {
     url: '/api/org/:clubId/members/exit',
     method: 'post',
-    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; reason?: string } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; action?: string; reason?: string } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user, query.clubId)
       if (!actor || !canManageMembers(user, query.clubId)) return forbidden()
       const memberId = body.input?.memberId
-      if (!body.input?.reason?.trim()) return businessError('移除成员必须填写原因')
+      const action = body.input?.action === 'mark_exit' ? 'mark_exit' : 'remove'
+      if (!body.input?.reason?.trim()) return businessError(action === 'mark_exit' ? '标记退出必须填写原因' : '移除成员必须填写原因')
       const member = db.findMember(query.clubId, memberId)
       if (!member) return businessError('成员不存在')
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden()
+      if (action === 'mark_exit') {
+        // 标记退出：软退出，保留档案；不通知「被移出」
+        const res = db.markMemberExit(query.clubId, actor, memberId)
+        if (!res.ok) return businessError(res.error || '标记退出失败')
+        return { code: 0, data: { memberId, action, status: res.member?.status } }
+      }
       const res = db.directRemoveMember(query.clubId, actor, memberId)
       if (!res.ok) return businessError(res.error || '移除失败')
       // 通知被移除成员（member 通知族）
       const removedUserId = userIdOfMember(memberId)
       if (removedUserId) pushNotification([removedUserId], 'member', { body: `您已被移出「计算机协会」，原因：${body.input.reason}` }, { clubId: query.clubId })
-      return { code: 0, data: { memberId, status: res.member?.status } }
+      return { code: 0, data: { memberId, action, status: res.member?.status } }
     },
   },
   // 主动退出申请（成员自发起，MEM-001）：进入审批队列，待负责人/人事批准
@@ -1957,7 +1966,7 @@ if (!r.ok) return businessError(r.error || '操作失败')
           },
         }
       }
-      const r = db.createExitRequest(query.clubId, { memberId: member.id, memberName: member.name, reason: body.input.reason })
+      const r = db.createExitRequest(query.clubId, { memberId: member.id, memberName: member.name, reason: body.input.reason, allowSelfExit: platformConfig.allowSelfExit })
       if (!r.ok) return businessError(r.error || '发起退出申请失败')
       return { code: 0, data: { id: r.request?.id, status: r.request?.status, submittedAt: r.request?.submittedAt, dueAt: r.request?.dueAt } }
     },

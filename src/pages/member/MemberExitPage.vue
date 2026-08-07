@@ -10,6 +10,7 @@ import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/err
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { useSessionViewStore } from '@/state/sessionViewStore'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useLastLeaderGuard } from '@/composables/useLastLeaderGuard'
 import type { PageState } from '@/types/machine'
 import { UserMinus, LogOut, AlertTriangle, FileText, CheckCircle2, XCircle } from '@lucide/vue'
@@ -20,6 +21,11 @@ interface ExitRequestRow { id: string; memberId: string; memberName: string; rea
 
 const route = useRoute()
 const session = useSessionViewStore()
+const workspace = useWorkspaceContextStore()
+// P2：退出审批仅社团负责人/人事（canManageMembersFull），部门负责人虽有 club:member:manage 但必 403
+const canApproveExit = computed(() =>
+  workspace.hasPermission('club:member:manage') && workspace.currentRole !== 'department_leader',
+)
 const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<ExitMember[]>([])
@@ -372,24 +378,22 @@ onMounted(loadData)
               >
                 二次确认退出
               </button>
-              <!-- 管理端：审批 -->
-              <template v-if="req.status === 'under_review'">
-                <PermissionGuard permission="club:member:manage" scope="workspace">
-                  <button
-                    class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90"
-                    :disabled="exitActingId === req.id"
-                    @click="handleExitDecide(req, 'approve')"
-                  >
-                    <CheckCircle2 :size="13" /> 批准
-                  </button>
-                  <button
-                    class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle"
-                    :disabled="exitActingId === req.id"
-                    @click="handleExitDecide(req, 'reject')"
-                  >
-                    <XCircle :size="13" /> 驳回
-                  </button>
-                </PermissionGuard>
+              <!-- 管理端：审批（仅社团负责人/人事，与后端 canManageMembersFull 一致） -->
+              <template v-if="req.status === 'under_review' && canApproveExit">
+                <button
+                  class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90"
+                  :disabled="exitActingId === req.id"
+                  @click="handleExitDecide(req, 'approve')"
+                >
+                  <CheckCircle2 :size="13" /> 批准
+                </button>
+                <button
+                  class="flex items-center gap-1 px-2.5 py-1 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle"
+                  :disabled="exitActingId === req.id"
+                  @click="handleExitDecide(req, 'reject')"
+                >
+                  <XCircle :size="13" /> 驳回
+                </button>
               </template>
               <p v-else-if="req.status === 'approved' && req.decidedBy" class="text-xs text-success self-center">由 {{ req.decidedBy }} 批准，待本人二次确认</p>
               <p v-else-if="req.status === 'rejected' && req.decidedBy" class="text-xs text-text-secondary self-center">由 {{ req.decidedBy }} 驳回</p>
@@ -468,7 +472,7 @@ onMounted(loadData)
             <AlertTriangle :size="20" class="text-warning" />
             <h3 class="text-base font-medium text-warning">确认标记退出</h3>
           </div>
-          <p class="text-sm text-text-secondary mb-3">此操作将记录该成员退出社团、所属部门和职位，请填写退出原因以便后续审计。</p>
+          <p class="text-sm text-text-secondary mb-3">此操作将该成员标记为已退出（保留部门/职位档案，不触发「被移出」通知），请填写退出原因以便后续审计。</p>
           <div v-if="actingMember" class="rounded-lg border border-border p-3 mb-3 text-sm">
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">目标成员</span><span class="text-text-primary">{{ actingMember.name }}</span></div>
             <div class="flex items-center justify-between py-0.5"><span class="text-text-secondary">学号</span><span class="text-text-primary">{{ actingMember.studentId }}</span></div>
