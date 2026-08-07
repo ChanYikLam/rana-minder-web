@@ -3,13 +3,29 @@ import { computed } from 'vue'
 import { CheckCircle2, LoaderCircle, ShieldAlert } from '@lucide/vue'
 import type { FileMeta, FileStatus } from '@/types/domain/form'
 
-const props = defineProps<{ modelValue?: FileMeta[] }>()
+const props = defineProps<{
+  modelValue?: FileMeta[]
+  accept?: string
+  hint?: string
+}>()
 const emit = defineEmits<{
   'update:modelValue': [files: FileMeta[]]
 }>()
 
-const ACCEPTED_TYPES = ['image/png', 'image/webp', 'image/jpeg', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const DOC_TYPES = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+const DEFAULT_ACCEPT = [...IMAGE_TYPES, ...DOC_TYPES]
 const MAX_SIZE_BYTES = 10 * 1024 * 1024
+
+/** 将 accept 中的通配符（image/*）展开为具体 MIME，选择器与校验共用同一份白名单 */
+const allowedTypes = computed(() => {
+  if (!props.accept) return DEFAULT_ACCEPT
+  return props.accept
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .flatMap((t) => (t === 'image/*' ? IMAGE_TYPES : [t]))
+})
 
 const files = computed(() => props.modelValue ?? [])
 
@@ -37,7 +53,7 @@ function onSelect(event: Event) {
   Array.from(input.files).forEach((f) => {
     const now = new Date().toISOString()
     const base = { uploadedAt: now, checkedAt: null as string | null, downloadUrl: null as string | null }
-    if (!ACCEPTED_TYPES.includes(f.type)) {
+    if (!allowedTypes.value.includes(f.type)) {
       nextFiles.push({ ...base, id: `rejected-type-${Date.now()}`, name: f.name, size: f.size, mimeType: f.type, status: 'rejected' })
       return
     }
@@ -55,7 +71,7 @@ function onSelect(event: Event) {
 <template>
   <div class="space-y-2">
     <div class="flex items-center gap-1.5 text-xs text-text-secondary">
-      <span>支持：图片（PNG/WebP）、PDF、Word；单个不超过 10MB</span>
+      <span>{{ hint || '支持：图片（PNG/JPG/GIF/WebP）、PDF、Word；单个不超过 10MB' }}</span>
     </div>
 
     <div class="space-y-2">
@@ -98,7 +114,7 @@ function onSelect(event: Event) {
       <label
         class="flex items-center justify-center h-10 rounded-md border border-dashed border-border-strong cursor-pointer hover:bg-subtle transition-colors"
       >
-        <input type="file" multiple class="sr-only" :accept="ACCEPTED_TYPES.join(',')" @change="onSelect" />
+        <input type="file" multiple class="sr-only" :accept="allowedTypes.join(',')" @change="onSelect" />
         <span class="text-sm text-text-secondary">+ 选择附件</span>
       </label>
     </div>

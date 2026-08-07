@@ -224,15 +224,15 @@ onMounted(loadData)
             </button>
           </div>
 
-          <!-- 已批准待执行：执行/失败重试 -->
+          <!-- 已批准待执行：执行/失败重试（与批准一致：非本人 + member:manage） -->
           <div v-if="item.status === 'approved_pending_exec'" class="mt-3">
-            <button class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover flex items-center gap-1" :disabled="actingId === item.id" @click="handleExecute(item.id)">
+            <button v-if="canApprove(item)" class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover flex items-center gap-1" :disabled="actingId === item.id" @click="handleExecute(item.id)">
               <RefreshCw :size="12" /> {{ actingId === item.id ? '执行中...' : '执行生效' }}
             </button>
           </div>
           <div v-if="item.status === 'exec_failed'" class="mt-3">
             <p class="text-xs text-warning mb-2 flex items-center gap-1"><AlertTriangle :size="12" /> 执行失败，原关系保持不变，可重试</p>
-            <button class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover flex items-center gap-1" :disabled="actingId === item.id" @click="handleExecute(item.id)">
+            <button v-if="canApprove(item)" class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover flex items-center gap-1" :disabled="actingId === item.id" @click="handleExecute(item.id)">
               <RefreshCw :size="12" /> {{ actingId === item.id ? '重试中...' : '重试' }}
             </button>
           </div>

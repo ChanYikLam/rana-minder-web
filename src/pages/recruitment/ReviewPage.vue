@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, DataTable } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
@@ -9,11 +10,18 @@ import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { Star, Send, CheckCircle2, Lock, EyeOff } from '@lucide/vue'
 
+interface PeerReview {
+  authorName: string; authorRole: string; comment: string
+  version: number; createdAt: string; updatedAt: string
+}
+
 interface ReviewItem {
   id: string; applicantId: string; applicantName: string
   departmentName: string; status: string; rating: number | null
   comment: string; concludedAt: string | null; concludedBy: string | null
   myRating: number | null; myComment: string | null
+  peerViewLocked: boolean
+  reviews: PeerReview[]
 }
 
 const route = useRoute()
@@ -24,13 +32,15 @@ const selectedId = ref<string | null>(null)
 const rating = ref(0)
 const comment = ref('')
 const submitting = ref(false)
+const publishOpen = ref(false)
+const publishSucceeded = ref(false)
+const publishError = ref('')
 
 const selected = ref<ReviewItem | null>(null)
 
-// REC-014: 首评前隔离 - 首次提交本人评价前，不得查看同轮其他面试官评价
+// REC-014: 首评前隔离 - 首次提交本人评价前，不得查看同轮其他面试官评价（服务端强制）
 const evaluationIsolated = computed(() => {
-  if (!selected.value) return false
-  return selected.value.myRating === null && selected.value.status === 'evaluating'
+  return selected.value?.peerViewLocked ?? false
 })
 
 // REC-015: 申请人不可查看内部评分、评语或讨论
@@ -68,8 +78,8 @@ function handleRowClick(row: unknown) {
   const item = row as ReviewItem
   selected.value = item
   selectedId.value = item.id
-  rating.value = item.rating || 0
-  comment.value = item.comment || ''
+  rating.value = 0
+  comment.value = ''
 }
 
 async function handleSubmitReview() {
@@ -83,21 +93,23 @@ async function handleSubmitReview() {
   })
   submitting.value = false
   if (result.kind === 'completed') {
-    selected.value!.status = 'concluded'
-    selected.value!.rating = rating.value
-    selected.value!.comment = comment.value
-    selected.value!.concludedAt = new Date().toISOString()
+    await loadReviews()
   }
 }
 
 async function handlePublishAll() {
   submitting.value = true
+  publishSucceeded.value = false
+  publishError.value = ''
   const scope = routeScope()
   if (!scope) { submitting.value = false; return }
   const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/publish`)
   submitting.value = false
   if (result.kind === 'completed') {
+    publishSucceeded.value = true
     reviews.value.forEach((r) => { if (r.status === 'concluded') r.status = 'published' })
+  } else {
+    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
   }
 }
 
@@ -112,8 +124,8 @@ onMounted(loadReviews)
         <PermissionGuard permission="club:recruitment:manage">
           <button
             class="flex items-center gap-1.5 px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
-            :disabled="submitting || !reviews.some((r) => r.status === 'concluded')"
-            @click="handlePublishAll"
+            :disabled="!reviews.some((r) => r.status === 'concluded')"
+            @click="publishOpen = true"
           >
             <Send :size="16" /> 统一发布结论
           </button>
@@ -153,24 +165,7 @@ onMounted(loadReviews)
             <p class="text-sm text-text-secondary">内部评分和评语不对申请人公开</p>
           </div>
 
-          <!-- 已有结论 -->
-          <div v-else-if="selected.status === 'concluded' || selected.status === 'published'" class="space-y-3">
-            <div>
-              <p class="text-xs text-text-secondary mb-1">评分</p>
-              <div class="flex gap-1">
-                <Star v-for="i in 5" :key="i" :size="20" :class="i <= (selected.rating || 0) ? 'text-warning fill-warning' : 'text-muted'" />
-              </div>
-            </div>
-            <div>
-              <p class="text-xs text-text-secondary mb-1">评语</p>
-              <p class="text-sm text-text-primary">{{ selected.comment || '无评语' }}</p>
-            </div>
-            <p v-if="selected.concludedBy" class="text-xs text-text-secondary">
-              评价人：{{ selected.concludedBy }}
-            </p>
-          </div>
-
-          <!-- REC-014: 首评前隔离 - 提示不可查看同轮他评 -->
+          <!-- REC-014: 首评前隔离 - 未提交本人评价，不可查看同轮他评（服务端强制） -->
           <div v-else-if="evaluationIsolated" class="space-y-4">
             <div class="rounded-lg bg-warning-subtle p-3 flex items-center gap-2">
               <Lock :size="16" class="text-warning" />
@@ -199,7 +194,12 @@ onMounted(loadReviews)
                 placeholder="填写评价内容..."
               />
             </div>
-            <PermissionGuard permission="club:interview:evaluate" fallback="disable" disable-reason="无面试评价权限">
+            <PermissionGuard
+              :permission="['club:interview:evaluate', 'club:recruitment:manage']"
+              scope="workspace"
+              fallback="disable"
+              disable-reason="无面试评价权限"
+            >
               <button
                 class="w-full h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
                 :disabled="submitting || rating === 0"
@@ -209,6 +209,62 @@ onMounted(loadReviews)
               </button>
             </PermissionGuard>
           </div>
+
+          <!-- 已提交本人评价：可见同轮全部评价（多作者），轮次关闭前可修改自己的 -->
+          <div v-else class="space-y-4">
+            <div>
+              <p class="text-xs text-text-secondary mb-1">同轮评价（{{ selected.reviews.length }} 条）</p>
+              <div class="space-y-2">
+                <div
+                  v-for="(r, idx) in selected.reviews"
+                  :key="idx"
+                  class="rounded-lg border border-border bg-elevated p-3"
+                >
+                  <div class="flex items-center justify-between mb-1">
+                    <p class="text-sm font-medium text-text-primary">{{ r.authorName }}</p>
+                    <p class="text-xs text-text-secondary">{{ r.authorRole }} · v{{ r.version }}</p>
+                  </div>
+                  <p class="text-sm text-text-primary">{{ r.comment || '无评语' }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selected.status !== 'published'" class="border-t border-border pt-3 space-y-3">
+              <p class="text-xs text-text-secondary">提交或修改本人评价（轮次关闭前可修改，每次修改保留历史）</p>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">我的评分</label>
+                <div class="flex gap-1">
+                  <button
+                    v-for="i in 5"
+                    :key="i"
+                    class="p-1"
+                    :aria-label="`${i} 星`"
+                    @click="rating = i"
+                  >
+                    <Star :size="24" :class="i <= rating ? 'text-warning fill-warning' : 'text-muted'" />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1">我的评语</label>
+                <textarea
+                  v-model="comment"
+                  rows="3"
+                  class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                  placeholder="填写评价内容..."
+                />
+              </div>
+              <PermissionGuard permission="club:interview:evaluate" fallback="disable" disable-reason="无面试评价权限">
+                <button
+                  class="w-full h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
+                  :disabled="submitting || rating === 0"
+                  @click="handleSubmitReview"
+                >
+                  <CheckCircle2 :size="16" /> {{ submitting ? '提交中...' : '提交/更新评价' }}
+                </button>
+              </PermissionGuard>
+            </div>
+          </div>
         </Card>
 
         <Card v-else class="h-fit flex items-center justify-center py-12">
@@ -216,5 +272,19 @@ onMounted(loadReviews)
         </Card>
       </div>
     </div>
+
+    <HighRiskConfirm
+      v-model:open="publishOpen"
+      title="统一发布结论"
+      description="将全部已评价结论一次性发布给申请人，发布后不可撤回。"
+      :targets="reviews.filter((r) => r.status === 'concluded').map((r) => ({ id: r.id, label: r.applicantName, detail: `${r.departmentName} · ${r.rating ?? 0} 分` }))"
+      impact-summary="申请人将收到录用/未录用结果通知；未完成评价的申请人不受影响。"
+      confirm-label="确认发布"
+      reauth-required
+      :executing="submitting"
+      :succeeded="publishSucceeded"
+      :error-message="publishError"
+      @confirm="handlePublishAll"
+    />
   </PageStateBoundary>
 </template>

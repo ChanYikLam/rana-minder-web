@@ -6,6 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import {
   Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck,
@@ -31,7 +32,7 @@ const submitting = ref(false)
 // 管理操作
 const actionLoading = ref(false)
 const actionError = ref('')
-const newDeadline = ref('2026-09-16T23:59:00+08:00')
+const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 
 async function loadDetail() {
@@ -43,9 +44,7 @@ async function loadDetail() {
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function runAction(action: string, input?: Record<string, unknown>) {
@@ -83,6 +82,10 @@ const canOpenChannel = computed(() => {
 
 const canCloseChannel = computed(() => detail.value?.channelStatus === 'open')
 
+/** draft 阶段仍有社团未确认参与 → 发布暂不可用（联合活动需全部拟参与社团确认后才能首次公布） */
+const pendingConfirmCount = computed(() => detail.value?.participants.filter((p) => p.status === 'invited').length || 0)
+const publishBlocked = computed(() => !!detail.value && detail.value.status === 'draft' && pendingConfirmCount.value > 0)
+
 // 名单调整
 const clubOptions = [
   { id: 'club-001', name: '计算机协会' },
@@ -91,7 +94,7 @@ const clubOptions = [
 ]
 const adjustOpen = ref(false)
 const selectedClubs = ref<string[]>([])
-const newConfirmDeadline = ref('2026-09-30T23:59:00+08:00')
+const newConfirmDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 
 async function openAdjust() {
   adjustOpen.value = true
@@ -229,11 +232,15 @@ onMounted(loadDetail)
             <button
               v-if="['draft', 'confirmed'].includes(detail.status)"
               class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
-              :disabled="actionLoading"
+              :disabled="actionLoading || publishBlocked"
+              :title="publishBlocked ? '等待全部参与社团确认后即可发布' : undefined"
               @click="runAction('publish')"
             >
               <Rocket :size="15" /> 发布活动
             </button>
+            <p v-if="publishBlocked" class="w-full text-xs text-warning mt-1">
+              尚有 {{ pendingConfirmCount }} 个参与社团未确认，待全部确认后即可发布（各社团在其工作台确认参与）。
+            </p>
             <button
               v-if="detail.status === 'draft'"
               class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"

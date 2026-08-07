@@ -11,7 +11,7 @@ dev:
         - name: typecheck
           script: pnpm run typecheck
         - name: test
-          script: pnpm run test
+          script: pnpm run test:coverage
         - name: build
           script: pnpm run build
         - name: audit

@@ -9,6 +9,7 @@ import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Download, Plus, FileText, Clock, CheckCircle2 } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
+import { formatSize, formatTime } from '@/lib/exportFormat'
 import { openAuthorizedDownload } from '@/services/download'
 import { toast } from 'vue-sonner'
 
@@ -80,17 +81,6 @@ function stopAllPolling() {
   pollingTimers.clear()
 }
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '-'
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 async function handleCreate() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
@@ -126,7 +116,7 @@ async function handleDownload(task: ExportTask) {
     toast.info('导出尚未完成，请稍候')
     return
   }
-  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/${task.id}/download`, {})
+  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/exports/${task.id}/download`, {})
   if (result.kind === 'completed') {
     if (openAuthorizedDownload(result.data.downloadUrl)) {
       toast.success('已开始下载')
@@ -158,7 +148,7 @@ onBeforeUnmount(stopAllPolling)
     <div class="max-w-2xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">导出管理</h1>
-        <PermissionGuard permission="club:member:manage">
+        <PermissionGuard permission="club:export:execute" scope="workspace">
           <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openCreateConfirm">
             <Plus :size="16" /> 新建导出
           </button>
@@ -167,7 +157,7 @@ onBeforeUnmount(stopAllPolling)
 
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无导出任务">
         <template #action>
-          <PermissionGuard permission="club:member:manage">
+          <PermissionGuard permission="club:export:execute" scope="workspace">
             <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="openCreateConfirm">
               <Plus :size="16" /> 新建导出
             </button>
@@ -228,7 +218,7 @@ onBeforeUnmount(stopAllPolling)
       title="创建成员名单导出"
       description="导出将生成包含社团成员信息的文件，请确认导出范围与安全规则。"
       :targets="[{ id: 'members', label: '本社团全部成员', detail: '仅基础字段，不含敏感列' }]"
-      impact-summary="导出任务生成后 7 天内可下载，过期自动失效；每次下载实时校验权限。"
+      impact-summary="导出任务生成后 24 小时内可下载，过期自动失效；每次下载实时校验权限。"
       confirm-label="开始导出"
       :executing="executing"
       :succeeded="succeeded"

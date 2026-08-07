@@ -20,8 +20,8 @@ const route = useRoute()
 const router = useRouter()
 const workspace = useWorkspaceContextStore()
 const state = ref<PageState>('loading')
-const clubName = ref('计算机协会')
-const role = ref('负责人')
+const clubName = ref('')
+const role = ref('')
 const todos = ref<TodoItem[]>([])
 const metrics = ref<DashboardMetrics | null>(null)
 
@@ -70,11 +70,11 @@ onMounted(loadDashboard)
       <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-3">
           <div class="flex items-center justify-center w-12 h-12 rounded-full bg-primary-subtle text-primary font-medium">
-            {{ clubName.charAt(0) }}
+            {{ (clubName || workspace.currentClubName || '未选择社团').charAt(0) }}
           </div>
           <div>
-            <h1 class="text-xl font-bold text-text-primary">{{ clubName }}</h1>
-            <p class="text-sm text-text-secondary">{{ role }}</p>
+            <h1 class="text-xl font-bold text-text-primary">{{ clubName || workspace.currentClubName || '未选择社团' }}</h1>
+            <p class="text-sm text-text-secondary">{{ role || '—' }}</p>
           </div>
         </div>
         <button
@@ -97,7 +97,7 @@ onMounted(loadDashboard)
             </div>
           </div>
         </Card>
-        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/recruitment/act-001/interview`)">
+        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/recruitment`)">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-warning-subtle text-warning"><CalendarClock :size="20" /></div>
             <div>
@@ -106,7 +106,7 @@ onMounted(loadDashboard)
             </div>
           </div>
         </Card>
-        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/recruitment/act-001/invitations`)">
+        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/recruitment`)">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-success-subtle text-success"><Send :size="20" /></div>
             <div>
@@ -150,7 +150,7 @@ onMounted(loadDashboard)
           v-for="todo in visibleTodos"
           :key="todo.id"
           class="cursor-pointer"
-          @click="router.push(`/org/${route.params.clubId}/recruitment/act-001`)"
+          @click="router.push(`/org/${route.params.clubId}/recruitment`)"
         >
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">

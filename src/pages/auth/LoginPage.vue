@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
 import { DEMO_ROLES } from '@/mock/auth'
 import type { MockRole } from '@/mock/auth'
+import { resolveLoginTarget, parseSameOriginRedirect } from './loginTarget'
 import {
   ShieldCheck, Users, UserCog, Building2, ClipboardCheck, User, GraduationCap,
   LogIn, Compass,
@@ -30,25 +31,21 @@ const roleIcons: Record<MockRole['role'], typeof ShieldCheck> = {
 
 const mockRoles = DEMO_ROLES.map((r) => ({ ...r, icon: roleIcons[r.role] }))
 
-function getRequestedRedirect(): string | null {
-  const redirect = route.query.redirect
-  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return null
-
-  try {
-    const target = new URL(redirect, window.location.origin)
-    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : null
-  } catch {
-    return null
-  }
-}
-
 function resolveTargetAfterLogin(): string {
-  const requested = getRequestedRedirect()
-  if (requested) return requested
-  if (session.workspace?.clubId) return `/org/${session.workspace.clubId}/dashboard`
-  if (session.hasPermission('platform:club:manage')) return '/admin/clubs'
-  return '/me'
+  return resolveLoginTarget({
+    workspace: session.workspace,
+    hasPermission: (permission) => session.hasPermission(permission),
+    requestedRedirect: parseSameOriginRedirect(route.query.redirect),
+    needsProfileGate: session.needsProfileGate,
+  })
 }
+
+onMounted(async () => {
+  await session.loadSession()
+  if (session.isAuthenticated) {
+    await router.replace(resolveTargetAfterLogin())
+  }
+})
 
 async function handleLogin() {
   if (loggingIn.value || authMode === 'disabled') return
@@ -56,7 +53,7 @@ async function handleLogin() {
   loginError.value = null
 
   try {
-    const result = await startLogin(getRequestedRedirect() ?? '/me', selectedRole.value)
+    const result = await startLogin(parseSameOriginRedirect(route.query.redirect) ?? '/me', selectedRole.value)
     if (result === 'redirected') return
     if (result === 'disabled') {
       loginError.value = '统一认证尚未配置，当前无法登录'

@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
-import { ADMIN_PERMISSIONS, workspacePermissionForRoute } from './permissions'
+import { resolveLoginTarget } from '@/pages/auth/loginTarget'
+import { runNavigationGuard } from './guard'
 
 const routes: RouteRecordRaw[] = [
   // ========== A. 公开路由（7条） ==========
@@ -120,6 +121,12 @@ const routes: RouteRecordRaw[] = [
     name: 'P-NTF-02-personal',
     component: () => import('@/pages/notification/EmailSettingsPage.vue'),
     meta: { layout: 'default', requiresAuth: true, scope: 'personal' },
+  },
+  {
+    path: '/me/interviews/tasks',
+    name: 'P-REC-04-tasks',
+    component: () => import('@/pages/recruitment/MyInterviewTasksPage.vue'),
+    meta: { layout: 'default', requiresAuth: true, view: 'self' },
   },
   {
     path: '/me/interviews/recruitment/:interviewId',
@@ -397,6 +404,12 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, requiresAdmin: true },
   },
   {
+    path: '/admin/clubs/wizard',
+    name: 'P-ORG-01-wizard',
+    component: () => import('@/pages/organization/ClubAccessWizardPage.vue'),
+    meta: { layout: 'default', requiresAuth: true, requiresAdmin: true },
+  },
+  {
     path: '/admin/forms/designer/:formId',
     name: 'P-FORM-01-admin',
     component: () => import('@/pages/form/FormDesignerPage.vue'),
@@ -498,67 +511,10 @@ const router = createRouter({
   },
 })
 
-router.beforeEach(async (to) => {
+router.beforeEach((to) => {
   const session = useSessionViewStore()
   const workspace = useWorkspaceContextStore()
-
-  // 根路径：按会话状态跳转默认落点
-  if (to.path === '/') {
-    if (!session.isAuthenticated) {
-      await session.loadSession()
-    }
-    if (!session.isAuthenticated) {
-      return { name: 'P-IDN-01' }
-    }
-    if (session.workspace?.clubId) {
-      return { path: `/org/${session.workspace.clubId}/dashboard` }
-    }
-    if (session.hasPermission('platform:club:manage')) {
-      return { name: 'P-ORG-01' }
-    }
-    return { name: 'P-IDN-03' }
-  }
-
-  const isPublic = to.meta.public === true
-
-  if (!isPublic) {
-    if (!session.isAuthenticated) {
-      await session.loadSession()
-    }
-
-    if (!session.isAuthenticated) {
-      return { name: 'P-IDN-01', query: { redirect: to.fullPath } }
-    }
-
-    if (session.needsProfileGate && to.name !== 'P-GEN-04' && to.name !== 'P-IDN-02' && to.name !== 'P-IDN-02-edit' && to.name !== 'P-IDN-02-sync-conflict') {
-      return { name: 'P-GEN-04' }
-    }
-
-    if (to.meta.requiresAdmin === true) {
-      const permission = ADMIN_PERMISSIONS[String(to.name)]
-      if (!permission || !session.hasPermission(permission)) {
-        return { name: 'P-GEN-02' }
-      }
-    }
-
-    if (to.meta.requiresWorkspace === true) {
-      const clubId = typeof to.params.clubId === 'string' ? to.params.clubId : null
-      const permission = workspacePermissionForRoute(String(to.name))
-      if (!clubId || !permission || !(await workspace.loadWorkspace(clubId)) || !workspace.hasPermission(permission)) {
-        return { name: 'P-GEN-02' }
-      }
-    } else if (!workspace.hasWorkspace && session.workspace) {
-      // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载时按会话初始化
-      workspace.setWorkspace(
-        session.workspace.clubId,
-        session.workspace.clubName,
-        session.workspace.role,
-        session.permissions,
-      )
-    }
-  }
-
-  return true
+  return runNavigationGuard(to, session, workspace, resolveLoginTarget)
 })
 
 export default router

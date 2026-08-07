@@ -3,6 +3,8 @@
  * 模拟不同角色登录后的会话和权限
  */
 
+import { resolveMemberId } from './db'
+
 export interface MockUser {
   id: string
   studentId: string
@@ -75,6 +77,8 @@ export const mockUsers: Record<string, MockUser> = {
           'club:recruitment:manage',
           'club:joint:manage',
           'club:member:manage',
+          'club:appointment:manage',
+          'club:resignation:approve',
           'club:invite:manage',
           'club:transition:manage',
           'club:form:design',
@@ -83,6 +87,7 @@ export const mockUsers: Record<string, MockUser> = {
           'club:audit:view',
           'club:config:manage',
           'club:batch:execute',
+          'club:email:config',
         ],
       },
       {
@@ -94,6 +99,8 @@ export const mockUsers: Record<string, MockUser> = {
           'club:recruitment:manage',
           'club:joint:manage',
           'club:member:manage',
+          'club:appointment:manage',
+          'club:resignation:approve',
           'club:invite:manage',
           'club:transition:manage',
           'club:stats:view',
@@ -127,8 +134,11 @@ export const mockUsers: Record<string, MockUser> = {
           'club:recruitment:manage',
           'club:joint:manage',
           'club:member:manage',
+          'club:appointment:manage',
+          'club:resignation:approve',
           'club:invite:manage',
           'club:transition:manage',
+          'club:form:design',
           'club:stats:view',
           'club:export:execute',
           'club:audit:view',
@@ -182,6 +192,10 @@ export const mockUsers: Record<string, MockUser> = {
         permissions: [
           'club:dashboard:view',
           'club:member:manage',
+          'club:interview:view',
+          'club:interview:evaluate',
+          'club:stats:view',
+          'club:export:execute',
         ],
       },
     ],
@@ -277,7 +291,7 @@ export const mockUsers: Record<string, MockUser> = {
   applicant3: {
     id: 'user-applicant-003',
     studentId: '20240006',
-    name: '孙一凡',
+    name: '林婉婷',
     email: 'applicant3@example.edu.cn',
     phone: '13800000003',
     avatar: null,
@@ -335,15 +349,6 @@ export const DEMO_ROLES: DemoRoleInfo[] = Object.entries(mockUsers).map(([key, u
   }
 })
 
-export function resolveMockSessionUser(url: string): MockUser | null {
-  const u = new URL(url, 'http://localhost')
-  const requestedKey = u.searchParams.get('_mock_user')
-  if (requestedKey && mockUsers[requestedKey]) {
-    activeMockUserKey = requestedKey
-  }
-  return activeMockUserKey ? mockUsers[activeMockUserKey] : null
-}
-
 export function clearMockSession(): void {
   activeMockUserKey = null
 }
@@ -352,11 +357,17 @@ export function getActiveMockUser(): MockUser | null {
   return activeMockUserKey ? mockUsers[activeMockUserKey] : null
 }
 
-/** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换） */
+/** 当前 mock 用户（可通过 URL 参数 ?_mock_user=leader 切换）
+ * 带参请求（如登录后的 session 拉取）会锚定 activeMockUserKey，
+ * 使后续不带参数的请求解析到同一登录角色，直到退出登录。 */
 export function resolveMockUser(url: string): MockUser {
   try {
     const u = new URL(url, 'http://localhost')
-    const key = u.searchParams.get('_mock_user') || activeMockUserKey || 'leader'
+    const requested = u.searchParams.get('_mock_user')
+    if (requested && mockUsers[requested]) {
+      activeMockUserKey = requested
+    }
+    const key = requested || activeMockUserKey || 'leader'
     return mockUsers[key] || mockUsers.leader
   } catch {
     return mockUsers.leader
@@ -374,13 +385,11 @@ export function getPermissions(user: MockUser, clubId: string): string[] {
   return role?.permissions || []
 }
 
-/** mock 用户 id → 社团成员 id（成员生命周期以成员视角模拟操作者） */
-export const USER_MEMBER_MAP: Record<string, string> = {
-  'user-leader-001': 'mem-004',
-  'user-hr-001': 'mem-003',
-  'user-interviewer-001': 'mem-002',
-  'user-member-001': 'mem-001',
-  'user-deptleader-001': 'mem-006',
+/** mock 用户 id → 候选人 id 映射（申请人视角操作者；通知/业务侧经此反查接收用户） */
+export const USER_APPLICANT_MAP: Record<string, string> = {
+  'user-applicant-001': 'u-001',
+  'user-applicant-002': 'u-002',
+  'user-applicant-003': 'u-006',
 }
 
 /** 获取当前用户的默认工作空间（有社团归属时返回） */
@@ -388,5 +397,5 @@ export function getWorkspace(user: MockUser): { clubId: string; clubName: string
   if (!user.currentClubId) return null
   const role = user.roles.find((r) => r.clubId === user.currentClubId)
   if (!role) return null
-  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, permissions: role.permissions, memberId: USER_MEMBER_MAP[user.id] }
+  return { clubId: role.clubId, clubName: role.clubName || '计算机协会', role: role.role, permissions: role.permissions, memberId: resolveMemberId(user.id, role.clubId) ?? undefined }
 }

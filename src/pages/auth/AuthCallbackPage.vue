@@ -2,23 +2,12 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
+import { resolveLoginTarget, parseSameOriginRedirect } from './loginTarget'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSessionViewStore()
 const error = ref<string | null>(null)
-
-function getRedirect(): string {
-  const redirect = route.query.redirect
-  if (typeof redirect !== 'string' || !redirect.startsWith('/') || redirect.startsWith('//')) return '/me'
-
-  try {
-    const target = new URL(redirect, window.location.origin)
-    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : '/me'
-  } catch {
-    return '/me'
-  }
-}
 
 onMounted(async () => {
   try {
@@ -27,7 +16,15 @@ onMounted(async () => {
       error.value = '未能建立登录会话，请返回登录页后重试。'
       return
     }
-    await router.replace(getRedirect())
+    // 与登录页/根守卫同一落点口径：redirect 校验同源后优先；
+    // 资料未完善（needsProfileGate）时 redirect 也让位，直达 P-GEN-04，避免闪跳
+    const target = resolveLoginTarget({
+      workspace: session.workspace,
+      hasPermission: (permission) => session.hasPermission(permission),
+      requestedRedirect: parseSameOriginRedirect(route.query.redirect),
+      needsProfileGate: session.needsProfileGate,
+    })
+    await router.replace(target)
   } catch {
     error.value = '登录回调处理失败，请返回登录页后重试。'
   }

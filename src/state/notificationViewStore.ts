@@ -4,7 +4,7 @@ import { notificationApi } from '@/services'
 
 export const useNotificationViewStore = defineStore('notificationView', () => {
   const unreadCount = ref(0)
-  const items = ref<{ id: string; type: string; title: string; body: string; read: boolean; createdAt: string; link: string | null }[]>([])
+  const items = ref<{ id: string; type: string; title: string; body: string; read: boolean; createdAt: string; link: string | null; clubName: string | null }[]>([])
   const loading = ref(false)
 
   const hasUnread = computed(() => unreadCount.value > 0)

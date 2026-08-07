@@ -1,0 +1,123 @@
+import { getCurrentInstance, onUnmounted, readonly, ref, type Ref } from 'vue'
+
+export interface UseDebouncedSearchOptions {
+  /** 防抖窗口，默认 300ms */
+  delay?: number
+  /**
+   * 搜索回调：keyword 为 trim 后的关键字（空字符串表示清空关键字，应立即重置结果）。
+   * 调用方应在异步操作前捕获 mySeq = seq.value，操作后比较 mySeq !== seq.value 判断是否作废。
+   */
+  onSearch: (keyword: string) => Promise<void> | void
+}
+
+export interface UseDebouncedSearchReturn {
+  /**
+   * 搜索中（覆盖防抖窗口 + 请求在途）。
+   * 仅服务候选搜索/内联结果类页面（成员邀请候选人、社团分组匹配等）的 loading 展示；
+   * 页面级状态机（PageStateBoundary 的 state）页面可不消费。
+   */
+  searching: Ref<boolean>
+  /**
+   * 当前代次号（只读，调用方不得修改——由 readonly 在类型层面固化）。
+   * 每次输入变化、清空或卸载时递增。调用方必须在 onSearch 入口处立即捕获 mySeq = seq.value，
+   * 异步操作后比较 mySeq !== seq.value 判断是否被作废。严禁在 onSearch 内自增 seq（如 ++seq.value），
+   * 否则将被 composable 内部的 searching 复位逻辑误判为 stale。
+   */
+  seq: Readonly<Ref<number>>
+  /** 输入变化时调用（含清空）；空关键字立即作废在途请求并同步触发 onSearch('')。immediate=true 跳过防抖立即执行 */
+  schedule: (keyword: string, immediate?: boolean) => void
+  /** 取消待触发的防抖定时器，并作废在途请求（内部递增代次号并复位 searching）。取消后如需继续查询请调用 schedule */
+  cancel: () => void
+}
+
+/**
+ * 防抖搜索控制器：统一 300ms 防抖、在途请求作废（代次号）、卸载清理与 loading 状态。
+ * 页面仅需提供 onSearch 处理业务状态（结果写入/失败提示），无需自行维护 timer/序号。
+ * schedule(keyword, immediate=true) 跳过防抖立即执行（重试、筛选即时查询等场景）。
+ * onSearch 内不得修改 seq（如 ++seq.value），仅允许捕获 mySeq = seq.value 后比较。
+ */
+export function useDebouncedSearch(options: UseDebouncedSearchOptions): UseDebouncedSearchReturn {
+  const delay = options.delay ?? 300
+  const searching = ref(false)
+  const seq = ref(0)
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  function schedule(keyword: string, immediate = false) {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    const kw = keyword.trim()
+    if (!kw) {
+      // 空关键字：立即作废在途请求（旧响应不再生效），同步清空
+      seq.value++
+      searching.value = false
+      try {
+        const result = options.onSearch('')
+        if (result instanceof Promise) {
+          result.catch((e) => {
+            console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+          })
+        }
+      } catch (e) {
+        console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+      }
+      return
+    }
+    // 输入变化立即递增序号：防抖窗口内到达的旧响应将被 seq 比较识别为作废
+    seq.value++
+    searching.value = true
+    if (immediate) {
+      // 立即执行（重试等场景），不经过防抖
+      const mySeq = seq.value
+      void (async () => {
+        try {
+          await options.onSearch(kw)
+        } catch (e) {
+          console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+        } finally {
+          if (mySeq === seq.value) searching.value = false
+        }
+      })()
+      return
+    }
+    timer = setTimeout(() => {
+      timer = null
+      const mySeq = seq.value
+      void (async () => {
+        try {
+          await options.onSearch(kw)
+        } catch (e) {
+          console.error('[useDebouncedSearch] onSearch 执行失败:', e)
+        } finally {
+          // 仅当无更新的输入（未被作废）时复位 loading，避免误清新请求的 loading 状态
+          if (mySeq === seq.value) searching.value = false
+        }
+      })()
+    }, delay)
+  }
+
+  /**
+   * 取消待触发的防抖定时器，并作废在途请求（递增代次号 + 复位 searching），
+   * 保证「先 cancel 后 schedule」窗口期内返回的旧响应不会写回结果。
+   */
+  function cancel() {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    seq.value++
+    searching.value = false
+  }
+
+  function cleanup() {
+    cancel()
+  }
+
+  // 组件挂载场景自动注册卸载清理；无实例（独立测试）时由测试方自行管理
+  const instance = getCurrentInstance()
+  if (instance) onUnmounted(cleanup)
+
+  // seq 以只读引用返回：外部仅能捕获/比较，无法篡改代次号，避免破坏内部 searching 复位语义
+  return { searching, seq: readonly(seq), schedule, cancel }
+}

@@ -12,9 +12,13 @@ const props = withDefaults(defineProps<{
   selected: BatchItem[]
   executing?: boolean
   actionLabel?: string
+  disabled?: boolean
+  disabledReason?: string
 }>(), {
   executing: false,
   actionLabel: '执行批量操作',
+  disabled: false,
+  disabledReason: '',
 })
 
 const emit = defineEmits<{
@@ -48,6 +52,9 @@ const more = computed(() => props.selected.length - previewItems.value.length)
       <p v-if="selected.length === 0" class="px-2.5 py-3 text-sm text-text-secondary text-center">
         请先选择需要批量操作的对象
       </p>
+      <p v-else-if="disabled && disabledReason" class="px-2.5 py-2 text-xs text-warning">
+        {{ disabledReason }}
+      </p>
     </div>
 
     <div class="flex flex-col-reverse sm:flex-row gap-2">
@@ -56,7 +63,7 @@ const more = computed(() => props.selected.length - previewItems.value.length)
       </Button>
       <Button
         class="w-full sm:flex-1"
-        :disabled="selected.length === 0"
+        :disabled="selected.length === 0 || disabled"
         :loading="executing"
         @click="emit('execute')"
       >

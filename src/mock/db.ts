@@ -3,6 +3,24 @@
  * 单一数据源，页面刷新即重置；状态流转经 state-machines 校验
  */
 
+import { assertTransition } from './state-machines/transitions'
+
+/** 登录账号 id → 其所属社团成员 id（在 db.members 中按「用户 × 社团」唯一）
+ * 原静态映射 auth.USER_MEMBER_MAP 仅按用户维度映射，无法表达多社团用户在不同社团的成员 id，
+ * 切换社团后 memberId 会沿用上一社团的值导致自审误判；改为由 members 种子推导单源解析。 */
+export const MEMBER_BY_USER: Record<string, Record<string, string>> = {
+  'user-leader-001': { 'club-001': 'mem-004', 'club-002': 'mem-101' },
+  'user-hr-001': { 'club-001': 'mem-003' },
+  'user-interviewer-001': { 'club-001': 'mem-002' },
+  'user-member-001': { 'club-001': 'mem-001' },
+  'user-deptleader-001': { 'club-001': 'mem-006' },
+}
+
+/** 按「用户 × 社团」解析成员 id；该用户在目标社团无成员身份（或数据未种子）时返回 null */
+export function resolveMemberId(userId: string, clubId: string): string | null {
+  return MEMBER_BY_USER[userId]?.[clubId] ?? null
+}
+
 export type MockRoleKey = 'club_leader' | 'hr' | 'department_leader' | 'interviewer' | 'member'
 
 export interface MockDepartment {
@@ -254,6 +272,21 @@ export const members: MockMember[] = [
     anomalies: [],
   },
   {
+    id: 'mem-101', clubId: 'club-002', studentId: '20210002',
+    name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002',
+    status: 'active', joinedAt: '2024-03-01T00:00:00+08:00', exitedAt: null,
+    positions: [
+      { id: 'pos-101', departmentId: 'dept-101', departmentName: '嵌入式组', title: '人事', startDate: '2024-03-01', endDate: null, status: 'active' },
+    ],
+    tenures: [
+      { id: 'ten-101', departmentName: '嵌入式组', title: '人事', startDate: '2024-03-01', endDate: null, endReason: null },
+    ],
+    departmentHistory: [
+      { id: 'dhis-101', action: 'join', departmentName: '嵌入式组', at: '2024-03-01T10:00:00+08:00' },
+    ],
+    anomalies: [],
+  },
+  {
     id: 'mem-005', clubId: 'club-001', studentId: '20240001',
     name: '刘子豪', email: 'former@example.edu.cn', phone: '13800000006',
     status: 'exited', joinedAt: '2023-09-01T00:00:00+08:00', exitedAt: '2024-06-01T00:00:00+08:00',
@@ -402,12 +435,16 @@ export function decideDepartmentApplication(appId: string, decision: 'approve' |
   if (app.applicantId === actorId) return { ok: false, error: '不能审批自己的申请' }
   if (decision === 'reject') {
     if (!rejectReason?.trim()) return { ok: false, error: '驳回必须填写原因' }
+    const t = assertTransition('SM-MEM-003', app.status, 'rejected', 'reject')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可驳回' }
     app.status = 'rejected'
     app.rejectReason = rejectReason
     app.decidedAt = now
     app.decidedBy = actorName
     return { ok: true, app }
   }
+  const t = assertTransition('SM-MEM-003', app.status, 'approved_pending_exec', 'approve')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可通过' }
   app.status = 'approved_pending_exec'
   app.decidedAt = now
   app.decidedBy = actorName
@@ -417,12 +454,18 @@ export function decideDepartmentApplication(appId: string, decision: 'approve' |
 export function executeDepartmentApplication(appId: string): { ok: boolean; error?: string; app?: MockDeptApplication } {
   const app = departmentApplications.find((a) => a.id === appId)
   if (!app) return { ok: false, error: '申请不存在' }
-  if (app.status !== 'approved_pending_exec' && app.status !== 'exec_failed') return { ok: false, error: '当前状态不可执行' }
+  const entry = app.status === 'approved_pending_exec' ? 'execute' : 'retry'
+  const t1 = assertTransition('SM-MEM-003', app.status, 'executing', entry)
+  if (!t1.ok) return { ok: false, error: t1.reason || '当前状态不可执行' }
+  app.status = 'executing'
   if (app.execFailOn === 'first' && !app.execRetried) {
     app.execRetried = true
-    app.status = 'exec_failed'
+    const t2 = assertTransition('SM-MEM-003', app.status, 'exec_failed', 'failed')
+    if (t2.ok) app.status = 'exec_failed'
     return { ok: false, error: '执行失败：目标部门关系写入未确认，保持原关系', app }
   }
+  const t2 = assertTransition('SM-MEM-003', app.status, 'effective', 'confirmed')
+  if (!t2.ok) return { ok: false, error: t2.reason || '执行写入未确认' }
   app.status = 'effective'
   const member = findMember(app.clubId, app.applicantId)
   if (member) {
@@ -435,6 +478,8 @@ export function executeDepartmentApplication(appId: string): { ok: boolean; erro
     if (app.type === 'leave' || app.type === 'transfer') {
       const pos = member.positions.find((p) => p.status === 'active' && p.departmentName === app.currentDept)
       if (pos) {
+        const t3 = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+        if (!t3.ok) return { ok: false, error: t3.reason || '当前职位状态无法结束' }
         pos.endDate = new Date().toISOString().slice(0, 10)
         pos.status = 'ended'
       }
@@ -466,6 +511,11 @@ export function withdrawInvitation(invitationId: string): { ok: boolean; error?:
   const inv = membershipInvitations.find((i) => i.id === invitationId)
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status !== 'sent' && inv.status !== 'pending_acceptance') return { ok: false, error: '仅待处理的邀请可撤回' }
+  // SM-MEM-004 状态机仅定义 pending_acceptance --withdraw--> withdrawn（sent 为发出态，撤回属状态机外补充）
+  if (inv.status === 'pending_acceptance') {
+    const t = assertTransition('SM-MEM-004', inv.status, 'withdrawn', 'withdraw')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可撤回' }
+  }
   inv.status = 'withdrawn'
   inv.withdrawnAt = now
   return { ok: true, invitation: inv }
@@ -476,14 +526,22 @@ export function respondInvitation(invitationId: string, action: 'accept' | 'reje
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status !== 'sent' && inv.status !== 'pending_acceptance') return { ok: false, error: '该邀请已处理，无法再次操作' }
   if (new Date(inv.expiredAt).getTime() < Date.now()) {
-    inv.status = 'expired'
+    const t = assertTransition('SM-MEM-004', inv.status, 'expired', 'expire')
+    if (t.ok) {
+      inv.status = 'expired'
+      return { ok: false, error: '邀请已过期' }
+    }
     return { ok: false, error: '邀请已过期' }
   }
   if (action === 'reject') {
+    const t = assertTransition('SM-MEM-004', inv.status, 'rejected', 'reject')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可拒绝' }
     inv.status = 'rejected'
     return { ok: true, invitation: inv }
   }
   // 整体接受：加入社团 + 初始部门必须整体生效，部分失败则整体回滚
+  const t = assertTransition('SM-MEM-004', inv.status, 'accepted_pending_sync', 'accept')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可接受' }
   inv.status = 'accepted_pending_sync'
   inv.acceptedAt = now
   return { ok: true, invitation: inv }
@@ -494,17 +552,47 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
   const inv = membershipInvitations.find((i) => i.id === invitationId)
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status === 'accepted_pending_sync') {
-    inv.status = 'effective'
-    members.push({
-      id: 'mem-' + Date.now(), clubId: inv.clubId, studentId: inv.candidateStudentId, name: inv.candidateName,
-      email: 'new@example.edu.cn', phone: '13900000000', status: 'active',
-      joinedAt: now, exitedAt: null,
-      positions: inv.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: inv.departmentId, departmentName: inv.departmentName || '', title: '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active' }] : [],
-      tenures: [], departmentHistory: [], anomalies: [],
+    const t = assertTransition('SM-MEM-004', inv.status, 'effective', 'confirmed')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可确认生效' }
+    // 复用 createMemberFromAdmission：业务生效时间取邀请接受时间（而非回读确认时间），且幂等不重复创建
+    const admitted = createMemberFromAdmission(inv.clubId, {
+      studentId: inv.candidateStudentId,
+      name: inv.candidateName,
+      departmentId: inv.departmentId,
+      departmentName: inv.departmentName,
+      acceptedAt: inv.acceptedAt || now,
     })
+    if (!admitted.ok) return { ok: false, error: admitted.error || '成员创建失败' }
+    inv.status = 'effective'
     return { ok: true, invitation: inv }
   }
   return { ok: false, error: '仅接受待同步的邀请可确认生效' }
+}
+
+/** 新成员基础联系方式占位（Mock 尚未接入真实资料），后续接入申请人档案后替换 */
+const MEMBER_FALLBACK_CONTACT = { email: 'new@example.edu.cn', phone: '13900000000' } // TODO: 接入真实联系方式
+
+/**
+ * 录取/联合邀请接受后的成员创建桥（06「接受普通或联合录取后，成员业务生效时间为接受时间」）。
+ * 幂等：同社团同学号的现有（active/非离职终态）成员不重复创建；业务生效时间取邀请接受时间，而非回读确认时间。
+ */
+export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
+  if (!input.studentId) return { ok: false, created: false, error: '学号为空，无法创建成员' }
+  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
+  // exiting（离职中）/pending_effective（待生效）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
+  if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective')) {
+    return { ok: false, created: false, error: `该学号在本社团存在${existing.status === 'exiting' ? '离职中' : '待生效'}的成员记录，请先完成原有流程` }
+  }
+  if (existing) return { ok: true, created: false, member: existing }
+  const member: MockMember = {
+    id: 'mem-' + Date.now(), clubId, studentId: input.studentId, name: input.name,
+    email: MEMBER_FALLBACK_CONTACT.email, phone: MEMBER_FALLBACK_CONTACT.phone, status: 'active',
+    joinedAt: input.acceptedAt, exitedAt: null,
+    positions: input.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: input.departmentId, departmentName: input.departmentName || '', title: '成员', startDate: input.acceptedAt.slice(0, 10), endDate: null, status: 'active' }] : [],
+    tenures: [], departmentHistory: input.departmentId ? [{ id: 'dhis-' + Date.now(), action: 'join', departmentName: input.departmentName || '', at: input.acceptedAt }] : [], anomalies: [],
+  }
+  members.push(member)
+  return { ok: true, created: true, member }
 }
 
 export function createAppointmentCommand(clubId: string, input: { action: AppointmentAction; memberId: string; memberName: string; departmentId: string | null; departmentName: string | null; title: string | null; scheduledAt: string | null; actorName: string }): { ok: boolean; error?: string; command?: MockAppointmentCommand } {
@@ -528,7 +616,8 @@ export function createAppointmentCommand(clubId: string, input: { action: Appoin
 export function cancelAppointmentCommand(commandId: string): { ok: boolean; error?: string } {
   const cmd = appointmentCommands.find((c) => c.id === commandId)
   if (!cmd) return { ok: false, error: '命令不存在' }
-  if (cmd.status === 'executed' || cmd.status === 'executing' || cmd.status === 'cancelled') return { ok: false, error: '当前状态不可取消' }
+  const t = assertTransition('SM-ORG-003', cmd.status, 'cancelled', 'cancel')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可取消' }
   cmd.status = 'cancelled'
   return { ok: true }
 }
@@ -536,7 +625,14 @@ export function cancelAppointmentCommand(commandId: string): { ok: boolean; erro
 export function reconfirmAppointmentCommand(commandId: string, scheduledAt: string): { ok: boolean; error?: string } {
   const cmd = appointmentCommands.find((c) => c.id === commandId)
   if (!cmd) return { ok: false, error: '命令不存在' }
-  if (cmd.status !== 'initiator_lost_rights' && cmd.status !== 'precondition_failed' && cmd.status !== 'pending_exec') return { ok: false, error: '当前状态不可重新确认' }
+  // pending_exec 属待执行态，仅更新计划时间不触发状态转换
+  if (cmd.status === 'pending_exec') {
+    cmd.scheduledAt = scheduledAt
+    return { ok: true }
+  }
+  const event = cmd.status === 'initiator_lost_rights' ? 'reconfirm' : 'reconfirm_new_time'
+  const t = assertTransition('SM-ORG-003', cmd.status, 'reconfirmed', event)
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可重新确认' }
   cmd.scheduledAt = scheduledAt
   cmd.status = 'reconfirmed'
   return { ok: true }
@@ -545,14 +641,19 @@ export function reconfirmAppointmentCommand(commandId: string, scheduledAt: stri
 export function executeAppointmentCommand(commandId: string): { ok: boolean; error?: string; command?: MockAppointmentCommand } {
   const cmd = appointmentCommands.find((c) => c.id === commandId)
   if (!cmd) return { ok: false, error: '命令不存在' }
-  if (cmd.status !== 'pending_exec' && cmd.status !== 'reconfirmed' && cmd.status !== 'exec_failed') return { ok: false, error: '当前状态不可执行' }
+  const entryEvent = cmd.status === 'exec_failed' ? 'retry' : 'execute_ok'
+  const t1 = assertTransition('SM-ORG-003', cmd.status, 'executing', entryEvent)
+  if (!t1.ok) return { ok: false, error: t1.reason || '当前状态不可执行' }
   cmd.status = 'executing'
   if (cmd.execFailOn === 'first' && !cmd.execRetried) {
     cmd.execRetried = true
-    cmd.status = 'exec_failed'
+    const t2 = assertTransition('SM-ORG-003', cmd.status, 'exec_failed', 'external_failed')
+    if (t2.ok) cmd.status = 'exec_failed'
     cmd.failReason = '执行失败：Casdoor 回读未确认，保持原关系'
     return { ok: false, error: cmd.failReason, command: cmd }
   }
+  const t2 = assertTransition('SM-ORG-003', cmd.status, 'executed', 'group_confirmed')
+  if (!t2.ok) return { ok: false, error: t2.reason || '执行结果未确认' }
   cmd.status = 'executed'
   cmd.executedAt = now
   const member = findMember(cmd.clubId, cmd.memberId)
@@ -560,8 +661,11 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
     if (cmd.action === 'dismiss') {
       const pos = member.positions.find((p) => p.status === 'active')
       if (pos) {
-        pos.endDate = new Date().toISOString().slice(0, 10)
-        pos.status = 'ended'
+        const t3 = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+        if (t3.ok) {
+          pos.endDate = new Date().toISOString().slice(0, 10)
+          pos.status = 'ended'
+        }
       }
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: pos?.departmentName || '', title: pos?.title || '', startDate: pos?.startDate || '', endDate: new Date().toISOString().slice(0, 10), endReason: '免职' })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: pos?.departmentName || '', at: now })
@@ -570,8 +674,11 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
       if (cmd.action === 'transfer') {
         const oldPos = member.positions.find((p) => p.status === 'active')
         if (oldPos) {
-          oldPos.endDate = new Date().toISOString().slice(0, 10)
-          oldPos.status = 'ended'
+          const t3 = assertTransition('SM-MEM-002', oldPos.status, 'ended', 'end_change')
+          if (t3.ok) {
+            oldPos.endDate = new Date().toISOString().slice(0, 10)
+            oldPos.status = 'ended'
+          }
           member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: oldPos.departmentName, title: oldPos.title, startDate: oldPos.startDate, endDate: oldPos.endDate, endReason: '调岗' })
         }
       }
@@ -611,11 +718,16 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
   req.decidedBy = actorName
   const member = findMember(req.clubId, req.memberId)
   if (member) {
+    const t = assertTransition('SM-MEM-001', member.status, 'exiting', 'exit_approved')
+    if (!t.ok) return { ok: false, error: t.reason || '当前成员状态不可进入退出流程' }
     member.status = 'exiting'
     const pos = member.positions.find((p) => p.status === 'active' && p.departmentName === req.departmentName)
     if (pos) {
-      pos.endDate = new Date().toISOString().slice(0, 10)
-      pos.status = 'ended'
+      const t2 = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+      if (t2.ok) {
+        pos.endDate = new Date().toISOString().slice(0, 10)
+        pos.status = 'ended'
+      }
     }
     member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: req.departmentName, title: req.title, startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), endReason: '辞职' })
     member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: req.departmentName, at: now })
