@@ -11,7 +11,7 @@ import type { MockMethod } from './types'
 type RawReq = any
 type RawRes = any
 import { resolveMockUser, getPermissions, getWorkspace, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
-import { pushNotifications, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
+import { pushNotification, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
 import * as rdb from './db-recruitment'
 import * as db from './db'
 import * as formdb from './db-forms'
@@ -658,12 +658,11 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       const input = unwrap(body) as { preferences: { departmentId: string }[]; allowAdjustment: boolean; answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
       const r = rdb.submitApplication(query.activityId, applicantId, { ...input, answers: input.answers ?? input.formData ?? input.formAnswers })
       if (r.ok) {
-        pushNotifications([resolveMockUser(url).id], {
-          type: 'application',
-          title: '报名申请已提交',
-          body: `您的报名申请已提交，请等待「${act.title}」的审核。`,
-          link: '/me/todo',
-        })
+        pushNotification([resolveMockUser(url).id], 'application', {
+          activityTitle: act.title,
+          dedupRef: `apply:${query.activityId}:${applicantId}`,
+          clubName: act.clubName,
+        }, { clubId: act.clubId })
       }
       return result(r)
     },
@@ -863,11 +862,13 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         userId: input.userId, userName: input.userName,
       })
       if (r.ok) {
-        pushNotifications([input.userId], {
-          type: 'interview',
+        pushNotification([input.userId], 'interview', {
+          dedupRef: `assign-interviewer:${query.activityId}:${input.userId}`,
+        }, {
+          clubId: query.clubId,
+          link: null,
           title: '您被指派为临时面试官',
           body: `您被 ${me.name} 指派为「${rdb.findAnyActivity(query.activityId)?.title || '招新活动'}」的${input.scope === 'round' ? '单轮次' : '活动级'}临时面试官。`,
-          link: null,
         })
       }
       return result(r)
@@ -943,11 +944,13 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (r.ok) {
         const uid = userIdOfApplicant(input.applicantId)
         if (uid) {
-          pushNotifications([uid], {
-            type: 'interview',
+          pushNotification([uid], 'interview', {
+            dedupRef: `book:${query.activityId}:${input.applicantId}`,
+          }, {
+            clubId: query.clubId,
+            link: '/me/schedule',
             title: '面试已排期',
             body: `您的「${a?.title || '招新活动'}」面试已安排，请及时查看日程并准备。`,
-            link: '/me/schedule',
           })
         }
       }
@@ -1023,11 +1026,13 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!slot) return notFound('面试时段不存在')
       const r = rdb.bookInterview(it.activityId, applicantId, slot.roundId, input.slotId, '', false, findInterviewersForClub(it.clubId))
       if (r.ok) {
-        pushNotifications([resolveMockUser(url).id], {
-          type: 'interview',
+        pushNotification([resolveMockUser(url).id], 'interview', {
+          dedupRef: `confirm:${it.activityId}:${applicantId}`,
+        }, {
+          clubId: it.clubId,
+          link: '/me/schedule',
           title: '面试时间已确认',
           body: `您「${a?.title || '招新活动'}」的面试时间已确认，请查看日程。`,
-          link: '/me/schedule',
         })
       }
       return result(r)
@@ -1046,11 +1051,13 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (it.status !== 'scheduled') return businessError('仅已安排的面试可登记请假，当前状态不可请假')
       const r = rdb.markAttendance(query.interviewId, 'leave', false)
       if (r.ok) {
-        pushNotifications([resolveMockUser(url).id], {
-          type: 'interview',
+        pushNotification([resolveMockUser(url).id], 'interview', {
+          dedupRef: `leave:${query.interviewId}`,
+        }, {
+          clubId: it.clubId,
+          link: null,
           title: '请假申请已登记',
           body: '已登记请假，可重新选择面试时段；管理员也可为您重新安排。',
-          link: null,
         })
       }
       return result(r)
@@ -1230,12 +1237,11 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       const targets = published
         .map((applicantId) => userIdOfApplicant(applicantId))
         .filter((uid): uid is string => uid !== null)
-      pushNotifications(targets, {
-        type: 'conclusion',
-        title: '结论已发布',
-        body: '您在本轮招新的结论已发布，请前往查看最终结果。',
-        link: '/me/todo',
-      })
+      if (targets.length) {
+        pushNotification(targets, 'conclusion', {
+          dedupRef: `conclusion:${query.activityId}`,
+        }, { clubId: query.clubId })
+      }
       return ok({ publishedCount: published.length })
     },
   },
@@ -1285,10 +1291,12 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (rinv.ok) {
         const uid = userIdOfApplicant(input.applicantId)
         if (uid) {
-          pushNotifications([uid], {
-            type: 'invitation',
-            title: '收到录取邀请',
-            body: '恭喜！您已收到一份录取邀请，请在有效期内及时确认。',
+          const clubName = rdb.findAnyActivity(query.activityId)?.clubName ?? null
+          pushNotification([uid], 'invitation', {
+            dedupRef: `invite:${rinv.data?.id ?? query.activityId}`,
+            clubName: clubName ?? '',
+          }, {
+            clubId: query.clubId,
             link: rinv.data?.id ? `/me/invitations/recruitment/${rinv.data.id}` : '/me/invitations/recruitment',
           })
         }
@@ -1762,11 +1770,13 @@ const jointHandlers: MockMethod[] = [
         userId: input.userId, userName: input.userName,
       })
       if (r.ok) {
-        pushNotifications([input.userId], {
-          type: 'interview',
+        pushNotification([input.userId], 'interview', {
+          dedupRef: `assign-interviewer:${query.jointId}:${input.userId}`,
+        }, {
+          clubId: query.clubId,
+          link: null,
           title: '您被指派为临时联合面试官',
           body: `您被 ${me.name} 指派为「${rdb.findJoint(query.jointId)?.title || '联合活动'}」的临时联合面试官。`,
-          link: null,
         })
       }
       return result(r)
@@ -1978,11 +1988,15 @@ const jointHandlers: MockMethod[] = [
         )
         const originUid = con?.versions[0]?.changedBy ? userIdOfName(con.versions[0].changedBy) : null
         if (originUid && userIdOfMember(me.memberId || '') !== originUid) {
-          pushNotifications([originUid], {
-            type: 'conclusion',
+          // 纯内部通知：仅站内信（channel 覆盖 inbox，不发邮件）
+          pushNotification([originUid], 'conclusion', {
+            dedupRef: `conclusion-review:${query.jointId}:${query.applicantId}`,
+          }, {
+            clubId: query.clubId,
+            channel: ['inbox'],
+            link: null,
             title: '您的结论已被复核修改',
             body: `您设置的联合结论已被管理员 ${me.name} 复核并修改，请知悉。`,
-            link: null,
           })
         }
       }

@@ -3,7 +3,7 @@ import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUs
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
-import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead } from './notifications'
+import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 import { correctionsDb, type CorrectionRecord } from './db-corrections'
 import * as formdb from './db-forms'
@@ -1265,12 +1265,27 @@ const memberHandlers: MockMethod[] = [
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status } }
     },
   },
-  // 个人通知偏好
+  // 个人通知偏好（P1-009：真实落库，支持读取/保存；缺省全订阅）
+  {
+    url: '/api/me/notifications/preferences',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: null } }
+    },
+  },
   {
     url: '/api/me/notifications/preferences',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      const prefs = (body.input ?? body) as Record<string, unknown>
+      for (const [kind, value] of Object.entries(prefs)) {
+        if (kind in notificationTemplates && typeof value === 'boolean') {
+          setNotificationPreference(user.id, kind, value)
+        }
+      }
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: new Date().toISOString() } }
     },
   },
   // 任命/调岗/免职：候选成员 + 预约命令列表
@@ -1832,34 +1847,56 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 邮件配置
+  // 邮件配置（P1-009：真实存储；未通过测试不可保存 —— US-NTF-02）
   {
     url: '/api/org/:clubId/notifications/email-config',
     method: 'get',
-    response: () => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const cfg = getEmailConfig(emailConfigKey('club', query.clubId))
       return {
         code: 0,
         data: {
-          smtpHost: 'smtp.example.edu.cn', smtpPort: 465, smtpUser: 'club@example.edu.cn',
-          fromName: '计算机协会', encryption: 'ssl', verified: true,
+          smtpHost: cfg.smtpHost, smtpPort: cfg.smtpPort, smtpUser: cfg.smtpUser,
+          fromName: cfg.fromName, encryption: cfg.encryption, verified: cfg.verified,
+          lastTestPassedAt: cfg.lastTestPassedAt, keyRotatedAt: cfg.keyRotatedAt,
         },
       }
     },
   },
-  // 保存邮件配置
+  // 保存邮件配置（未测试通过 → 拒绝保存并提示先测试）
   {
     url: '/api/org/:clubId/notifications/email-config',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, verified: true, savedAt: new Date().toISOString() } }
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const key = emailConfigKey('club', query.clubId)
+      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; fromName: string; encryption: string }>
+      const result = saveEmailConfig(key, {
+        smtpHost: String(input.smtpHost ?? ''),
+        smtpPort: Number(input.smtpPort) || 465,
+        smtpUser: String(input.smtpUser ?? ''),
+        fromName: String(input.fromName ?? ''),
+        encryption: (['ssl', 'tls', 'none'].includes(String(input.encryption)) ? String(input.encryption) : 'ssl') as 'ssl' | 'tls' | 'none',
+      })
+      if (!result.ok) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '发信配置未通过测试，请先发送测试邮件', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+      }
+      return { code: 0, data: { ...result.config, savedAt: new Date().toISOString() } }
     },
   },
-  // 测试邮件配置
+  // 测试邮件配置（通过后标记 verified）
   {
     url: '/api/org/:clubId/notifications/email-config/test',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { status: 'sent', sentAt: new Date().toISOString(), to: 'config-owner@example.edu.cn' } }
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const key = emailConfigKey('club', query.clubId)
+      const cfg = markEmailTestPassed(key)
+      return { code: 0, data: { status: 'sent', sentAt: cfg.lastTestPassedAt, to: user.email ?? cfg.smtpUser } }
     },
   },
   // 保存社团配置
@@ -2760,16 +2797,19 @@ policies: retentionPolicies,
       return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
     },
   },
-  // 管理员路由：邮件配置
+  // 管理员路由：邮件配置（P1-009：真实存储；未测试通过不可保存）
   {
     url: '/api/admin/notifications/email-config',
     method: 'get',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const cfg = getEmailConfig(emailConfigKey('platform'))
       return {
         code: 0,
         data: {
-          smtpHost: 'smtp.platform.edu.cn', smtpPort: 465, smtpUser: 'admin@platform.edu.cn',
-          fromName: 'RanaMinder 平台', encryption: 'ssl', verified: true,
+          smtpHost: cfg.smtpHost, smtpPort: cfg.smtpPort, smtpUser: cfg.smtpUser,
+          fromName: cfg.fromName, encryption: cfg.encryption, verified: cfg.verified,
+          lastTestPassedAt: cfg.lastTestPassedAt, keyRotatedAt: cfg.keyRotatedAt,
         },
       }
     },
@@ -2777,29 +2817,82 @@ policies: retentionPolicies,
   {
     url: '/api/admin/notifications/email-config',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, verified: true, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; fromName: string; encryption: string }>
+      const result = saveEmailConfig(emailConfigKey('platform'), {
+        smtpHost: String(input.smtpHost ?? ''),
+        smtpPort: Number(input.smtpPort) || 465,
+        smtpUser: String(input.smtpUser ?? ''),
+        fromName: String(input.fromName ?? ''),
+        encryption: (['ssl', 'tls', 'none'].includes(String(input.encryption)) ? String(input.encryption) : 'ssl') as 'ssl' | 'tls' | 'none',
+      })
+      if (!result.ok) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '发信配置未通过测试，请先发送测试邮件', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+      }
+      return { code: 0, data: { ...result.config, savedAt: new Date().toISOString() } }
     },
   },
   {
     url: '/api/admin/notifications/email-config/test',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { status: 'sent', sentAt: new Date().toISOString(), to: 'admin@platform.edu.cn' } }
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const user = resolveMockUser(url)
+      const cfg = markEmailTestPassed(emailConfigKey('platform'))
+      return { code: 0, data: { status: 'sent', sentAt: cfg.lastTestPassedAt, to: user.email ?? cfg.smtpUser } }
     },
   },
   {
     url: '/api/admin/notifications/email-config/rotate-key',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const cfg = rotateEmailKey(emailConfigKey('platform'))
+      return { code: 0, data: { rotated: true, rotatedAt: cfg.keyRotatedAt, verified: cfg.verified } }
+    },
+  },
+  // 管理员通知偏好（平台默认偏好：管理端统一配置，保存真实落库）
+  {
+    url: '/api/admin/notifications/preferences',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { preferences: listNotificationPreferences('user-admin-001'), savedAt: null } }
     },
   },
   {
     url: '/api/admin/notifications/preferences',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const prefs = (body.input ?? body) as Record<string, unknown>
+      for (const [kind, value] of Object.entries(prefs)) {
+        if (kind in notificationTemplates && typeof value === 'boolean') {
+          setNotificationPreference('user-admin-001', kind, value)
+        }
+      }
+      return { code: 0, data: { preferences: listNotificationPreferences('user-admin-001'), savedAt: new Date().toISOString() } }
+    },
+  },
+  // 紧急关闭（P1-009 kill switch：平台级一键熔断全站通知，US-NTF-01）
+  {
+    url: '/api/admin/notifications/kill-switch',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { ...notificationKillSwitch } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/kill-switch',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const user = resolveMockUser(url)
+      const input = (body.input ?? body) as { active?: boolean; reason?: string }
+      setNotificationKillSwitch({ active: !!input.active, scope: 'platform', reason: input.reason ?? null, operatorName: user.name })
+      return { code: 0, data: { ...notificationKillSwitch } }
     },
   },
   // 管理员路由：表单（SM-FORM-001：编辑态取最新草稿，无草稿回退最新已发布版本）
@@ -2939,20 +3032,77 @@ policies: retentionPolicies,
       }
     },
   },
-  // 工作空间：邮件密钥轮换
+  // 工作空间：邮件密钥轮换（P1-009：轮换后需重新测试通过）
   {
     url: '/api/org/:clubId/notifications/email-config/rotate-key',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const cfg = rotateEmailKey(emailConfigKey('club', query.clubId))
+      return { code: 0, data: { rotated: true, rotatedAt: cfg.keyRotatedAt, verified: cfg.verified } }
     },
   },
-  // 工作空间：通知偏好
+  // 工作空间：通知偏好（P1-009：真实落库）
+  {
+    url: '/api/org/:clubId/notifications/preferences',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: null } }
+    },
+  },
   {
     url: '/api/org/:clubId/notifications/preferences',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      const prefs = (body.input ?? body) as Record<string, unknown>
+      for (const [kind, value] of Object.entries(prefs)) {
+        if (kind in notificationTemplates && typeof value === 'boolean') {
+          setNotificationPreference(user.id, kind, value)
+        }
+      }
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：紧急关闭（社团级 kill switch，US-NTF-01）
+  {
+    url: '/api/org/:clubId/notifications/kill-switch',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      return { code: 0, data: { ...clubKillSwitchState(query.clubId) } }
+    },
+  },
+  {
+    url: '/api/org/:clubId/notifications/kill-switch',
+    method: 'post',
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const input = (body.input ?? body) as { active?: boolean; reason?: string }
+      setNotificationKillSwitch({ active: !!input.active, scope: 'club', clubId: query.clubId, reason: input.reason ?? null, operatorName: user.name })
+      return { code: 0, data: { ...clubKillSwitchState(query.clubId) } }
+    },
+  },
+  // 邮件发送记录（P1-009 审计：平台管理员可查）
+  {
+    url: '/api/admin/notifications/email-outbox',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { items: emailOutbox.slice(0, 50) } }
+    },
+  },
+  // 通知模板目录（P1-009 审计/配置：模板清单）
+  {
+    url: '/api/admin/notifications/templates',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { items: Object.values(notificationTemplates) } }
     },
   },
   // 工作空间：表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）

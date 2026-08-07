@@ -1,6 +1,6 @@
 import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, APPLICANT_PROFILES } from './db-recruitment'
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
-import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
+import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
 export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
@@ -61,6 +61,14 @@ export function resetDb(): void {
 export function resetNotifications(): void {
   sysNotifications.splice(0, sysNotifications.length, ...structuredClone(seed.sysNotifications))
   setNotificationSeq(seed.notificationSeq)
+  // P1-009：重置紧急关闭、去重、偏好、邮件 outbox、SMTP 配置
+  setNotificationKillSwitch({ active: false })
+  Object.assign(notificationKillSwitch, structuredClone(killSwitchInitial))
+  resetClubKillSwitches()
+  resetNotificationDedup()
+  resetNotificationPreferences()
+  resetEmailOutbox()
+  resetEmailConfigs()
 }
 
 export function resetCorrections(): void {
