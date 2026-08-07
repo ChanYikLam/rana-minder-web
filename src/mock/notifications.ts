@@ -41,6 +41,8 @@ export type NotificationKind =
   | 'member'
   | 'transition'
   | 'correction'
+  | 'label_override'
+  | 'overall_not_admitted'
 
 /** 发送渠道：inbox=仅站内信（纯内部通知）；email=额外发邮件 */
 export type NotificationChannel = 'inbox' | 'email'
@@ -131,6 +133,24 @@ export const notificationTemplates: Record<NotificationKind, NotificationTemplat
     body: '{{body}}',
     channel: ['inbox'],
     link: null,
+  },
+  label_override: {
+    kind: 'label_override',
+    title: '部门标签被改判',
+    body: '您在「{{activityTitle}}」中为 {{applicantName}} 设置的「{{departmentName}}」录取标签已被 {{actorName}} 覆盖。请前往查看。',
+    channel: ['inbox'],
+    link: '/recruitment/{{activityId}}/applications',
+    dedupKey: 'label_override:{{activityId}}:{{applicantId}}:{{departmentId}}',
+  },
+  overall_not_admitted: {
+    kind: 'overall_not_admitted',
+    title: '整体未录取通知',
+    body: '您在「{{activityTitle}}」的招新中所有志愿均未录取。感谢您的参与，欢迎关注后续招新活动！',
+    channel: ['inbox', 'email'],
+    emailSubject: '【RanaMinder】招新整体结论通知',
+    emailBody: '您在「{{activityTitle}}」的招新中所有志愿均未录取。感谢您的参与，欢迎关注后续招新活动！',
+    link: '/me/todo',
+    dedupKey: 'overall_not_admitted:{{activityId}}:{{applicantId}}',
   },
 }
 
