@@ -386,7 +386,7 @@ onMounted(loadData)
                 {{ importingBusy ? '导入中...' : `导入 ${groupDetail?.members.length ?? 0} 名成员` }}
               </button>
             </div>
-            <p v-if="wizardClub.importedCount > 0" class="text-xs text-success mt-1.5">已导入 {{ wizardClub.importedCount }} 名成员（历史记录；仅记录导入数量，不生成新成员关系）</p>
+            <p v-if="wizardClub.importedCount > 0" class="text-xs text-success mt-1.5">已导入 {{ wizardClub.importedCount }} 名成员（历史记录；仅记录导入数量，不生成新成员关系）{{ wizardClub.importedAt ? `· ${wizardClub.importedAt.slice(0, 10)} 导入` : '' }}</p>
           </div>
 
           <!-- 步骤4：完成 -->
@@ -458,7 +458,7 @@ onMounted(loadData)
               </template>
 
               <div class="ml-auto flex items-center gap-3">
-                <span v-if="club.importedCount > 0" class="text-xs text-text-secondary">曾导入 {{ club.importedCount }} 名成员（历史记录，与当前成员数口径不同）</span>
+                <span v-if="club.importedCount > 0" class="text-xs text-text-secondary">曾导入 {{ club.importedCount }} 名成员（历史记录，与当前成员数口径不同）{{ club.importedAt ? `· ${club.importedAt.slice(0, 10)} 导入` : '' }}</span>
                 <button v-if="club.syncEvents.length > 0" class="text-xs text-text-secondary hover:text-primary" title="查看同步记录">
                   <span class="flex items-center gap-1"><Info :size="14" /> {{ club.syncEvents.length }} 条</span>
                 </button>

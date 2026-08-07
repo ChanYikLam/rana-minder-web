@@ -107,8 +107,8 @@ describe('getGroupDetail / getClubAccess / listClubAccesses 查询', () => {
     const detail = getGroupDetail('grp-004')!
     expect(detail.members.map((m) => m.id)).toEqual(['mem-401', 'mem-402', 'mem-403'])
     expect(detail.members.find((m) => m.id === 'mem-401')?.name).toBe('孙欣怡')
-    // grp-lead-004 是 grp-004 下未绑定的 position Group
-    expect(detail.leaderGroups.map((g) => g.id)).toEqual(['grp-lead-004'])
+    // grp-lead-004 / grp-vice-004 是 grp-004 下未绑定的 position Group
+    expect(detail.leaderGroups.map((g) => g.id).sort()).toEqual(['grp-lead-004', 'grp-vice-004'])
   })
 
   it('getGroupDetail 未知 Group 返回 null', () => {
@@ -420,5 +420,78 @@ describe('审计修复：部门/职位/负责人引用校验（createClubAccess 
     expect(good.ok).toBe(true)
     expect(getClubAccess(id)?.wizard?.roleGroups).toEqual(['grp-lead-004'])
     expect(getClubAccess(id)?.wizard?.leaderRoleGroup).toBe('grp-lead-004')
+  })
+})
+
+/** 审计修复（第二轮）：联系方式兜底 / 导入语义 / disconnect 子 Group 清理 / search 仅社团级 / leaderRoleGroup 一致性 */
+describe('审计修复：联系方式兜底、导入语义、子 Group 解绑、search 过滤、负责人引用一致性', () => {
+  beforeEach(() => {
+    resetOrgDb()
+  })
+
+  it('P2-2：importMembers 启用前导入只记 importedAt，不提前写 boundAt（绑定时间由 completeWizard 负责）', () => {
+    saveWizardStep('club-004', { step: 2, selectedGroupId: 'grp-003' })
+    const before = getClubAccess('club-004')!
+    expect(before.boundAt).toBeNull()
+
+    const r = importMembers('club-004', ['mem-201'])
+    expect(r.ok).toBe(true)
+    expect(r.data?.importedCount).toBe(1)
+    expect(r.data?.importedAt).toBeTruthy()
+    expect(r.data?.boundAt).toBeNull()
+    expect(getClubAccess('club-004')?.syncEvents[0].kind).toBe('import')
+  })
+
+  it('P2-2：enabled 后补导成员保留既有绑定时间并新增 import 同步事件', () => {
+    saveWizardStep('club-004', { step: 4, selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-004' })
+    const completed = completeWizard('club-004')
+    expect(completed.ok).toBe(true)
+    const boundAt = getClubAccess('club-004')?.boundAt
+    expect(boundAt).toBeTruthy()
+
+    const r = importMembers('club-004', ['mem-401'])
+    expect(r.ok).toBe(true)
+    expect(getClubAccess('club-004')?.boundAt).toBe(boundAt)
+    expect(getClubAccess('club-004')?.importedAt).toBeTruthy()
+    expect(getClubAccess('club-004')?.syncEvents[0].kind).toBe('import')
+  })
+
+  it('P3-1：disconnectClub 一并解绑部门/职位子 Group（不残留 boundClubId）', () => {
+    // grp-dept-001（计算机协会技术部）种子绑定了 club-001；disconnect 需从 sync_abnormal_ro 出发
+    expect(getGroupDetail('grp-001')?.departments.find((g) => g.id === 'grp-dept-001')?.boundClubId).toBe('club-001')
+    expect(triggerGroupLost('club-001').ok).toBe(true)
+    expect(disconnectClub('club-001').ok).toBe(true)
+    const detail = getGroupDetail('grp-001')!
+    expect(detail.departments.find((g) => g.id === 'grp-dept-001')?.boundClubId).toBeNull()
+    expect(detail.leaderGroups.find((g) => g.id === 'grp-lead-001')?.boundClubId).toBeNull()
+  })
+
+  it('P3-2：searchGroups 仅返回社团级候选（不泄露部门/职位 Group）', () => {
+    const result = searchGroups('技术部')
+    expect(result.length).toBe(0)
+    const byName = searchGroups('负责人')
+    expect(byName.length).toBe(0)
+    // 社团级仍可命中
+    const clubHit = searchGroups('摄影协会')
+    expect(clubHit.some((g) => g.purpose === 'club')).toBe(true)
+    expect(clubHit.every((g) => g.purpose === 'club')).toBe(true)
+  })
+
+  it('P3-3：createClubAccess 负责人职位引用必须与负责人职位一致', () => {
+    // grp-vice-004 层级合法（grp-004 下职位 Group）但与被选负责人不一致 → 拒绝
+    const mismatch = createClubAccess({
+      groupId: 'grp-004', name: '引用分裂社', description: '',
+      leaderGroupId: 'grp-lead-004', leaderRoleGroup: 'grp-vice-004',
+    })
+    expect(mismatch.ok).toBe(false)
+    expect(mismatch.error).toContain('负责人职位引用必须与负责人职位一致')
+  })
+
+  it('P3-3：saveWizardStep 负责人职位引用必须与负责人职位一致', () => {
+    const created = createClubAccess({ groupId: 'grp-004', name: '保存引用分裂社', description: '', leaderGroupId: 'grp-lead-004' })
+    const id = created.data!.clubId
+    const bad = saveWizardStep(id, { step: 3, selectedGroupId: 'grp-004', leaderGroupId: 'grp-lead-004', leaderRoleGroup: 'grp-vice-004' })
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toContain('负责人职位引用必须与负责人职位一致')
   })
 })

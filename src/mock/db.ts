@@ -574,9 +574,9 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
 /**
  * 录取/联合邀请接受后的成员创建桥（06「接受普通或联合录取后，成员业务生效时间为接受时间」）。
  * 幂等：同社团同学号的现有（active/非离职终态）成员不重复创建；业务生效时间取邀请接受时间，而非回读确认时间。
- * 幂等边界：exiting（离职中）/pending_effective（待生效）显式报错要求先完成原流程；联系方式取自候选人档案。
+ * 幂等边界：exiting（离职中）/pending_effective（待生效）显式报错要求先完成原流程；联系方式优先调用方透传（录取链路从申请人档案解析），其次候选人档案。
  */
-export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
+export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string; email?: string; phone?: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
   if (!input.studentId) return { ok: false, created: false, error: '学号为空，无法创建成员' }
   const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
   // exiting（离职中）/pending_effective（待生效）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
@@ -585,9 +585,12 @@ export function createMemberFromAdmission(clubId: string, input: { studentId: st
   }
   if (existing) return { ok: true, created: false, member: existing }
   const candidate = candidates.find((c) => c.studentId === input.studentId)
+  // 联系方式：优先调用方透传（录取链路由申请人档案解析，避免空串），其次候选人档案
+  const email = input.email !== undefined ? input.email : (candidate?.email ?? '')
+  const phone = input.phone !== undefined ? input.phone : (candidate?.phone ?? '')
   const member: MockMember = {
     id: 'mem-' + Date.now(), clubId, studentId: input.studentId, name: input.name,
-    email: candidate?.email || '', phone: candidate?.phone || '', status: 'active',
+    email, phone, status: 'active',
     joinedAt: input.acceptedAt, exitedAt: null,
     positions: input.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: input.departmentId, departmentName: input.departmentName || '', title: '成员', startDate: input.acceptedAt.slice(0, 10), endDate: null, status: 'active' }] : [],
     tenures: [], departmentHistory: input.departmentId ? [{ id: 'dhis-' + Date.now(), action: 'join', departmentName: input.departmentName || '', at: input.acceptedAt }] : [], anomalies: [],

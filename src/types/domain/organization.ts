@@ -48,6 +48,7 @@ export interface ClubAccessItem {
   memberCount: number
   createdAt: string
   boundAt: string | null
+  importedAt: string | null
   importedCount: number
   /** 向导草稿（管理页向导回显已选 Group/负责人用）；未开始向导时为 null */
   wizard: {

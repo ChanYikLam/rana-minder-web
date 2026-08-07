@@ -4,7 +4,7 @@
  */
 import { assertTransition } from './state-machines/transitions'
 import { mockUsers } from './auth'
-import { createMemberFromAdmission } from './db'
+import { createMemberFromAdmission, candidates } from './db'
 
 /** 申请人档案（applicantId → 姓名/学号）：申请人 id 为 u-xxx 域内编号，
  * 与 auth.mockUsers 的 user-applicant-xxx 键不同，按申请人域自维护；
@@ -36,6 +36,17 @@ export function ensureApplicantProfile(studentId: string, name: string): string 
   const id = `u-auto-${Date.now().toString(36)}-${autoProfileSeq.toString(36)}`
   APPLICANT_PROFILES[id] = { name, studentId }
   return id
+}
+
+/** 申请人联系方式解析：优先以档案学号命中已登录用户（auth.mockUsers）的联系方式，
+ * 其次匹配候选人档案（candidates），避免录取确认后新成员 email/phone 为空串（P2-1 回归）。
+ * 注意：auth 在模块顶部导入 db（resolveMemberId），此处仅取 mockUsers 数据，不反向导入，无循环依赖。 */
+function resolveApplicantContact(studentId: string): { email: string; phone: string } {
+  const user = Object.values(mockUsers).find((u) => u.studentId === studentId)
+  if (user) return { email: user.email, phone: user.phone }
+  const candidate = candidates.find((c) => c.studentId === studentId)
+  if (candidate) return { email: candidate.email, phone: candidate.phone }
+  return { email: '', phone: '' }
 }
 
 const now = () => new Date().toISOString()
@@ -1574,12 +1585,14 @@ export function confirmRecInvitationSync(invitationId: string): { ok: boolean; e
   if (inv.status !== 'accepted') return err('仅已接受的邀请可执行成员同步确认')
   if (inv.casdoorSync === 'processing') {
     // 先创建成员再翻转同步状态：成员创建失败时保持 processing，可重试，避免卡在「已确认但无成员」中间态
+    const contact = resolveApplicantContact(applicantStudentIdOf(inv.applicantId))
     const admitted = createMemberFromAdmission(inv.clubId, {
       studentId: applicantStudentIdOf(inv.applicantId),
       name: inv.applicantName,
       departmentId: inv.departmentId,
       departmentName: inv.departmentName,
       acceptedAt: inv.acceptedAt || now(),
+      ...contact,
     })
     if (!admitted.ok) return err(admitted.error || '成员创建失败')
     inv.casdoorSync = 'confirmed'
@@ -2127,12 +2140,15 @@ export function confirmJointInvitationSync(invitationId: string): { ok: boolean;
     const clubDepts = ja?.clubs.find((c) => c.clubId === inv.clubId)?.departments ?? []
     const pref = app?.preferences.find((p) => clubDepts.some((d) => d.id === p.departmentId))
     if (!pref) return err('报名意向中未匹配到该社团开设部门，无法确认生效，请先指定部门或调整意向')
+    const studentId = app?.studentId ?? applicantStudentIdOf(inv.applicantId)
+    const contact = resolveApplicantContact(studentId)
     const admitted = createMemberFromAdmission(inv.clubId, {
-      studentId: app?.studentId ?? applicantStudentIdOf(inv.applicantId),
+      studentId,
       name: app?.applicantName ?? applicantNameOf(inv.applicantId),
       departmentId: pref.departmentId,
       departmentName: pref.departmentName,
       acceptedAt: inv.acceptedAt || now(),
+      ...contact,
     })
     if (!admitted.ok) return err(admitted.error || '成员创建失败')
     inv.casdoorSync = 'confirmed'
