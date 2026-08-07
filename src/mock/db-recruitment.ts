@@ -189,6 +189,8 @@ export interface JointActivity {
   channelStatus: ChannelStatus
   channelPausedBefore: ChannelStatus | null
   pauseStartAt: string | null
+  /** 报名通道首次开放时间（JNT-029） */
+  channelOpenedAt: string | null
   deadline: string
   deadlineVersion: number
   window: { seq: number; deadline: string }
@@ -459,7 +461,7 @@ export const jointActivities: JointActivity[] = [
     confirmRound: 1, confirmDeadline: daysFromNow(10),
     sharedAgreement: { version: 1, text: '您的报名资料将在两个参与社团之间共享，用于联合面试与选拔。您可以在提交前选择是否同意共享；拒绝共享则不能参加本次联合活动。' },
     formId: 'form-001', formVersion: 1,
-    channelStatus: 'open', channelPausedBefore: null, pauseStartAt: null,
+    channelStatus: 'open', channelPausedBefore: null, pauseStartAt: null, channelOpenedAt: daysFromNow(-26),
     deadline: daysFromNow(10), deadlineVersion: 1,
     window: { seq: 1, deadline: daysFromNow(10) },
     publishedAt: daysFromNow(-26), firstInviteAt: null, closedAt: null, forceClosedAt: null,
@@ -1286,7 +1288,7 @@ export function createJointActivity(clubId: string, clubName: string, actorName:
     confirmRound: 1, confirmDeadline: input.confirmDeadline,
     sharedAgreement: { version: 1, text: input.sharedAgreement || '您的报名资料将在全部参与社团之间共享，用于联合面试与选拔。' },
     formId: 'form-001', formVersion: 1,
-    channelStatus: 'not_open', channelPausedBefore: null, pauseStartAt: null,
+    channelStatus: 'not_open', channelPausedBefore: null, pauseStartAt: null, channelOpenedAt: null,
     deadline: daysFromNow(10), deadlineVersion: 1, window: { seq: 1, deadline: daysFromNow(10) },
     publishedAt: null, firstInviteAt: null, closedAt: null, forceClosedAt: null,
     cancelConfirmRound: 0, cancelConfirmDeadline: null, cancelConfirmations: {},
@@ -1354,7 +1356,16 @@ export function publishJointActivity(jointId: string): { ok: boolean; error?: st
   if (!ja.clubs.every((c) => c.status === 'accepted')) return err('全部拟参与社团确认后才能首次公布')
   ja.status = 'published'
   ja.publishedAt = now()
+  ja.channelOpenedAt = now()
   ja.clubs.forEach((c) => (c.status = 'locked'))
+  // 自动推进渠道状态: 已发布后若渠道仍为 not_open，则自动开放
+  if (ja.channelStatus === 'not_open') {
+    const tc = assertTransition('SM-JNT-006', ja.channelStatus, 'open', 'first_open')
+    if (tc.ok) {
+      ja.channelStatus = 'open'
+      ja.deadlineVersion += 1
+    }
+  }
   ja.version += 1
   return ok()
 }
@@ -1702,6 +1713,7 @@ export function openJointChannel(jointId: string, deadline: string): { ok: boole
   ja.channelStatus = 'open'
   ja.deadline = deadline
   ja.deadlineVersion += 1
+  if (!ja.channelOpenedAt) ja.channelOpenedAt = now()
   ja.version += 1
   return ok()
 }
@@ -1711,6 +1723,8 @@ export function pauseJointChannel(jointId: string): { ok: boolean; error?: strin
   if (!ja) return err('联合活动不存在')
   const t = assertTransition('SM-JNT-006', ja.channelStatus, 'paused', 'pause')
   if (!t.ok) return err(t.reason || '联合报名通道当前不可暂停')
+  // 废止旧截止版本: 暂停时冻结当前截止，防止暂停期间到期导致状态漂移
+  ja.pauseStartAt = now()
   ja.channelStatus = 'paused'
   ja.version += 1
   return ok()
@@ -1789,6 +1803,52 @@ export function cancelJointActivity(jointId: string, clubId: string, actorName: 
   }
   ja.version += 1
   return ok()
+}
+
+/**
+ * 自动推进联合活动期限: 检测当前时刻与 deadline 的关系，推进状态机。
+ * 不新增定时任务，在每次状态读取时调用（lazy evaluation）。
+ */
+export function autoAdvanceJointDeadlines(jointId: string): { ok: boolean; error?: string; changed?: boolean } {
+  const ja = findJoint(jointId)
+  if (!ja) return err('联合活动不存在')
+  const nowMs = Date.now()
+  let changed = false
+
+  // 通道 deadline 已过: 自动关闭 open 状态的通道
+  if (ja.channelStatus === 'open' && new Date(ja.deadline).getTime() <= nowMs) {
+    const tc = assertTransition('SM-JNT-006', ja.channelStatus, 'closed', 'deadline_reached')
+    if (tc.ok) {
+      ja.channelStatus = 'closed'
+      ja.version += 1
+      changed = true
+    }
+  }
+
+  // 活动 deadline 已过: published 状态自动推进
+  if (ja.status === 'published' && new Date(ja.deadline).getTime() <= nowMs) {
+    const ta = assertTransition('SM-JNT-001', ja.status, 'closed', 'all_invites_final')
+    if (ta.ok) {
+      ja.status = 'closed'
+      ja.closedAt = now()
+      ja.version += 1
+      changed = true
+    }
+  }
+
+  return { ok: true, changed }
+}
+
+/** 批量推进所有联合活动期限 */
+export function autoAdvanceAllJointDeadlines(): number {
+  let advanced = 0
+  for (const ja of jointActivities) {
+    if (ja.channelStatus === 'open' && new Date(ja.deadline).getTime() <= Date.now()) {
+      autoAdvanceJointDeadlines(ja.id)
+      advanced++
+    }
+  }
+  return advanced
 }
 
 export function startJointEndConfirm(jointId: string, clubId: string, actorName: string): { ok: boolean; error?: string } {
