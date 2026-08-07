@@ -34,7 +34,13 @@ async function handleSave() {
   saving.value = true
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
-  const result = await post(`${apiScope.prefix}/config`, { ...config.value })
+  // 学年/届次为平台级字段（P2-3）：社团域提交时剥离，避免空串误写入社团配置
+  const payload = { ...config.value } as Record<string, unknown>
+  if (!isAdmin.value) {
+    delete payload.academicYear
+    delete payload.cohort
+  }
+  const result = await post(`${apiScope.prefix}/config`, payload)
   saving.value = false
   if (result.kind !== 'completed') {
     toast.error('保存失败，请重试')

@@ -151,6 +151,26 @@ function templateSeed(): PermissionTemplate[] {
 const permissionTemplates = templateSeed()
 let templatePreviewVersion = 1
 
+/** 平台配置（US-CFG：内存态持久化；学年/届次为平台级字段，社团域不携带——P2-3） */
+interface PlatformConfig {
+  clubName: string
+  clubDescription: string
+  requireEmailVerification: boolean
+  requireProfileComplete: boolean
+  maxMembers: number
+  allowSelfExit: boolean
+  academicYearStart: number
+  academicYear: string
+  cohort: string
+}
+const platformConfig: PlatformConfig = {
+  clubName: 'RanaMinder 平台', clubDescription: '社团招新管理平台',
+  requireEmailVerification: true, requireProfileComplete: true,
+  maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
+  academicYear: '2026—2027', cohort: '2026级',
+}
+let platformConfigVersion = 1
+
 /** 保留策略（US-AUD-04：不可变版本发布；缩短期限对已有数据 ≥7 天缓冲） */
 interface RetentionPolicy {
   id: string
@@ -1656,17 +1676,6 @@ const memberHandlers: MockMethod[] = [
       }
     },
   },
-  // 演示触发：成员级外部变更（P2-015，与社团级 triggerGroupLost 对称；供演示/测试调用）
-  {
-    url: '/api/org/:clubId/members/:memberId/trigger-external-change',
-    method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input?: { kind?: string } } }) => {
-      const kind = body.input?.kind === 'casdoor_mismatch' ? 'casdoor_mismatch' : 'external_change'
-      const r = db.triggerMemberExternalChange(query.clubId, query.memberId, kind)
-      if (!r.ok) return businessError(r.error || '外部变更触发失败')
-      return { code: 0, data: r.data }
-    },
-  },
 ]
 
 /** 支撑与平台处理器 */
@@ -2408,6 +2417,10 @@ policies: retentionPolicies,
       const clubId = query.clubId
       const scope = departmentScopeFor(user, clubId)
       const activeMembers = db.listMembers(clubId).filter((m) => m.status === 'active')
+      // P3-1：口径一致——范围存在时四指标均按本部门过滤（此前仅总成员数/分布过滤，本月新增写死 0）
+      const scopedMembers = scope
+        ? activeMembers.filter((m) => m.positions.find((p) => p.status === 'active')?.departmentName === scope)
+        : activeMembers
       const distMap: Record<string, number> = {}
       for (const m of activeMembers) {
         const dept = m.positions.find((p) => p.status === 'active')?.departmentName
@@ -2418,19 +2431,19 @@ policies: retentionPolicies,
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count)
       const now = new Date()
-      const joinedThisMonth = activeMembers.filter((m) => {
+      const joinedThisMonth = scopedMembers.filter((m) => {
         const d = new Date(m.joinedAt)
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
       }).length
-      const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === clubId && a.status === 'in_progress').length
-      const pending = rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted').length
+      const activeRec = rdb.recruitmentActivities.filter((a) => a.clubId === clubId && a.status === 'in_progress' && (!scope || a.departments.some((d) => d.name === scope))).length
+      const pending = rdb.recruitmentApplications.filter((a) => a.clubId === clubId && a.status === 'submitted' && (!scope || a.preferences[0]?.departmentName === scope)).length
       const dept = scope ? distribution.find((d) => d.name === scope) : undefined
       return {
         code: 0,
         data: {
           summary: [
-            { label: '总成员数', value: dept ? dept.count : activeMembers.length, trend: 'flat', trendValue: 0 },
-            { label: '本月新增', value: scope ? 0 : joinedThisMonth, trend: 'flat', trendValue: 0 },
+            { label: '总成员数', value: scopedMembers.length, trend: 'flat', trendValue: 0 },
+            { label: '本月新增', value: joinedThisMonth, trend: 'flat', trendValue: 0 },
             { label: '活跃招新', value: activeRec, trend: 'flat', trendValue: 0 },
             { label: '待处理申请', value: pending, trend: 'flat', trendValue: 0 },
           ],
@@ -2626,7 +2639,8 @@ policies: retentionPolicies,
       const abnormalClubs = clubs.filter((c) => c.status === 'sync_abnormal_ro').length
       const recentEvents = clubs
         .flatMap((c) => c.syncEvents.map((e) => ({ id: e.id, kind: e.kind, clubId: c.clubId, clubName: c.clubName, at: e.at, note: e.note })))
-        .sort((a, b) => b.at.localeCompare(a.at))
+        // P3-2：ISO 时间字符串（+08:00 与 Z 混用）用 localeCompare 字典序不可靠，改时间戳差值
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, 6)
       const allExportTasks = [...exportTasks, ...adminExportTasks]
       return {
@@ -2659,24 +2673,21 @@ policies: retentionPolicies,
   {
     url: '/api/admin/config',
     method: 'get',
-    response: () => {
-      return {
-        code: 0,
-        data: {
-          clubName: 'RanaMinder 平台', clubDescription: '社团招新管理平台',
-          requireEmailVerification: true, requireProfileComplete: true,
-          maxMembers: 500, allowSelfExit: true, academicYearStart: 9,
-          // CFG 学年/届次（P2-016：平台配置含当前学年与届次口径）
-          academicYear: '2026—2027', cohort: '2026级',
-        },
-      }
+    response: ({ url }: { url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      // P2-3：返回内存库真实保存值（此前为静态种子，POST 仅回显不落库）
+      return { code: 0, data: { ...platformConfig } }
     },
   },
   {
     url: '/api/admin/config',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, version: 2, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      // P2-3：落内存库并回读（重进页面不还原），与 permissionTemplates 持久化方式一致
+      Object.assign(platformConfig, body.input || {})
+      platformConfigVersion += 1
+      return { code: 0, data: { ...platformConfig, version: platformConfigVersion, savedAt: new Date().toISOString() } }
     },
   },
   // 管理员路由：统计
@@ -2708,7 +2719,9 @@ policies: retentionPolicies,
   {
     url: '/api/admin/exports',
     method: 'get',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      // P2-1：GET 清单与 POST 同鉴权（此前仅 POST 拦截，admin 域端点口径不一致）
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden()
       adminExportTasks.forEach(settleExportTask)
       return {
         code: 0,
@@ -2738,7 +2751,8 @@ policies: retentionPolicies,
   {
     url: '/api/admin/exports/:id/download',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden()
       return {
         code: 0,
         data: {
@@ -2753,7 +2767,8 @@ policies: retentionPolicies,
   {
     url: '/api/admin/exports/:id/status',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden()
       const task = adminExportTasks.find((t) => t.id === query.id)
       if (!task) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '导出任务不存在', supportId: 'MOCK' } }
