@@ -127,7 +127,7 @@ describe('sessionViewStore 会话加载（loadSession）', () => {
     expect(session.needsProfileGate).toBe(true)
   })
 
-  it('非 completed（rejected）时清空既有会话', async () => {
+  it('非 completed（rejected）时清空既有会话，且失败原因可透出（P2-1：先清空再写 lastError）', async () => {
     const session = seedLoggedInUser()
     session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }
     vi.mocked(getSession).mockResolvedValue({
@@ -142,6 +142,21 @@ describe('sessionViewStore 会话加载（loadSession）', () => {
     expect(session.workspace).toBeNull()
     expect(session.permissions).toEqual([])
     expect(session.loading).toBe(false)
+    // 会话已清空，但失败原因保留供登录页透出（禁止被 clearSession 重置）
+    expect(session.lastError).toBe('请先选择 Mock 登录身份')
+  })
+
+  it('禁用账号：session 拒绝后 lastError 保留禁用文案（登录页提示链路可达）', async () => {
+    const session = useSessionViewStore()
+    vi.mocked(getSession).mockResolvedValue({
+      kind: 'rejected',
+      error: { code: 'IFC-ERR-011', message: '账号已被禁用，请联系平台管理员' },
+    })
+
+    await session.loadSession()
+
+    expect(session.isAuthenticated).toBe(false)
+    expect(session.lastError).toBe('账号已被禁用，请联系平台管理员')
   })
 
   it('getSession 抛出异常时 loading 复位且状态不受污染', async () => {

@@ -62,13 +62,14 @@ async function handleLogin() {
 
     await session.loadSession()
     if (!session.isAuthenticated) {
-      loginError.value = '登录失败，请稍后重试'
+      loginError.value = session.lastError || '登录失败，请稍后重试'
       return
     }
 
     await router.push(resolveTargetAfterLogin())
   } catch {
-    loginError.value = '登录失败，请稍后重试'
+    // 兜底：优先透出会话层具体原因（如账号禁用），再退化为通用文案
+    loginError.value = session.lastError || '登录失败，请稍后重试'
   } finally {
     loggingIn.value = false
   }
@@ -102,6 +103,11 @@ async function handleLogin() {
               <p class="text-xs font-medium" :class="selectedRole === role.key ? 'text-primary' : 'text-text-primary'">{{ role.label }}</p>
               <p class="text-xs text-text-secondary truncate">{{ role.desc }}</p>
             </div>
+            <span
+              v-if="role.badge"
+              class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+              :class="selectedRole === role.key ? 'bg-primary text-text-on-primary' : 'bg-background-subtle text-text-secondary'"
+            >{{ role.badge }}</span>
           </button>
         </div>
       </div>

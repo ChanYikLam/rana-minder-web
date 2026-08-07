@@ -57,9 +57,10 @@ describe('成员查询与统计', () => {
   })
 
   it('listMembers / getMemberStats：按社团统计 total/active/exited', () => {
-    expect(listMembers('club-001')).toHaveLength(6)
+    // 含 P3-1 新身份成员（mem-007 赵雨萌 / mem-008 孙雅静）
+    expect(listMembers('club-001')).toHaveLength(8)
     expect(listMembers('club-002').map((m) => m.id)).toEqual(['mem-101'])
-    expect(getMemberStats('club-001')).toEqual({ total: 6, active: 5, exited: 1 })
+    expect(getMemberStats('club-001')).toEqual({ total: 8, active: 7, exited: 1 })
   })
 })
 

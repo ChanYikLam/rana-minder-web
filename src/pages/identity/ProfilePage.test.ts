@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
@@ -22,6 +23,8 @@ describe('ProfilePage 个人资料', () => {
     mockGet.mockReset()
     mockPost.mockReset()
     vi.clearAllMocks()
+    // P3-1 新增：ProfilePage 保存/验证后联动刷新会话（useSessionViewStore），需安装 pinia
+    setActivePinia(createPinia())
   })
   afterEach(() => vi.restoreAllMocks())
 
