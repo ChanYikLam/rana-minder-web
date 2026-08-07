@@ -210,6 +210,28 @@ describe('InterviewManagePage 面试管理', () => {
     wrapper.unmount()
   })
 
+  it('轮次创建失败：展示后端错误信息', async () => {
+    mockPageGet([interviewRow], [openRound])
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'ROUND-001', message: '截止时间已过，无法创建' } })
+    const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('轮次管理'))!.trigger('click')
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('二面')
+    await inputs[1].setValue('2026-08-15T00:00:00Z')
+    await inputs[2].setValue('2026-08-15T10:00:00Z')
+    await inputs[3].setValue('2026-08-15T12:00:00Z')
+    await wrapper.findAll('button').find((b) => b.text().includes('创建轮次'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith(
+      '/org/club-001/recruitment/act-1/rounds',
+      expect.objectContaining({ name: '二面', selectDeadline: '2026-08-15T00:00:00Z', slots: expect.any(Array) })
+    )
+    expect(wrapper.text()).toContain('截止时间已过，无法创建')
+    wrapper.unmount()
+  })
+
   it('跳轮/免试：填写申请人+原因后提交成功', async () => {
     mockPageGet([interviewRow], [openRound], [{ applicantId: 'a2', applicantName: '李四', status: 'submitted' }])
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })
@@ -242,6 +264,9 @@ describe('InterviewManagePage 面试管理', () => {
     // 指派成功后的重载（loadInterviewers 两次 GET：interviewers + candidates）
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { defaultReviewers: [], tasks: [{ id: 't1', userId: 'm1', userName: '王浩然', scope: 'activity', roundId: '', roundName: '', status: 'active' }] } })
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ id: 'm1', name: '王浩然', role: '干事' }] } })
+    // 轮次级指派成功后的重载（任务列表出现轮次级任务 t2）
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { defaultReviewers: [], tasks: [{ id: 't2', userId: 'm1', userName: '王浩然', scope: 'round', roundId: 'r1', roundName: '一轮', status: 'active' }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ id: 'm1', name: '王浩然', role: '干事' }] } })
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })
     const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
@@ -259,26 +284,35 @@ describe('InterviewManagePage 面试管理', () => {
     await flushPromises()
     await assignBtn!.trigger('click')
     await flushPromises()
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/interviewers', { userId: 'm1', userName: '王浩然', scope: 'activity', roundId: undefined })
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/interviewers', expect.objectContaining({ userId: 'm1', userName: '王浩然', scope: 'activity' }))
     // 任务列表出现撤销按钮
     const revokeBtn = wrapper.findAll('button').find((b) => b.text().includes('撤销'))
     expect(revokeBtn, '撤销按钮').toBeTruthy()
 
     // 轮次级：未选轮次拦截（userId 已选故按钮可用）
-    const selects2 = wrapper.findAll('select')
-    await selects2[0].setValue('m1')
-    await selects2[1].setValue('round')
+    await selects[0].setValue('m1')
+    await selects[1].setValue('round')
     await flushPromises()
     await wrapper.findAll('button').find((b) => b.text().includes('确认指派'))!.trigger('click')
     expect(wrapper.text()).toContain('轮次级任务必须指定轮次')
 
-    // 撤销任务：确认后调用 revoke
-    await revokeBtn!.trigger('click')
+    // 轮次级指派成功：必须携带 roundId（scope 切为 round 后重查 select 列表）
+    const selects3 = wrapper.findAll('select')
+    await selects3[2].setValue('r1')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('确认指派'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/interviewers', { userId: 'm1', userName: '王浩然', scope: 'round', roundId: 'r1' })
+
+    // 撤销任务：确认后调用 revoke（此时列表为轮次级任务 t2）
+    const revokeBtn2 = wrapper.findAll('button').find((b) => b.text().includes('撤销'))
+    expect(revokeBtn2, '撤销按钮').toBeTruthy()
+    await revokeBtn2!.trigger('click')
     const confirmRevoke = wrapper.findAll('button').find((b) => b.text().trim() === '确认')
     expect(confirmRevoke, '撤销确认按钮').toBeTruthy()
     await confirmRevoke!.trigger('click')
     await flushPromises()
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/interviewers/t1/revoke', {})
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/interviewers/t2/revoke', {})
     wrapper.unmount()
   })
 })

@@ -89,6 +89,26 @@ describe('JointInterviewPage 联合面试管理', () => {
     wrapper.unmount()
   })
 
+  it('代预约失败：展示后端错误且面板保持打开', async () => {
+    mockPageGet([interview], [{ applicantId: 'a2', applicantName: '李四', status: 'submitted' }], [{ id: 's1', startAt: '2026-08-10T10:00:00Z', capacity: 10, available: 3 }])
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'BOOK-001', message: '时段已被约满' } })
+    const wrapper = mount(JointInterviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('代预约面试'))!.trigger('click')
+    const selects = wrapper.findAll('select')
+    await selects[0].setValue('a2')
+    await selects[1].setValue('s1')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('确认预约'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/interviews/book', { applicantId: 'a2', slotId: 's1' })
+    expect(wrapper.text()).toContain('时段已被约满')
+    // 失败后面板保持打开
+    expect(wrapper.text()).toContain('代申请人预约联合面试')
+    wrapper.unmount()
+  })
+
   it('行操作：开始面试成功后刷新', async () => {
     mockPageGet([interview])
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })

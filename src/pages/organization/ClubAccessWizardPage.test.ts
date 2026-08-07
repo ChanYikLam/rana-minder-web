@@ -47,7 +47,10 @@ describe('ClubAccessWizardPage 社团接入向导', () => {
     mockPost.mockReset()
     vi.clearAllMocks()
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it('加载成功：并行加载 Casdoor Group 与已有社团，进入步骤一', async () => {
     // mockResolvedValueOnce 优先于默认值，按调用顺序设置：groups → clubs
@@ -145,21 +148,27 @@ describe('ClubAccessWizardPage 社团接入向导', () => {
     }))
     expect(mockToastSuccess).toHaveBeenCalledWith('接入条目已创建')
     expect(wrapper.text()).toContain('接入条目已创建')
-    vi.useRealTimers()
     wrapper.unmount()
   })
 
   it('校验拦截：Group 已被绑定 → 校验页显示未通过且创建按钮禁用', async () => {
-    // GET 顺序：groups → clubs → groups/{id}(detail)。schedule('') 填充候选不发起请求。
+    vi.useFakeTimers()
+    // GET 顺序：groups → clubs → search → groups/{id}(detail)
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ ...clubGroup, boundClubId: 'club-001' }] } })
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ ...clubGroup, boundClubId: 'club-001' }] } })
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { ...groupDetail, boundClubId: 'club-001' } })
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
     const wrapper = mount(ClubAccessWizardPage, { global: { stubs: wizardStubs } })
     await flushPromises()
 
-    // 直接选择结果（点击 .ns-result 前 searchResults 已由 schedule('') 填充候选社团列表）
+    // 显式搜索并选择已被绑定的 Group（不依赖 mount 时的候选填充）
+    const searchInput = wrapper.find('input[placeholder="搜索"]')
+    await searchInput.setValue('摄影')
+    await vi.advanceTimersByTimeAsync(400)
+    await flushPromises()
     const resultBtn = wrapper.find('.ns-result')
+    expect(resultBtn, '搜索结果按钮').toBeTruthy()
     await resultBtn!.trigger('click')
     await flushPromises()
     await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')

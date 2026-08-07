@@ -45,7 +45,13 @@ describe('ActivityManagePage 招新活动管理', () => {
     await flushPromises()
     expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1')
     expect(wrapper.text()).toContain('秋季招新')
+    // 统计卡片渲染（报名/面试/邀请数量绑定具体值）
+    expect(wrapper.text()).toContain('报名申请')
     expect(wrapper.text()).toContain('12')
+    expect(wrapper.text()).toContain('面试安排')
+    expect(wrapper.text()).toContain('3')
+    expect(wrapper.text()).toContain('录取邀请')
+    expect(wrapper.text()).toContain('2')
     wrapper.unmount()
   })
 
@@ -129,6 +135,23 @@ describe('ActivityManagePage 招新活动管理', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('保存修改'))!.trigger('click')
     await flushPromises()
     expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '新描述' })
+    wrapper.unmount()
+  })
+
+  it('编辑活动：保存失败展示后端错误且面板不关闭', async () => {
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: detail('in_progress', 'open') })
+    mockPut.mockResolvedValue({ kind: 'rejected', error: { code: 'EDIT-001', message: '数据版本已过期' } })
+    const wrapper = mount(ActivityManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('编辑活动'))!.trigger('click')
+    const titleInput = wrapper.find('input[placeholder="活动名称"]')
+    await titleInput.setValue('秋季招新 2026')
+    await wrapper.findAll('button').find((b) => b.text().includes('保存修改'))!.trigger('click')
+    await flushPromises()
+    expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '面向全校招新' })
+    expect(wrapper.text()).toContain('数据版本已过期')
+    expect(wrapper.text()).toContain('保存修改')
     wrapper.unmount()
   })
 

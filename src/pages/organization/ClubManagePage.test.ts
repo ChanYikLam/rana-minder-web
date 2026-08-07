@@ -31,7 +31,10 @@ describe('ClubManagePage 社团管理', () => {
     mockPost.mockReset()
     vi.clearAllMocks()
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it('加载成功：请求社团列表并渲染页面', async () => {
     mockGet.mockResolvedValue({
@@ -87,6 +90,8 @@ describe('ClubManagePage 社团管理', () => {
     expect(mockGet).toHaveBeenCalledWith('/admin/groups/search', { q: '计算机' })
 
     // 点击搜索结果 → save-step + 拉取详情
+    // 注：NameSearch（真实组件）在 mousedown 上触发选中（NameSearch.vue 用 @mousedown.prevent），
+    // 该事件序列等同真实用户点击（mousedown→mouseup→click 的首发事件）；选中结果由下方 save-step 请求断言。
     const optionBtn = wrapper.findAll('button[role="option"]').find((b) => b.text().includes('计算机协会'))
     expect(optionBtn, '搜索结果选项').toBeTruthy()
     await optionBtn!.trigger('mousedown')
@@ -107,7 +112,6 @@ describe('ClubManagePage 社团管理', () => {
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/admin/clubs/wizard/complete', { clubId: 'club-001' })
     expect(mockToastSuccess).toHaveBeenCalledWith('接入完成，社团已启用')
-    vi.useRealTimers()
     wrapper.unmount()
   })
 

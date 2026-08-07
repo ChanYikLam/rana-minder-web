@@ -93,21 +93,24 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     // 新字段自动选中，属性配置面板出现
     expect(wrapper.text()).toContain('字段标签')
 
-    // 编辑标签
+    // 编辑标签（定位"属性配置"面板卡，避免依赖卡片排列索引）
     const cards = wrapper.findAll('.card')
-    const propInputs = cards[2].findAll('input')
-    const labelInput = propInputs.find((i) => i.attributes('type') === 'text')
-    await labelInput!.setValue('联系手机')
+    const propCard = cards.find((c) => c.text().includes('属性配置'))
+    expect(propCard, '属性配置面板').toBeTruthy()
+    const labelInput = propCard!.find('input[type="text"]')
+    await labelInput.setValue('联系手机')
     await nextTick()
     expect(wrapper.text()).toContain('联系手机')
 
     // 勾选必填（checkbox @change）
-    const requiredBox = cards[2].find('input[type="checkbox"]')
+    const requiredBox = propCard!.find('input[type="checkbox"]')
     await requiredBox.setValue(true)
     await nextTick()
 
-    // 删除新字段（新加的字段位于画布最后一行，取最后一个删除按钮）
-    const canvasButtons = cards[1].findAll('button')
+    // 删除新字段（新加的字段位于画布最后一行，取画布卡内最后一个删除按钮）
+    const canvasCard = cards.find((c) => c.text().includes('表单画布'))
+    expect(canvasCard, '表单画布').toBeTruthy()
+    const canvasButtons = canvasCard!.findAll('button')
     const removeBtn = canvasButtons[canvasButtons.length - 1]
     expect(removeBtn, '删除字段按钮').toBeTruthy()
     await removeBtn!.trigger('click')
@@ -150,6 +153,23 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     // 重载后显示已发布状态，发布按钮消失
     expect(wrapper.text()).toContain('已发布')
     expect(wrapper.findAll('button').find((b) => b.text().includes('发布'))).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('发布失败：展示后端错误且仍为草稿态', async () => {
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDesigner('draft', 1) })
+    mockPost.mockResolvedValue({ kind: 'rejected' as const, error: { code: 'IFC-ERR-009', message: '存在必填字段未配置选项' } })
+    const wrapper = mount(FormDesignerPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('发布'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/forms/designer/form-001/publish', { version: 1 })
+    expect(mockToastError).toHaveBeenCalledWith('存在必填字段未配置选项')
+    // 未重载，仍为草稿态且发布按钮保留
+    expect(wrapper.text()).toContain('草稿')
+    expect(wrapper.findAll('button').find((b) => b.text().includes('发布'))).toBeTruthy()
     wrapper.unmount()
   })
 
