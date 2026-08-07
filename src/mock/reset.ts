@@ -2,6 +2,7 @@ import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, 
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase } from './notifications'
 import { correctionsDb } from './db-corrections'
+import { resetForms } from './db-forms'
 
 const seed = {
   recruitmentActivities: structuredClone(recruitmentActivities),
@@ -42,6 +43,7 @@ export function resetRecruitmentDB(): void {
   jointInvitations.splice(0, jointInvitations.length, ...structuredClone(seed.jointInvitations))
   jointSlots.splice(0, jointSlots.length, ...structuredClone(seed.jointSlots))
   Object.keys(APPLICANT_PROFILES).forEach((k) => { if (k.startsWith('u-auto-')) delete APPLICANT_PROFILES[k] })
+  resetForms()
 }
 
 export function resetDb(): void {
