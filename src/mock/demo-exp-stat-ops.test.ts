@@ -121,7 +121,7 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
       id: 'mem-stats-1', clubId: 'club-001', studentId: '20990001',
       name: '本月新人', email: 'new@example.edu.cn', phone: '13800000099',
       status: 'active', joinedAt: new Date().toISOString(), exitedAt: null,
-      positions: [{ id: 'pos-stats-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, status: 'active' }],
+      positions: [{ id: 'pos-stats-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, plannedEndDate: null, status: 'active' }],
       tenures: [], departmentHistory: [], anomalies: [],
     })
 
@@ -208,7 +208,7 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
       id: 'mem-stats-2', clubId: 'club-001', studentId: '20990002',
       name: '趋势新人', email: 'trend@example.edu.cn', phone: '13800000088',
       status: 'active', joinedAt: new Date().toISOString(), exitedAt: null,
-      positions: [{ id: 'pos-stats-2', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, status: 'active' }],
+      positions: [{ id: 'pos-stats-2', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, plannedEndDate: null, status: 'active' }],
       tenures: [], departmentHistory: [], anomalies: [],
     })
 
@@ -241,7 +241,7 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
       id: 'mem-stats-exit', clubId: 'club-001', studentId: '20990003',
       name: '本月退出', email: 'exit@example.edu.cn', phone: '13800000077',
       status: 'exited', joinedAt: '2024-01-01T00:00:00+08:00', exitedAt: new Date().toISOString(),
-      positions: [{ id: 'pos-exit-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2024-01-01', endDate: new Date().toISOString().slice(0, 10), status: 'ended' }],
+      positions: [{ id: 'pos-exit-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2024-01-01', endDate: new Date().toISOString().slice(0, 10), plannedEndDate: null, status: 'ended' }],
       tenures: [], departmentHistory: [], anomalies: [],
     })
 

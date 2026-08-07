@@ -37,8 +37,11 @@ describe('workspacePermissionForRoute', () => {
   it('maps member routes to club:member:manage', () => {
     expect(workspacePermissionForRoute('P-MEM-list')).toBe('club:member:manage')
     expect(workspacePermissionForRoute('P-MEM-02')).toBe('club:member:manage')
-    expect(workspacePermissionForRoute('P-MEM-05')).toBe('club:member:manage')
     expect(workspacePermissionForRoute('P-MEM-01')).toBe('club:member:manage')
+  })
+
+  it('maps exit route to member:manage or view-self (self-exit accessible to ordinary members)', () => {
+    expect(workspacePermissionForRoute('P-MEM-05')).toEqual(['club:member:manage', 'club:member:view-self'])
   })
 
   it('maps appointment route to club:appointment:manage (leader/hr only)', () => {

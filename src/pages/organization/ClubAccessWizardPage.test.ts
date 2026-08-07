@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, mockPush } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPush: vi.fn() }))
 const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { clubId: 'club-004' } }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mockPush }),
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),

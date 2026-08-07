@@ -7,6 +7,8 @@ export interface SideNavItem {
   label: string
   path: string
   permission?: string
+  /** 任一命中即可（与 permission 二选一；仅用于单条导航项的多权限放行） */
+  permissionAny?: string[]
 }
 
 export interface SideNavGroup {
@@ -54,7 +56,7 @@ export function buildClubGroups(clubId: string, canAccess: (p?: string, permissi
         { label: '部门关系申请', path: `${base}/members/department-apply`, permission: 'club:member:manage' },
         { label: '常规入社邀请', path: `${base}/members/invite`, permission: 'club:invite:manage' },
         { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:appointment:manage' },
-        { label: '成员退出与移除', path: `${base}/members/exit`, permission: 'club:member:manage' },
+        { label: '成员退出与移除', path: `${base}/members/exit`, permissionAny: ['club:member:manage', 'club:member:view-self'] },
         { label: '换届管理', path: `${base}/members/transition`, permission: 'club:transition:manage' },
       ],
     },
@@ -88,7 +90,7 @@ export function buildClubGroups(clubId: string, canAccess: (p?: string, permissi
   return groups
     .map((g) => ({
       ...g,
-      items: g.items.filter((i) => (i.permission ? canAccess(i.permission) : canAccess(g.permission, g.permissionAny))),
+      items: g.items.filter((i) => (i.permission ? canAccess(i.permission) : i.permissionAny ? canAccess(undefined, i.permissionAny) : canAccess(g.permission, g.permissionAny))),
     }))
     .filter((g) => g.items.length > 0)
 }

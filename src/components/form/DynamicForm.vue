@@ -267,7 +267,7 @@ const inputErrorClass = 'border-danger'
           :aria-invalid="getFieldErrors(field.id).length > 0 || undefined"
           :value="(fieldValue(field) as number | undefined) ?? ''"
           :disabled="isReadOnly(field)"
-          @input="updateField(field, Number(($event.target as HTMLInputElement).value))"
+          @input="updateField(field, ($event.target as HTMLInputElement).value === '' ? '' : Number(($event.target as HTMLInputElement).value))"
         />
 
         <DateTimePicker

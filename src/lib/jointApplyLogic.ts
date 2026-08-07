@@ -3,6 +3,8 @@
  * 与 recruitment-status 同模式：页面仅做状态编排，决策/计算集中于此。
  */
 
+import { fileBlockingError, isFieldFilled, restoredFieldValue } from './formFile'
+
 export interface JointFormField {
   id: string
   type: string
@@ -18,11 +20,6 @@ export interface JointDeptPref {
 export interface JointClub {
   id: string
   departments: { id: string; name: string }[]
-}
-
-export interface JointFileState {
-  checking: boolean
-  error: boolean
 }
 
 /** 联合申请通道状态 → 文案与色调（ChannelStatus: not_open/open/paused/closed） */
@@ -98,24 +95,27 @@ export function movePreference(preferences: JointDeptPref[], index: number, dire
   return next
 }
 
-/** 表单校验：必填缺失、文件检查中、文件上传失败 */
+/** 附件状态拦截（逻辑见 formFile，供报名页/联合报名页共用）：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
+
+/** 表单校验：必填缺失（按字段类型取值）、文件检查中/被拒绝/被隔离/被删除；同字段首个错误优先 */
 export function validateJointForm(
   fields: JointFormField[],
-  formData: Record<string, string>,
-  formFiles: Record<string, JointFileState | null>,
+  formData: Record<string, unknown>,
 ): Record<string, string> {
   const errors: Record<string, string> = {}
   for (const field of fields) {
-    if (field.required && !formData[field.id]) {
-      errors[field.id] = `${field.label}为必填项`
-    }
-    if (field.type === 'file') {
-      const f = formFiles[field.id]
-      if (f?.checking) {
-        errors[field.id] = '文件安全检查中，请稍候再提交'
-      } else if (f?.error) {
-        errors[field.id] = '文件上传失败，请重新上传'
+    const value = formData[field.id]
+    if (field.required) {
+      const filled = isFieldFilled(value, field.type)
+      if (!filled) {
+        // 必填缺失直接收口该字段，避免后续附件错误覆盖必填错误
+        errors[field.id] = `${field.label}为必填项`
+        continue
       }
+    }
+    if ((field.type === 'file' || field.type === 'image') && errors[field.id] === undefined) {
+      const msg = fileBlockingError(value)
+      if (msg) errors[field.id] = msg
     }
   }
   return errors
@@ -127,13 +127,13 @@ export function buildSubmitPayload(input: {
   allowJointAdjustment: boolean
   volunteerClubIds: string[]
   preferences: JointDeptPref[]
-  answers: Record<string, string>
+  answers: Record<string, unknown>
 }): {
   consented: boolean
   allowJointAdjustment: boolean
   volunteerClubIds: string[]
   preferences: JointDeptPref[]
-  answers: Record<string, string>
+  answers: Record<string, unknown>
 } {
   const clubIds = input.volunteerClubIds ?? []
   return {
@@ -154,31 +154,35 @@ export interface RestorableApplication {
   consented?: boolean
 }
 
-/** 草稿回填纯化：仅 draft 态恢复，文件字段单独提取 fileId 用于回显附件 */
+/** 草稿回填纯化：仅 draft 态恢复；文件字段兼容 fileId 字符串与 FileMeta[] 两种形态，其余按字段类型归一（number/数组不再被静默清空） */
 export function restoreDraftState(
   app: RestorableApplication,
   fields: { id: string; type: string }[],
 ): {
-  answers: Record<string, string>
-  fileIds: Record<string, string>
+  answers: Record<string, unknown>
   volunteerClubIds: string[]
   preferences: JointDeptPref[]
   consented: boolean
   allowJointAdjustment: boolean
 } {
-  const answers: Record<string, string> = {}
-  const fileIds: Record<string, string> = {}
+  const answers: Record<string, unknown> = {}
   if (app.status === 'draft' && app.answers) {
     for (const [fieldId, value] of Object.entries(app.answers)) {
-      if (typeof value !== 'string') continue
-      answers[fieldId] = value
       const field = fields.find((f) => f.id === fieldId)
-      if (field?.type === 'file' && value) fileIds[fieldId] = value
+      if (field?.type === 'file' || field?.type === 'image') {
+        if (Array.isArray(value)) {
+          answers[fieldId] = value
+        } else if (typeof value === 'string' && value) {
+          answers[fieldId] = value
+        }
+        continue
+      }
+      const restored = restoredFieldValue(value, field?.type ?? '')
+      if (restored !== undefined) answers[fieldId] = restored
     }
   }
   return {
     answers,
-    fileIds,
     volunteerClubIds: Array.isArray(app.volunteerClubIds) ? app.volunteerClubIds : [],
     preferences: app.preferences ? app.preferences.map((p) => ({ ...p })) : [],
     consented: app.consented ?? false,

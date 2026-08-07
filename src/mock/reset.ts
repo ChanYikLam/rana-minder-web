@@ -1,5 +1,5 @@
 import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, jointReviewExtras, APPLICANT_PROFILES } from './db-recruitment'
-import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
+import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, exitRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
 import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
@@ -30,6 +30,7 @@ const seed = {
   membershipInvitations: structuredClone(membershipInvitations),
   appointmentCommands: structuredClone(appointmentCommands),
   resignationRequests: structuredClone(resignationRequests),
+  exitRequests: structuredClone(exitRequests),
   transitionState: structuredClone(transitionState),
   sysNotifications: structuredClone(sysNotifications),
   notificationSeq: notificationSeqBase,
@@ -63,6 +64,7 @@ export function resetDb(): void {
   membershipInvitations.splice(0, membershipInvitations.length, ...structuredClone(seed.membershipInvitations))
   appointmentCommands.splice(0, appointmentCommands.length, ...structuredClone(seed.appointmentCommands))
   resignationRequests.splice(0, resignationRequests.length, ...structuredClone(seed.resignationRequests))
+  exitRequests.splice(0, exitRequests.length, ...structuredClone(seed.exitRequests))
   Object.assign(transitionState, structuredClone(seed.transitionState))
 }
 
