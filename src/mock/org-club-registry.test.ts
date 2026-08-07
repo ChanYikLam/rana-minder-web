@@ -155,6 +155,19 @@ describe('P0-001 社团注册表统一（orgdb 单一权威）', () => {
     })
     expect(out.statusCode).toBe(403)
   })
+
+  it('template-mappings 查询 API：返回社团既有映射，且非平台社团管理员被拒（403）', async () => {
+    const ok = await invokeHandler('/api/admin/clubs/:clubId/template-mappings', 'get', '/api/admin/clubs/club-001/template-mappings')
+    expect(ok.statusCode, JSON.stringify(ok.body)).toBe(200)
+    const items = (ok.body.data as { items: { clubId: string; groupId: string; templateId: string }[] }).items
+    expect(items.some((m) => m.groupId === 'grp-lead-001' && m.templateId === 'tpl-001')).toBe(true)
+    expect(items.some((m) => m.groupId === 'grp-001' && m.templateId === 'tpl-002')).toBe(true)
+    expect(items.some((m) => m.groupId === 'grp-dept-001' && m.templateId === 'tpl-003')).toBe(true)
+
+    resolveMockUser('/api/auth/session?_mock_user=member')
+    const denied = await invokeHandler('/api/admin/clubs/:clubId/template-mappings', 'get', '/api/admin/clubs/club-001/template-mappings')
+    expect(denied.statusCode).toBe(403)
+  })
 })
 
 /** 审计修复：负责人职位层级复检（complete/save-step）与成员数单一数据源（seed 不再双口径） */

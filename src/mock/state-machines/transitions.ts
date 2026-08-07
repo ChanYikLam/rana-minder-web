@@ -83,6 +83,7 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       normal_suspend: 'suspended',
       force_suspend: 'suspended',
       group_lost: 'sync_abnormal_ro',
+      disconnect: 'pending_rebind',
     },
     suspended: {
       re_enable: 'enabled',

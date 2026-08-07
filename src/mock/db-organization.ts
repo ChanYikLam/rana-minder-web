@@ -73,16 +73,21 @@ export interface GroupTemplateMapping {
 
 /** 模板映射注册表（内存态，与 clubAccesses 同步生命周期） */
 const groupTemplateMappings: GroupTemplateMapping[] = [
-  { clubId: 'club-001', groupId: 'grp-001', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-001', groupId: 'grp-001', templateId: 'tpl-002', createdAt: '2022-09-05T10:00:00+08:00' },
   { clubId: 'club-001', groupId: 'grp-lead-001', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
   { clubId: 'club-001', groupId: 'grp-dept-001', templateId: 'tpl-003', createdAt: '2022-09-05T10:00:00+08:00' },
-  { clubId: 'club-002', groupId: 'grp-002', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-002', groupId: 'grp-002', templateId: 'tpl-002', createdAt: '2022-09-05T10:00:00+08:00' },
   { clubId: 'club-002', groupId: 'grp-lead-002', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
 ]
 
-/** 预置模板与 Group 用途的默认关联规则 */
+/** 预置模板与 Group 用途的默认关联规则（P1-005）
+ * - leader（社团负责人职位）→ tpl-001 社团负责人模板
+ * - 普通职位（副负责人/干事等）→ tpl-002 人事模板（成员管理/招新），避免越级授予负责人权限
+ * - 部门 → tpl-003 面试官模板
+ */
 const DEFAULT_TEMPLATE_MAP: Record<string, string> = {
-  position: 'tpl-001',   // 职位 Group → 社团负责人模板
+  leader: 'tpl-001',     // 负责人职位 Group → 社团负责人模板
+  position: 'tpl-002',   // 普通职位 Group → 人事模板
   department: 'tpl-003', // 部门 Group → 面试官模板
 }
 
@@ -134,6 +139,10 @@ const groups: GroupSeed[] = [
     id: 'grp-dept-001', name: '计算机协会技术部', stableId: 'G-COMP-DEPT-001', path: '/学校学生组织/计算机协会/技术部',
     parentId: 'grp-001', purpose: 'department', boundClubId: 'club-001', leaderGroupId: null, members: [],
   },
+  {
+    id: 'grp-dept-004', name: '摄影协会创作部', stableId: 'G-PHOTO-DEPT-001', path: '/学校学生组织/摄影协会/创作部',
+    parentId: 'grp-004', purpose: 'department', boundClubId: null, leaderGroupId: null, members: [],
+  },
 ]
 
 const memberNames: Record<string, string> = {
@@ -150,14 +159,14 @@ function daysAgo(days: number): string {
 export const clubAccesses: MockClubAccess[] = [
   {
     clubId: 'club-001', clubName: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001', email: 'club-001@example.edu.cn', deptGroups: ['/学校学生组织/计算机协会/技术部'], roleGroups: [], leaderRoleGroup: '/学校学生组织/计算机协会/负责人' },
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001', email: 'club-001@example.edu.cn', deptGroups: ['grp-dept-001'], roleGroups: [], leaderRoleGroup: 'grp-lead-001' },
     leaderGroupId: 'grp-lead-001', leaderName: '张明远', deptGroupIds: ['grp-dept-001'], roleGroupIds: [],
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedAt: '2022-09-05T11:00:00+08:00', importedCount: 6,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-002', clubName: '电子设计协会', description: '电子设计与嵌入式开发', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002', email: 'club-002@example.edu.cn', deptGroups: [], roleGroups: [], leaderRoleGroup: '/学校学生组织/电子设计协会/负责人' },
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002', email: 'club-002@example.edu.cn', deptGroups: [], roleGroups: [], leaderRoleGroup: 'grp-lead-002' },
     leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', deptGroupIds: [], roleGroupIds: [],
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedAt: '2022-09-05T11:00:00+08:00', importedCount: 1,
     syncEvents: [], freezeIntervals: [], readonly: false,
@@ -420,15 +429,18 @@ function ensureMapping(clubId: string, groupId: string, templateId: string) {
   }
 }
 
-/** 为社团批量创建权限模板映射（向导完成后调用） */
+/** 为社团批量创建权限模板映射（向导完成后调用，幂等） */
 function createTemplateMappings(club: MockClubAccess) {
   // 负责人 Group → tpl-001（社团负责人模板）
   if (club.leaderGroupId) ensureMapping(club.clubId, club.leaderGroupId, 'tpl-001')
   // 部门 Group → tpl-003（面试官模板）
   for (const deptId of club.deptGroupIds) ensureMapping(club.clubId, deptId, DEFAULT_TEMPLATE_MAP.department)
-  // 职位 Group（含 roleGroupIds + leaderGroupId） → tpl-001
-  for (const roleId of club.roleGroupIds) ensureMapping(club.clubId, roleId, DEFAULT_TEMPLATE_MAP.position)
-  // 社团主 Group → tpl-001
+  // 普通职位 Group（roleGroupIds 不含负责人，负责人已在上面单独映射） → tpl-002（人事模板）
+  for (const roleId of club.roleGroupIds) {
+    if (roleId === club.leaderGroupId) continue // 负责人已映射 tpl-001，避免重复
+    ensureMapping(club.clubId, roleId, DEFAULT_TEMPLATE_MAP.position)
+  }
+  // 社团主 Group → tpl-002（人事模板；主 Group 成员为普通成员，不授予负责人级权限）
   if (club.groupId) ensureMapping(club.clubId, club.groupId, DEFAULT_TEMPLATE_MAP.position)
 }
 
@@ -607,6 +619,8 @@ export function recoverClub(clubId: string): { ok: boolean; error?: string; data
 export function disconnectClub(clubId: string): { ok: boolean; error?: string; data?: ClubAccessItem } {
   const club = findClub(clubId)
   if (!club) return { ok: false, error: '未找到该社团' }
+  // 支持 enabled → pending_rebind（前端管理页对已启用社团展示"解除接入"）与
+  // sync_abnormal_ro → pending_rebind（对账异常后解除），统一走 pending_rebind 待重接状态
   const check = validateTransition(club, 'pending_rebind', 'disconnect')
   if (!check.ok) return { ok: false, error: check.error }
   const prevGroupId = club.groupId
