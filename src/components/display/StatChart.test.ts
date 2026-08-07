@@ -15,12 +15,13 @@ describe('StatChart 统计图表', () => {
     expect(wrapper.text()).toContain('单位：人')
   })
 
-  it('空系列不崩溃', () => {
+  it('空系列：仅渲染标题与单位不崩溃', () => {
     const wrapper = mount(StatChart, {
       props: { title: 'x', series: [], unit: '人' },
       global: { stubs: pageStubs },
     })
-    expect(wrapper.exists()).toBe(true)
+    expect(wrapper.text()).toContain('x')
+    expect(wrapper.text()).toContain('单位：人')
     wrapper.unmount()
   })
 })

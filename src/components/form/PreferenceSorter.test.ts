@@ -44,10 +44,9 @@ describe('PreferenceSorter 意向排序', () => {
   it('移除：emit 过滤后的数组', async () => {
     const wrapper = mountSorter()
     const removeBtn = wrapper.findAll('button').find((b) => b.text().includes('移除'))
-    if (removeBtn) {
-      await removeBtn.trigger('click')
-      expect(wrapper.emitted('update:modelValue')?.[0]![0]).toHaveLength(2)
-    }
+    expect(removeBtn, '每个志愿项应渲染移除按钮').toBeTruthy()
+    await removeBtn!.trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0]![0]).toHaveLength(2)
   })
 
   it('键盘 ArrowUp/ArrowDown/Delete 控制', async () => {

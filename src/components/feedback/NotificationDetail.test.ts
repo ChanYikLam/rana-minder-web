@@ -17,9 +17,10 @@ describe('NotificationDetail 通知详情', () => {
     expect(wrapper.emitted('back')).toHaveLength(1)
   })
 
-  it('正文为空：展示占位', () => {
+  it('正文为空：标题与来源仍渲染', () => {
     const wrapper = mount(NotificationDetail, { props: { notification: { ...notification, body: '' } } })
-    expect(wrapper.exists()).toBe(true)
+    expect(wrapper.text()).toContain('报名状态更新')
+    expect(wrapper.text()).toContain('计算机协会')
     wrapper.unmount()
   })
 })

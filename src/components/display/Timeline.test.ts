@@ -15,9 +15,9 @@ describe('Timeline 时间线', () => {
     expect(text.indexOf('提交')).toBeLessThan(text.indexOf('通过'))
   })
 
-  it('空列表不崩溃', () => {
-    const wrapper = mount(Timeline, { props: { items: [] }, global: { stubs: pageStubs } })
-    expect(wrapper.exists()).toBe(true)
+  it('空列表：无条目渲染但不崩溃', () => {
+    const wrapper = mount(Timeline, { props: { items: [], label: '历史' }, global: { stubs: pageStubs } })
+    expect(wrapper.find('ol').attributes('aria-label')).toBe('历史')
     wrapper.unmount()
   })
 })
