@@ -74,3 +74,18 @@ function stringFileMeta(value: unknown): FileMeta[] {
   if (typeof value !== 'string' || value === '') return []
   return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'uploaded', uploadedAt: '', checkedAt: null, downloadUrl: null }]
 }
+
+/**
+ * 草稿落库前的附件值归一（报名页/联合报名页保存草稿共用）：
+ * - 将瞬态 uploading（尚未取得 fileId，纯前端占位）整条丢弃，避免把 pending-/rejected- 假 id 落库；
+ * - 将瞬态 checking（已换得真实 fileId，但安全检查尚未完成）降级为中性 uploaded，
+ *   重开草稿后用户可重新上传触发检查，杜绝「永不 auto-approve、无法移除、无法提交」的卡死文件；
+ * - 其余状态原样保留（uploaded/approved/quarantined/rejected/deleted 均为可消费状态）。
+ */
+export function draftSafeFileMeta(value: unknown): FileMeta[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const next = (value as FileMeta[])
+    .filter((f) => f.status !== 'uploading')
+    .map((f) => (f.status === 'checking' ? { ...f, status: 'uploaded' as const, checkedAt: null } : f))
+  return next
+}

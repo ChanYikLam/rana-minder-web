@@ -13,7 +13,7 @@ import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
 import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
 import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
 import type { FormField } from '@/types/domain/form'
-import { fileBlockingError, isFieldFilled, restoredFieldValue, restoredFileMeta as restoredFileMetaFromLib } from '@/lib/formFile'
+import { fileBlockingError, isFieldFilled, restoredFieldValue, restoredFileMeta as restoredFileMetaFromLib, draftSafeFileMeta } from '@/lib/formFile'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string; allowAdjustmentDefault?: boolean }
 interface MyApplication {
@@ -217,8 +217,20 @@ watch([formData, preferences], () => {
 async function handleSaveDraft() {
   if (!showApplyForm.value) return
   savingDraft.value = true
+  // 瞬态附件（uploading 占位/checking 检查中）不得原样落库：uploading 丢弃、checking 降级 uploaded，
+  // 否则重开草稿后会得到永远无法 auto-approve、无法移除、无法提交的卡死文件（见 draftSafeFileMeta）
+  const draftAnswers: Record<string, unknown> = {}
+  for (const [fieldId, value] of Object.entries(formData.value)) {
+    const field = formFields.value.find((f) => f.id === fieldId)
+    if (field?.type === 'file' || field?.type === 'image') {
+      const safe = draftSafeFileMeta(value)
+      if (safe !== undefined) draftAnswers[fieldId] = safe
+      continue
+    }
+    draftAnswers[fieldId] = value
+  }
   const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
-    answers: { ...formData.value },
+    answers: draftAnswers,
   })
   savingDraft.value = false
   if (result.kind === 'completed') {

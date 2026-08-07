@@ -57,7 +57,7 @@ function scheduleAutoApprove(nextFiles: FileMeta[]) {
     const updated = files.value.map((f) => {
       if (!approvedIds.has(f.id) || f.status !== 'checking') return f
       changed = true
-      return { ...f, status: 'approved' as const, checkedAt: new Date().toISOString(), downloadUrl: `/files/${f.id}` }
+      return { ...f, status: 'approved' as const, checkedAt: new Date().toISOString() }
     })
     if (changed) emit('update:modelValue', updated)
   }, CHECK_DELAY_MS)

@@ -232,7 +232,6 @@ describe('restoreDraftState 草稿回填', () => {
       [{ id: 'f1', type: 'text' }, { id: 'f2', type: 'file' }, { id: 'f3', type: 'text' }],
     )
     expect(restored.answers).toEqual({ f1: '文本', f2: 'file-001' })
-    expect(restored.fileIds).toEqual({ f2: 'file-001' })
     expect(restored.volunteerClubIds).toEqual(['c1'])
     expect(restored.preferences).toEqual([{ departmentId: 'd1', departmentName: '技术部' }])
     expect(restored.consented).toBe(true)
@@ -246,7 +245,6 @@ describe('restoreDraftState 草稿回填', () => {
       [{ id: 'f2', type: 'file' }],
     )
     expect(restored.answers).toEqual({ f2: fileMeta })
-    expect(restored.fileIds).toEqual({})
   })
 
   it('draft 态：number 归一并回填（不再被静默清空）', () => {

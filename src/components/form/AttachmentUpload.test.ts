@@ -143,7 +143,8 @@ describe('AttachmentUpload 上传与安全检查', () => {
 
     expect(wrapper.text()).toContain('已通过安全检测')
     expect(lastFiles(wrapper)[0].status).toBe('approved')
-    expect(lastFiles(wrapper)[0].downloadUrl).toBe('/files/file-upload-001')
+    // 真实下载契约为 POST /api/files/:fileId/download 换取，auto-approve 不伪造 downloadUrl
+    expect(lastFiles(wrapper)[0].downloadUrl).toBeNull()
   })
 
   it('定时器触发前文件已被移除：不复活为 approved', async () => {

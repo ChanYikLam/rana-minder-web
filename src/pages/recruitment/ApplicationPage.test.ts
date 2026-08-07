@@ -411,6 +411,32 @@ describe('ApplicationPage 交互流程', () => {
     expect(wrapper.text()).not.toContain('草稿已保存')
   })
 
+  it('保存草稿：瞬态附件不落库——uploading 丢弃、checking 降级 uploaded，approved 保留', async () => {
+    const now = '2026-08-07T00:00:00Z'
+    const checkingFile = { id: 'file-9', name: 'a.pdf', size: 1024, mimeType: 'application/pdf', status: 'checking', uploadedAt: now, checkedAt: null, downloadUrl: null }
+    const uploadingFile = { id: 'pending-1', name: 'b.pdf', size: 1024, mimeType: 'application/pdf', status: 'uploading', uploadedAt: now, checkedAt: null, downloadUrl: null }
+    const approvedFile = { id: 'file-10', name: 'c.pdf', size: 1024, mimeType: 'application/pdf', status: 'approved', uploadedAt: now, checkedAt: now, downloadUrl: null }
+    setupGetMocks('draft', { answers: { f1: '张三' } }, [...mockFormFields, fileField])
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 模拟 AttachmentUpload 在检查窗口内 emit 出含瞬态状态的附件数组
+    const upload = wrapper.findComponent({ name: 'AttachmentUpload' })
+    expect(upload.exists()).toBe(true)
+    upload.vm.$emit('update:modelValue', [checkingFile, uploadingFile, approvedFile])
+    await nextTick()
+
+    mockPost.mockResolvedValue({ kind: 'completed', data: { savedAt: '2026-08-07T12:00:00Z' } })
+    await buttonWithText(wrapper, '保存草稿').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/draft', {
+      answers: { f1: '张三', f2: [{ ...checkingFile, status: 'uploaded', checkedAt: null }, approvedFile] },
+    })
+  })
+
   it('撤销提交：两段式确认，5 秒未确认自动复位且不发起请求', async () => {
     vi.useFakeTimers()
     try {

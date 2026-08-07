@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fileBlockingError, isFieldFilled, isFileFieldFilled, restoredFieldValue, restoredFileMeta } from './formFile'
+import { draftSafeFileMeta, fileBlockingError, isFieldFilled, isFileFieldFilled, restoredFieldValue, restoredFileMeta } from './formFile'
 
 const baseFile = { name: 'a.pdf', size: 1, mimeType: 'application/pdf', uploadedAt: '', checkedAt: null as string | null, downloadUrl: null as string | null }
 
@@ -74,6 +74,34 @@ describe('isFieldFilled 按类型必填判定', () => {
   it('file/image：附件数组非空为准', () => {
     expect(isFieldFilled([{ ...baseFile, id: 'z', status: 'approved' as const }], 'image')).toBe(true)
     expect(isFieldFilled([], 'file')).toBe(false)
+  })
+})
+
+describe('draftSafeFileMeta 草稿落库归一', () => {
+  const uploaded = { ...baseFile, id: 'f1', status: 'uploaded' as const, uploadedAt: 't' }
+  const approved = { ...baseFile, id: 'f2', status: 'approved' as const, uploadedAt: 't' }
+
+  it('非数组返回 undefined（调用方跳过，保持原值）', () => {
+    expect(draftSafeFileMeta(undefined)).toBeUndefined()
+    expect(draftSafeFileMeta('file-001')).toBeUndefined()
+  })
+
+  it('uploading 瞬态占位整条丢弃，checking 降级为中性 uploaded 且清空 checkedAt', () => {
+    const uploading = { ...baseFile, id: 'pending-1', status: 'uploading' as const, uploadedAt: 't' }
+    const checking = { ...baseFile, id: 'file-9', status: 'checking' as const, uploadedAt: 't', checkedAt: 'x' }
+    expect(draftSafeFileMeta([uploading, checking, uploaded])).toEqual([{ ...checking, status: 'uploaded', checkedAt: null }, uploaded])
+  })
+
+  it('可消费状态原样保留（uploaded/approved/quarantined/rejected/deleted）', () => {
+    const rejected = { ...baseFile, id: 'r1', status: 'rejected' as const, uploadedAt: 't' }
+    const quarantined = { ...baseFile, id: 'q1', status: 'quarantined' as const, uploadedAt: 't' }
+    const deleted = { ...baseFile, id: 'd1', status: 'deleted' as const, uploadedAt: 't' }
+    expect(draftSafeFileMeta([uploaded, approved, rejected, quarantined, deleted])).toEqual([uploaded, approved, rejected, quarantined, deleted])
+  })
+
+  it('全部为瞬态时返回空数组（不残留卡死文件）', () => {
+    const uploading = { ...baseFile, id: 'pending-1', status: 'uploading' as const, uploadedAt: 't' }
+    expect(draftSafeFileMeta([uploading])).toEqual([])
   })
 })
 

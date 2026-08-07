@@ -160,14 +160,12 @@ export function restoreDraftState(
   fields: { id: string; type: string }[],
 ): {
   answers: Record<string, unknown>
-  fileIds: Record<string, string>
   volunteerClubIds: string[]
   preferences: JointDeptPref[]
   consented: boolean
   allowJointAdjustment: boolean
 } {
   const answers: Record<string, unknown> = {}
-  const fileIds: Record<string, string> = {}
   if (app.status === 'draft' && app.answers) {
     for (const [fieldId, value] of Object.entries(app.answers)) {
       const field = fields.find((f) => f.id === fieldId)
@@ -176,7 +174,6 @@ export function restoreDraftState(
           answers[fieldId] = value
         } else if (typeof value === 'string' && value) {
           answers[fieldId] = value
-          fileIds[fieldId] = value
         }
         continue
       }
@@ -186,7 +183,6 @@ export function restoreDraftState(
   }
   return {
     answers,
-    fileIds,
     volunteerClubIds: Array.isArray(app.volunteerClubIds) ? app.volunteerClubIds : [],
     preferences: app.preferences ? app.preferences.map((p) => ({ ...p })) : [],
     consented: app.consented ?? false,
