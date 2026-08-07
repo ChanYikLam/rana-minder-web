@@ -570,7 +570,7 @@ const publicHandlers: MockMethod[] = [
           id: c.clubId,
           name: c.clubName,
           description: c.description,
-          memberCount: c.memberCount,
+          memberCount: db.getMemberStats(c.clubId).total,
           logo: null,
           layer: 'exact' as SearchLayer,
         }))
@@ -1627,13 +1627,13 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
-  // Group 目录（接入向导候选：SM-ORG-001 唯一 Group 数据源）
+  // Group 目录（接入向导候选：SM-ORG-001 唯一 Group 数据源，仅暴露社团级候选，不泄露内部职位/部门层级）
   {
     url: '/api/admin/groups',
     method: 'get',
     response: ({ url }: { url: string }) => {
       if (!isPlatformClubManager(url)) return forbidden()
-      return { code: 0, data: { items: orgdb.listGroups() } }
+      return { code: 0, data: { items: orgdb.listGroups().filter((g) => g.purpose === 'club') } }
     },
   },
   // Group 分层搜索（精确 → 中文连续子串 → 受控错别字近似，3 有效字符门槛）
@@ -1660,11 +1660,21 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/clubs/wizard/save-step',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null } } }) => {
+    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
       if (!isPlatformClubManager(url)) return forbidden()
       const input = body.input || {}
       if (!input.clubId) return businessError('缺少社团 ID')
-      const result = orgdb.saveWizardStep(input.clubId, { step: input.step ?? 0, selectedGroupId: input.selectedGroupId, leaderGroupId: input.leaderGroupId })
+      const email = (input.email ?? '').trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return businessError('联系邮箱格式不正确')
+      const result = orgdb.saveWizardStep(input.clubId, {
+        step: input.step ?? 0,
+        selectedGroupId: input.selectedGroupId,
+        leaderGroupId: input.leaderGroupId,
+        email,
+        deptGroups: input.deptGroups,
+        roleGroups: input.roleGroups,
+        leaderRoleGroup: input.leaderRoleGroup,
+      })
       if (!result.ok) return businessError(result.error || '保存失败')
       return { code: 0, data: result.data }
     },
@@ -2474,11 +2484,16 @@ policies: retentionPolicies,
   {
     url: '/api/admin/clubs/wizard',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { groupId?: string; name?: string; description?: string; leaderGroupId?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
+    response: ({ url, body }: { url: string; body: { input: { groupId?: string; name?: string; description?: string; leaderGroupId?: string; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
       const input = body.input ?? {}
       if (!input.groupId) return businessError('缺少 Group ID')
-      const result = orgdb.createClubAccess({ groupId: input.groupId, name: input.name ?? '', description: input.description, leaderGroupId: input.leaderGroupId ?? '' })
+      const email = (input.email ?? '').trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return businessError('联系邮箱格式不正确')
+      const result = orgdb.createClubAccess({
+        groupId: input.groupId, name: input.name ?? '', description: input.description, leaderGroupId: input.leaderGroupId ?? '',
+        email, deptGroups: input.deptGroups, roleGroups: input.roleGroups, leaderRoleGroup: input.leaderRoleGroup,
+      })
       if (!result.ok || !result.data) return businessError(result.error || '接入失败')
       return { code: 0, data: { id: result.data.clubId, status: result.data.status, wizardStep: result.data.wizardStep, createdAt: result.data.createdAt } }
     },

@@ -155,6 +155,8 @@ export interface MockCandidateUser {
   id: string
   studentId: string
   name: string
+  email: string
+  phone: string
   isMember: boolean
 }
 
@@ -173,10 +175,10 @@ export const departments: MockDepartment[] = [
 ]
 
 export const candidates: MockCandidateUser[] = [
-  { id: 'cand-001', studentId: '20240010', name: '周明轩', isMember: false },
-  { id: 'cand-002', studentId: '20240011', name: '孙佳琪', isMember: false },
-  { id: 'cand-003', studentId: '20240012', name: '郑浩宇', isMember: false },
-  { id: 'cand-004', studentId: '20210005', name: '陈雨桐', isMember: true },
+  { id: 'cand-001', studentId: '20240010', name: '周明轩', email: 'candidate@example.edu.cn', phone: '13800000010', isMember: false },
+  { id: 'cand-002', studentId: '20240011', name: '孙佳琪', email: 'sun@example.edu.cn', phone: '13800000011', isMember: false },
+  { id: 'cand-003', studentId: '20240012', name: '郑浩宇', email: 'zheng@example.edu.cn', phone: '13800000012', isMember: false },
+  { id: 'cand-004', studentId: '20210005', name: '陈雨桐', email: 'member@example.edu.cn', phone: '13800000005', isMember: true },
 ]
 
 /** 按姓名连续子串/学号精确查找候选 */
@@ -555,9 +557,10 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
     const t = assertTransition('SM-MEM-004', inv.status, 'effective', 'confirmed')
     if (!t.ok) return { ok: false, error: t.reason || '当前状态不可确认生效' }
     inv.status = 'effective'
+    const candidate = candidates.find((c) => c.id === inv.candidateId)
     members.push({
       id: 'mem-' + Date.now(), clubId: inv.clubId, studentId: inv.candidateStudentId, name: inv.candidateName,
-      email: 'new@example.edu.cn', phone: '13900000000', status: 'active',
+      email: candidate?.email || '', phone: candidate?.phone || '', status: 'active',
       joinedAt: now, exitedAt: null,
       positions: inv.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: inv.departmentId, departmentName: inv.departmentName || '', title: '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active' }] : [],
       tenures: [], departmentHistory: [], anomalies: [],
@@ -575,9 +578,10 @@ export function createMemberFromAdmission(clubId: string, input: { studentId: st
   if (!input.studentId) return { ok: true, created: false, member: undefined }
   const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
   if (existing) return { ok: true, created: false, member: existing }
+  const candidate = candidates.find((c) => c.studentId === input.studentId)
   const member: MockMember = {
     id: 'mem-' + Date.now(), clubId, studentId: input.studentId, name: input.name,
-    email: 'new@example.edu.cn', phone: '13900000000', status: 'active',
+    email: candidate?.email || '', phone: candidate?.phone || '', status: 'active',
     joinedAt: input.acceptedAt, exitedAt: null,
     positions: input.departmentId ? [{ id: 'pos-' + Date.now(), departmentId: input.departmentId, departmentName: input.departmentName || '', title: '成员', startDate: new Date(input.acceptedAt).toISOString().slice(0, 10), endDate: null, status: 'active' }] : [],
     tenures: [], departmentHistory: input.departmentId ? [{ id: 'dhis-' + Date.now(), action: 'join', departmentName: input.departmentName || '', at: input.acceptedAt }] : [], anomalies: [],

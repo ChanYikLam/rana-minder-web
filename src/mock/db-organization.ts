@@ -32,6 +32,10 @@ export interface ClubFreezeInterval {
 export interface WizardDraft {
   selectedGroupId: string | null
   leaderGroupId: string | null
+  email: string
+  deptGroups: string[]
+  roleGroups: string[]
+  leaderRoleGroup: string
 }
 
 export interface MockClubAccess {
@@ -114,35 +118,35 @@ function daysAgo(days: number): string {
 export const clubAccesses: MockClubAccess[] = [
   {
     clubId: 'club-001', clubName: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001' },
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001', email: 'club-001@example.edu.cn', deptGroups: ['/学校学生组织/计算机协会/技术部'], roleGroups: [], leaderRoleGroup: '/学校学生组织/计算机协会/负责人' },
     leaderGroupId: 'grp-lead-001', leaderName: '张明远', memberCount: 128,
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 128,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-002', clubName: '电子设计协会', description: '电子设计与嵌入式开发', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002' },
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002', email: 'club-002@example.edu.cn', deptGroups: [], roleGroups: [], leaderRoleGroup: '/学校学生组织/电子设计协会/负责人' },
     leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', memberCount: 86,
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 86,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-003', clubName: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'suspended', groupId: 'grp-003', mappingVersion: 1,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-003', leaderGroupId: null },
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-003', leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
     leaderGroupId: null, leaderName: null, memberCount: 64,
     createdAt: '2023-03-01T00:00:00+08:00', boundAt: '2023-03-10T10:00:00+08:00', importedCount: 64,
     syncEvents: [], freezeIntervals: [{ id: 'fri-001', reason: '常规停用', suspendedAt: daysAgo(9), recoveredAt: null }], readonly: true,
   },
   {
     clubId: 'club-004', clubName: '摄影协会', description: '摄影艺术与后期制作', status: 'wizard_pending', groupId: null, mappingVersion: 0,
-    wizardStep: 0, wizard: { selectedGroupId: null, leaderGroupId: null },
+    wizardStep: 0, wizard: { selectedGroupId: null, leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
     leaderGroupId: null, leaderName: null, memberCount: 0,
     createdAt: '2025-07-28T00:00:00+08:00', boundAt: null, importedCount: 0,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-005', clubName: '新媒体中心', description: '校园新媒体运营与内容创作', status: 'sync_abnormal_ro', groupId: 'grp-005', mappingVersion: 2,
-    wizardStep: 4, wizard: { selectedGroupId: 'grp-005', leaderGroupId: null },
+    wizardStep: 4, wizard: { selectedGroupId: 'grp-005', leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' },
     leaderGroupId: null, leaderName: null, memberCount: 37,
     createdAt: '2024-09-01T00:00:00+08:00', boundAt: '2024-09-08T10:00:00+08:00', importedCount: 37,
     syncEvents: [{ id: 'evt-001', kind: 'group_lost', at: daysAgo(3), note: '对账检测到 Group 删除/移动/失权，进入同步异常只读' }],
@@ -158,11 +162,13 @@ const seedGroups: GroupSeed[] = structuredClone(groups)
 /** 测试隔离：恢复接入注册表与 Group 绑定关系的种子快照 */
 export function resetOrgDb(): void {
   clubAccesses.splice(0, clubAccesses.length, ...structuredClone(seedClubAccesses))
-  groups.forEach((g, i) => {
-    g.boundClubId = seedGroups[i].boundClubId
-    g.leaderGroupId = seedGroups[i].leaderGroupId
-    g.members = [...seedGroups[i].members]
-  })
+  for (const g of groups) {
+    const seed = seedGroups.find((s) => s.id === g.id)
+    if (!seed) continue
+    g.boundClubId = seed.boundClubId
+    g.leaderGroupId = seed.leaderGroupId
+    g.members = [...seed.members]
+  }
 }
 
 function findClub(clubId: string): MockClubAccess | undefined {
@@ -251,6 +257,15 @@ export function searchGroups(keyword: string): GroupSearchResult[] {
 
 // ================= 接入向导 =================
 
+/** 职位 Group 统一查询：同一数据源按「是否排除已绑定」过滤（leaderGroups/positions 共用，杜绝双源不一致） */
+function listPositionGroups(parentId: string, excludeBound = true): GroupNode[] {
+  return groups
+    .filter((g) => g.purpose === 'position' && g.parentId === parentId && (!excludeBound || !g.boundClubId))
+    .map((g) => ({
+      id: g.id, name: g.name, stableId: g.stableId, path: g.path, parentId: g.parentId, purpose: g.purpose, boundClubId: g.boundClubId, memberCount: g.members.length,
+    }))
+}
+
 /** Group 详情：基本信息 + 已有成员 + 可用负责人职位 Group（向导步骤 1/2 使用） */
 export function getGroupDetail(groupId: string): {
   id: string
@@ -274,15 +289,11 @@ export function getGroupDetail(groupId: string): {
     purpose: group.purpose,
     boundClubId: group.boundClubId,
     members: group.members.map((id) => ({ id, name: memberNames[id] ?? id })),
-    leaderGroups: groups.filter((g) => g.purpose === 'position' && g.parentId === groupId && !g.boundClubId).map((g) => ({
-      id: g.id, name: g.name, stableId: g.stableId, path: g.path, parentId: g.parentId, purpose: g.purpose, boundClubId: g.boundClubId, memberCount: g.members.length,
-    })),
+    leaderGroups: listPositionGroups(groupId, true),
     departments: groups.filter((g) => g.purpose === 'department' && g.parentId === groupId).map((g) => ({
       id: g.id, name: g.name, stableId: g.stableId, path: g.path, parentId: g.parentId, purpose: g.purpose, boundClubId: g.boundClubId, memberCount: g.members.length,
     })),
-    positions: groups.filter((g) => g.purpose === 'position' && g.parentId === groupId).map((g) => ({
-      id: g.id, name: g.name, stableId: g.stableId, path: g.path, parentId: g.parentId, purpose: g.purpose, boundClubId: g.boundClubId, memberCount: g.members.length,
-    })),
+    positions: listPositionGroups(groupId, false),
   }
 }
 
@@ -327,15 +338,13 @@ export function listGroups(): GroupNode[] {
  * 创建即进入 wizard_pending（SM-ORG-001 初始态），任一步校验失败保持未启用且不产生部分权限；
  * 绑定仅在 complete_validation 时落库（重复绑定/层级/负责人连续性在启用前复检）。
  */
-export function createClubAccess(input: { groupId: string; name: string; description?: string; leaderGroupId: string }): { ok: boolean; error?: string; data?: ClubAccessItem } {
+export function createClubAccess(input: { groupId: string; name: string; description?: string; leaderGroupId: string; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string }): { ok: boolean; error?: string; data?: ClubAccessItem } {
   const name = input.name.trim()
   if (!name) return { ok: false, error: '请填写社团展示名称' }
   if (clubAccesses.some((c) => c.clubName === name)) return { ok: false, error: '社团名称已存在，请检查用途唯一性' }
-  const group = findGroup(input.groupId)
-  if (!group) return { ok: false, error: '所选 Group 不存在' }
-  if (group.purpose !== 'club') return { ok: false, error: `Group「${group.name}」用途为「${group.purpose}」，仅社团级 Group 可接入` }
-  if (group.boundClubId) return { ok: false, error: `Group「${group.name}」已被社团 ${group.boundClubId} 绑定，不得重复绑定` }
-  if (!group.parentId || !findGroup(group.parentId)) return { ok: false, error: `Group「${group.name}」缺少有效父级，层级校验未通过` }
+  const binding = validateGroupForBinding(input.groupId, '')
+  if (!binding.ok) return { ok: false, error: binding.error }
+  const group = findGroup(input.groupId)!
   const leader = findGroup(input.leaderGroupId)
   if (!leader) return { ok: false, error: '负责人职位 Group 不存在' }
   if (leader.parentId !== group.id || leader.purpose !== 'position') return { ok: false, error: '负责人职位 Group 必须在所选社团层级下且为职位 Group' }
@@ -349,7 +358,7 @@ export function createClubAccess(input: { groupId: string; name: string; descrip
     groupId: null,
     mappingVersion: 0,
     wizardStep: 2,
-    wizard: { selectedGroupId: input.groupId, leaderGroupId: input.leaderGroupId },
+    wizard: { selectedGroupId: input.groupId, leaderGroupId: input.leaderGroupId, email: (input.email ?? '').trim(), deptGroups: input.deptGroups ?? [], roleGroups: input.roleGroups ?? [], leaderRoleGroup: input.leaderRoleGroup ?? '' },
     leaderGroupId: input.leaderGroupId,
     leaderName: memberNames[leader.members[0]] ?? null,
     memberCount: group.members.length,
@@ -364,7 +373,7 @@ export function createClubAccess(input: { groupId: string; name: string; descrip
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === club.clubId) }
 }
 
-export function saveWizardStep(clubId: string, input: { step: number; selectedGroupId?: string | null; leaderGroupId?: string | null }): { ok: boolean; error?: string; data?: ClubAccessItem } {
+export function saveWizardStep(clubId: string, input: { step: number; selectedGroupId?: string | null; leaderGroupId?: string | null; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string }): { ok: boolean; error?: string; data?: ClubAccessItem } {
   const club = findClub(clubId)
   if (!club) return { ok: false, error: '未找到该社团' }
   const check = validateTransition(club, 'wizard_pending', 'save_step')
@@ -373,6 +382,10 @@ export function saveWizardStep(clubId: string, input: { step: number; selectedGr
   club.wizard = {
     selectedGroupId: input.selectedGroupId !== undefined ? input.selectedGroupId : club.wizard?.selectedGroupId ?? null,
     leaderGroupId: input.leaderGroupId !== undefined ? input.leaderGroupId : club.wizard?.leaderGroupId ?? null,
+    email: input.email !== undefined ? input.email.trim() : club.wizard?.email ?? '',
+    deptGroups: input.deptGroups !== undefined ? input.deptGroups : club.wizard?.deptGroups ?? [],
+    roleGroups: input.roleGroups !== undefined ? input.roleGroups : club.wizard?.roleGroups ?? [],
+    leaderRoleGroup: input.leaderRoleGroup !== undefined ? input.leaderRoleGroup : club.wizard?.leaderRoleGroup ?? '',
   }
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
@@ -410,9 +423,10 @@ export function importMembers(clubId: string, memberIds: string[]): { ok: boolea
   if (club.status !== 'wizard_pending' && club.status !== 'enabled') return { ok: false, error: '当前状态不可导入成员' }
   const group = club.groupId ? findGroup(club.groupId) : club.wizard?.selectedGroupId ? findGroup(club.wizard.selectedGroupId) : undefined
   if (!group) return { ok: false, error: '请先选择要接入的 Group' }
+  if (!memberIds || memberIds.length === 0) return { ok: false, error: '成员列表不能为空，请先选择要导入的成员' }
   const valid = memberIds.filter((id) => group.members.includes(id))
   if (valid.length !== memberIds.length) return { ok: false, error: '存在不在该 Group 内的成员，导入被拒绝' }
-  club.memberCount = group.members.length
+  club.memberCount = valid.length
   club.importedCount = valid.length
   club.boundAt = club.boundAt || nowIso()
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
@@ -474,7 +488,7 @@ export function disconnectClub(clubId: string): { ok: boolean; error?: string; d
   club.leaderGroupId = null
   club.leaderName = null
   club.wizardStep = 0
-  club.wizard = { selectedGroupId: null, leaderGroupId: null }
+  club.wizard = { selectedGroupId: null, leaderGroupId: null, email: '', deptGroups: [], roleGroups: [], leaderRoleGroup: '' }
   pushSyncEvent(club, 'disconnect', `解除接入（原 Group：${prevGroupName}），等待重新接入`)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }

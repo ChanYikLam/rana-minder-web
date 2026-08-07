@@ -65,7 +65,7 @@ describe('P0-001 社团注册表统一（orgdb 单一权威）', () => {
     expect(items.map((c) => c.name).sort()).toEqual(['电子设计协会', '计算机协会'])
     expect(items.every((c) => c.description.length > 0)).toBe(true)
     const comp = items.find((c) => c.name === '计算机协会')
-    expect(comp?.memberCount).toBe(128)
+    expect(comp?.memberCount).toBe(6)
   })
 
   it('wizard 提交创建 wizard_pending 条目（无审批环节），未启用前不进目录', async () => {
@@ -127,7 +127,7 @@ describe('P0-001 社团注册表统一（orgdb 单一权威）', () => {
       input: { groupId: 'grp-dept-001', name: '部门冒充社团', description: '', leaderGroupId: 'grp-lead-001' },
     })
     expect(wrongPurpose.statusCode).toBe(422)
-    expect(wrongPurpose.body.message).toContain('仅社团级 Group 可接入')
+    expect(wrongPurpose.body.message).toContain('仅 club 用途可绑定为社团')
 
     const bound = await invokeHandler(wizardPattern, 'post', wizardUrl(), {
       input: { groupId: 'grp-001', name: '重复绑定', description: '', leaderGroupId: 'grp-lead-001' },

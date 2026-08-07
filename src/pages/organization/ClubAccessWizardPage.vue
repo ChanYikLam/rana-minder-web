@@ -152,6 +152,10 @@ async function submit() {
     name: form.value.name,
     description: form.value.description,
     leaderGroupId: form.value.leaderRoleGroup,
+    email: form.value.email,
+    deptGroups: form.value.deptGroups,
+    roleGroups: form.value.roleGroups,
+    leaderRoleGroup: form.value.leaderRoleGroup,
   })
   importing.value = false
   if (result.kind === 'completed') {
