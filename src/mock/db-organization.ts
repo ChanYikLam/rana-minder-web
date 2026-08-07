@@ -45,6 +45,10 @@ export interface MockClubAccess {
   wizard: WizardDraft | null
   leaderGroupId: string | null
   leaderName: string | null
+  /** 向导提交时选择的部门 Group ID 列表 */
+  deptGroupIds: string[]
+  /** 向导提交时选择的职位 Group ID 列表（不含负责人职位） */
+  roleGroupIds: string[]
   memberCount: number
   createdAt: string
   boundAt: string | null
@@ -52,6 +56,26 @@ export interface MockClubAccess {
   syncEvents: ClubSyncEvent[]
   freezeIntervals: ClubFreezeInterval[]
   readonly: boolean
+}
+
+/** Group → 权限模板映射（向导提交后建立，用于接入后从 Group 成员推导权限） */
+export interface GroupTemplateMapping {
+  clubId: string
+  groupId: string
+  templateId: string
+  createdAt: string
+}
+
+/** 模板映射注册表（内存态，与 clubAccesses 同步生命周期） */
+const groupTemplateMappings: GroupTemplateMapping[] = [
+  { clubId: 'club-001', groupId: 'grp-lead-001', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-002', groupId: 'grp-lead-002', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+]
+
+/** 预置模板与 Group 用途的默认关联规则 */
+const DEFAULT_TEMPLATE_MAP: Record<string, string> = {
+  position: 'tpl-001',   // 职位 Group → 社团负责人模板
+  department: 'tpl-003', // 部门 Group → 面试官模板
 }
 
 const nowIso = () => new Date().toISOString()
@@ -115,35 +139,35 @@ export const clubAccesses: MockClubAccess[] = [
   {
     clubId: 'club-001', clubName: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'enabled', groupId: 'grp-001', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-001', leaderGroupId: 'grp-lead-001' },
-    leaderGroupId: 'grp-lead-001', leaderName: '张明远', memberCount: 128,
+    leaderGroupId: 'grp-lead-001', leaderName: '张明远', deptGroupIds: ['grp-dept-001'], roleGroupIds: [], memberCount: 128,
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 128,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-002', clubName: '电子设计协会', description: '电子设计与嵌入式开发', status: 'enabled', groupId: 'grp-002', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-002', leaderGroupId: 'grp-lead-002' },
-    leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', memberCount: 86,
+    leaderGroupId: 'grp-lead-002', leaderName: '赵子涵', deptGroupIds: [], roleGroupIds: [], memberCount: 86,
     createdAt: '2022-09-01T00:00:00+08:00', boundAt: '2022-09-05T10:00:00+08:00', importedCount: 86,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-003', clubName: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'suspended', groupId: 'grp-003', mappingVersion: 1,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-003', leaderGroupId: null },
-    leaderGroupId: null, leaderName: null, memberCount: 64,
+    leaderGroupId: null, leaderName: null, deptGroupIds: [], roleGroupIds: [], memberCount: 64,
     createdAt: '2023-03-01T00:00:00+08:00', boundAt: '2023-03-10T10:00:00+08:00', importedCount: 64,
     syncEvents: [], freezeIntervals: [{ id: 'fri-001', reason: '常规停用', suspendedAt: daysAgo(9), recoveredAt: null }], readonly: true,
   },
   {
     clubId: 'club-004', clubName: '摄影协会', description: '摄影艺术与后期制作', status: 'wizard_pending', groupId: null, mappingVersion: 0,
     wizardStep: 0, wizard: { selectedGroupId: null, leaderGroupId: null },
-    leaderGroupId: null, leaderName: null, memberCount: 0,
+    leaderGroupId: null, leaderName: null, deptGroupIds: [], roleGroupIds: [], memberCount: 0,
     createdAt: '2025-07-28T00:00:00+08:00', boundAt: null, importedCount: 0,
     syncEvents: [], freezeIntervals: [], readonly: false,
   },
   {
     clubId: 'club-005', clubName: '新媒体中心', description: '校园新媒体运营与内容创作', status: 'sync_abnormal_ro', groupId: 'grp-005', mappingVersion: 2,
     wizardStep: 4, wizard: { selectedGroupId: 'grp-005', leaderGroupId: null },
-    leaderGroupId: null, leaderName: null, memberCount: 37,
+    leaderGroupId: null, leaderName: null, deptGroupIds: [], roleGroupIds: [], memberCount: 37,
     createdAt: '2024-09-01T00:00:00+08:00', boundAt: '2024-09-08T10:00:00+08:00', importedCount: 37,
     syncEvents: [{ id: 'evt-001', kind: 'group_lost', at: daysAgo(3), note: '对账检测到 Group 删除/移动/失权，进入同步异常只读' }],
     freezeIntervals: [], readonly: true,
@@ -266,7 +290,7 @@ export function getGroupDetail(groupId: string): {
 }
 
 /** 创建新社团接入记录（向导提交后进入待审核，外部已做名称/Group 等校验） */
-export function createClub(input: { clubName: string; description: string; groupId: string; leaderGroupId: string }): { ok: boolean; error?: string; data?: ClubAccessItem } {
+export function createClub(input: { clubName: string; description: string; groupId: string; leaderGroupId: string; deptGroupIds?: string[]; roleGroupIds?: string[] }): { ok: boolean; error?: string; data?: ClubAccessItem } {
   const name = input.clubName.trim()
   if (!name) return { ok: false, error: '社团名称不能为空' }
   if (clubAccesses.some((c) => c.clubName === name)) return { ok: false, error: '社团名称已存在' }
@@ -288,6 +312,8 @@ export function createClub(input: { clubName: string; description: string; group
     wizard: { selectedGroupId: input.groupId, leaderGroupId: input.leaderGroupId },
     leaderGroupId: null,
     leaderName: null,
+    deptGroupIds: input.deptGroupIds ?? [],
+    roleGroupIds: input.roleGroupIds ?? [],
     memberCount: 0,
     createdAt: nowIso(),
     boundAt: null,
@@ -314,6 +340,40 @@ export function listGroups(opts?: { parentId?: string | null; purpose?: string }
     parentId: g.parentId, purpose: g.purpose, boundClubId: g.boundClubId,
     memberCount: g.members.length,
   }))
+}
+
+// ================= 模板映射（US-CFG-01 / P1-005） =================
+
+/** 查询社团所有 Group→Template 映射 */
+export function getTemplateMappings(clubId: string): GroupTemplateMapping[] {
+  return groupTemplateMappings.filter((m) => m.clubId === clubId)
+}
+
+/** 创建单条 Group→Template 映射（幂等） */
+function ensureMapping(clubId: string, groupId: string, templateId: string) {
+  const exists = groupTemplateMappings.some((m) => m.clubId === clubId && m.groupId === groupId)
+  if (!exists) {
+    groupTemplateMappings.push({ clubId, groupId, templateId, createdAt: nowIso() })
+  }
+}
+
+/** 为社团批量创建权限模板映射（向导完成后调用） */
+function createTemplateMappings(club: MockClubAccess) {
+  // 负责人 Group → tpl-001（社团负责人模板）
+  if (club.leaderGroupId) ensureMapping(club.clubId, club.leaderGroupId, 'tpl-001')
+  // 部门 Group → tpl-003（面试官模板）
+  for (const deptId of club.deptGroupIds) ensureMapping(club.clubId, deptId, DEFAULT_TEMPLATE_MAP.department)
+  // 职位 Group（含 roleGroupIds + leaderGroupId） → tpl-001
+  for (const roleId of club.roleGroupIds) ensureMapping(club.clubId, roleId, DEFAULT_TEMPLATE_MAP.position)
+  // 社团主 Group → tpl-001
+  if (club.groupId) ensureMapping(club.clubId, club.groupId, DEFAULT_TEMPLATE_MAP.position)
+}
+
+/** 清除社团所有模板映射（解除接入时调用） */
+export function clearTemplateMappings(clubId: string) {
+  for (let i = groupTemplateMappings.length - 1; i >= 0; i--) {
+    if (groupTemplateMappings[i].clubId === clubId) groupTemplateMappings.splice(i, 1)
+  }
 }
 
 export function listClubAccesses(): ClubAccessItem[] {
@@ -376,6 +436,7 @@ export function completeWizard(clubId: string): { ok: boolean; error?: string; d
   club.mappingVersion += 1
   club.status = 'enabled'
   club.readonly = false
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -424,6 +485,7 @@ export function recoverClub(clubId: string): { ok: boolean; error?: string; data
   club.status = 'enabled'
   club.readonly = false
   pushSyncEvent(club, 'recover', '恢复启用，冻结期限已按停用时长顺延')
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -452,6 +514,7 @@ export function disconnectClub(clubId: string): { ok: boolean; error?: string; d
   club.wizardStep = 0
   club.wizard = { selectedGroupId: null, leaderGroupId: null }
   pushSyncEvent(club, 'disconnect', `解除接入（原 Group：${prevGroupName}），等待重新接入`)
+  clearTemplateMappings(clubId)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 

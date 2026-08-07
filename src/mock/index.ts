@@ -2367,6 +2367,15 @@ policies: retentionPolicies,
       return { code: 0, data: { items: permissionTemplates } }
     },
   },
+  // Group→权限模板映射查询（P1-005：按社团查询已建立的映射关系）
+  {
+    url: '/api/admin/clubs/:clubId/template-mappings',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { items: orgdb.getTemplateMappings(query.clubId) } }
+    },
+  },
   // 新建权限模板（直接进入草稿状态）
   {
     url: '/api/admin/config/permission-templates',
@@ -2506,7 +2515,7 @@ policies: retentionPolicies,
         const r = positionGroups.find((g) => g.id === p)
         if (!r) return businessError(`职位 Group「${p}」不存在或类型不正确`)
       }
-      const result = orgdb.createClub({ clubName: name, description: input.description ?? '', groupId, leaderGroupId: input.leaderGroupId })
+      const result = orgdb.createClub({ clubName: name, description: input.description ?? '', groupId, leaderGroupId: input.leaderGroupId, deptGroupIds: input.deptGroups ?? [], roleGroupIds: input.roleGroups ?? [] })
       if (!result.ok) return businessError(result.error || '创建失败')
       return { code: 0, data: { id: result.data!.clubId, status: 'wizard_pending', pendingAt: new Date().toISOString() } }
     },
