@@ -14,4 +14,10 @@ describe('exportFormat 展示格式化', () => {
     const d = new Date('2026-08-07T12:34:00')
     expect(formatTime(d.toISOString())).toBe('8月7日 12:34')
   })
+
+  it('formatTime：无效日期防御性返回空串', () => {
+    expect(formatTime('bad')).toBe('')
+    expect(formatTime('')).toBe('')
+    expect(formatTime('not-a-date')).toBe('')
+  })
 })
