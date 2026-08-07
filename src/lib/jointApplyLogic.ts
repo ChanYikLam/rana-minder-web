@@ -3,7 +3,7 @@
  * 与 recruitment-status 同模式：页面仅做状态编排，决策/计算集中于此。
  */
 
-import type { FileMeta } from '@/types/domain/form'
+import { fileBlockingError } from './formFile'
 
 export interface JointFormField {
   id: string
@@ -95,17 +95,7 @@ export function movePreference(preferences: JointDeptPref[], index: number, dire
   return next
 }
 
-/** 附件状态拦截：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
-function fileBlockingError(value: unknown): string | null {
-  if (!Array.isArray(value)) return null
-  for (const f of value as FileMeta[]) {
-    if (f.status === 'checking' || f.status === 'uploading') return '文件安全检查中，请稍候再提交'
-    if (f.status === 'rejected') return '文件上传失败，请重新上传'
-    if (f.status === 'quarantined') return '附件疑似恶意内容已隔离，请联系管理员处理'
-    if (f.status === 'deleted') return '文件已移除，请重新上传'
-  }
-  return null
-}
+/** 附件状态拦截（逻辑见 formFile，供报名页/联合报名页共用）：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
 
 /** 表单校验：必填缺失（按字段类型取值）、文件检查中/被拒绝/被隔离/被删除；同字段首个错误优先 */
 export function validateJointForm(

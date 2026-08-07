@@ -13,7 +13,8 @@ import ObjectPicker from '@/components/form/ObjectPicker.vue'
 import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
 import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
 import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
-import type { FormField, FileMeta } from '@/types/domain/form'
+import type { FormField } from '@/types/domain/form'
+import { restoredFileMeta as restoredFileMetaFromLib } from '@/lib/formFile'
 import {
   buildSubmitPayload,
   channelStatusMeta,
@@ -79,15 +80,8 @@ const showApplyForm = computed(() => isEditableStatus(myApplication.value))
 /** 部门意向仅对已选意向社团开放 */
 const volunteerClubs = computed(() => (detail.value?.clubs || []).filter((c) => volunteerClubIds.value.includes(c.id)))
 
-/** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[] */
-function restoredFileMeta(value: unknown): FileMeta[] {
-  if (Array.isArray(value)) {
-    return value.map((v): FileMeta => (typeof v === 'object' && v !== null ? (v as FileMeta) : restoredFileMeta(v)[0])).filter(Boolean)
-  }
-  if (typeof value !== 'string' || value === '') return []
-  // 历史 fileId 字符串回填：不宣称已通过安全检测（无真实元数据），以中性态 uploaded 展示
-  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'uploaded', uploadedAt: '', checkedAt: null, downloadUrl: null }]
-}
+/** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[]（逻辑见 src/lib/formFile） */
+const restoredFileMeta = restoredFileMetaFromLib
 
 /** validateJointForm 返回单错误串，DynamicForm 的 fieldErrors 需要 string[] */
 const formErrorGroups = computed<Record<string, string[]>>(() =>
@@ -143,6 +137,8 @@ function restoreDraft(app: MyApplication) {
   const restored = restoreDraftState(app, formFields.value)
   for (const [fieldId, value] of Object.entries(restored.answers)) {
     const field = formFields.value.find((f) => f.id === fieldId)
+    // restoreDraftState 对 FileMeta[] 原样返回、对历史 fileId 字符串返回字符串；
+    // 此处统一经 restoredFileMeta 归一为 FileMeta[]（字符串形态必须转换，数组形态幂等）
     formData.value[fieldId] = field?.type === 'file' || field?.type === 'image' ? restoredFileMeta(value) : value
   }
   volunteerClubIds.value = restored.volunteerClubIds
@@ -168,10 +164,11 @@ const preferenceEntries = computed<PreferenceEntry[]>({
   },
 })
 
-/** ObjectPicker 分组：每个已选意向社团一组部门，多选切换已选/未选 */
+/** ObjectPicker 分组：每个已选意向社团一组部门，多选切换已选/未选；key 用 club.id 保证多社团分组唯一 */
 const deptPickerGroups = computed<PickerGroup[]>(() =>
   volunteerClubs.value.map((club) => ({
     type: 'department',
+    key: club.id,
     label: club.name,
     items: club.departments.map((d) => ({ id: d.id, label: d.name })),
   })),

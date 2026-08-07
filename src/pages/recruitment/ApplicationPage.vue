@@ -12,7 +12,8 @@ import ObjectPicker from '@/components/form/ObjectPicker.vue'
 import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
 import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
 import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
-import type { FormField, FileMeta } from '@/types/domain/form'
+import type { FormField } from '@/types/domain/form'
+import { fileBlockingError, isFileFieldFilled, restoredFileMeta as restoredFileMetaFromLib } from '@/lib/formFile'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string; allowAdjustmentDefault?: boolean }
 interface MyApplication {
@@ -40,15 +41,8 @@ const submitError = ref<string | null>(null)
 const savedDraft = ref(false)
 const savingDraft = ref(false)
 
-/** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[] */
-function restoredFileMeta(value: unknown): FileMeta[] {
-  if (Array.isArray(value)) {
-    return value.map((v): FileMeta => (typeof v === 'object' && v !== null ? (v as FileMeta) : restoredFileMeta(v)[0])).filter(Boolean)
-  }
-  if (typeof value !== 'string' || value === '') return []
-  // 历史 fileId 字符串回填：不宣称已通过安全检测（无真实元数据），以中性态 uploaded 展示
-  return [{ id: value, name: '已上传附件', size: 0, mimeType: '', status: 'uploaded', uploadedAt: '', checkedAt: null, downloadUrl: null }]
-}
+/** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[]（逻辑见 src/lib/formFile） */
+const restoredFileMeta = restoredFileMetaFromLib
 
 async function loadData() {
   state.value = 'loading'
@@ -235,25 +229,15 @@ async function handleSaveDraft() {
   }
 }
 
-/** 必填判定按字段类型取值：file/image 以附件数组非空为准，其余以非空字符串为准 */
+/** 必填判定按字段类型取值：file/image 以附件数组非空为准（逻辑见 src/lib/formFile），其余以非空字符串为准 */
 function isFilled(value: unknown, field: FormField): boolean {
   if (field.type === 'file' || field.type === 'image') {
-    return Array.isArray(value) && value.length > 0
+    return isFileFieldFilled(value)
   }
   return typeof value === 'string' && value.trim() !== ''
 }
 
-/** 附件状态拦截：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
-function fileBlockingError(value: unknown): string | null {
-  if (!Array.isArray(value)) return null
-  for (const f of value as FileMeta[]) {
-    if (f.status === 'checking' || f.status === 'uploading') return '文件安全检查中，请稍候再提交'
-    if (f.status === 'rejected') return '文件上传失败，请重新上传'
-    if (f.status === 'quarantined') return '附件疑似恶意内容已隔离，请联系管理员处理'
-    if (f.status === 'deleted') return '文件已移除，请重新上传'
-  }
-  return null
-}
+/** 附件状态拦截（逻辑见 src/lib/formFile）：检查中/上传中不可提交，被拒绝、隔离或删除需重新处理 */
 
 async function handleSubmit() {
   if (!showApplyForm.value) return

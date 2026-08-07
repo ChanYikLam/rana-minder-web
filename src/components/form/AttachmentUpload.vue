@@ -2,6 +2,7 @@
 import { computed, onUnmounted } from 'vue'
 import { CheckCircle2, LoaderCircle, ShieldAlert } from '@lucide/vue'
 import { post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { FileMeta, FileStatus } from '@/types/domain/form'
 
 const CHECK_DELAY_MS = 1200
@@ -87,6 +88,8 @@ async function resolveUpload(tempId: string, file: File) {
   } else {
     updated[idx] = { ...updated[idx], status: 'rejected' as const }
     emit('update:modelValue', updated)
+    const msg = result.kind === 'rejected' && result.error ? result.error.message : '文件上传失败，请重新上传'
+    toast.error(msg)
   }
 }
 

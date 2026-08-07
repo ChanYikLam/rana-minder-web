@@ -10,6 +10,11 @@ vi.mock('@/services/client', () => ({
   post: (...args: unknown[]) => mockPost(...args),
 }))
 
+vi.mock('vue-sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+import { toast } from 'vue-sonner'
 import AttachmentUpload from './AttachmentUpload.vue'
 
 const uploadOk = {
@@ -112,7 +117,7 @@ describe('AttachmentUpload 上传与安全检查', () => {
     expect(wrapper.text()).not.toContain('已通过安全检测')
   })
 
-  it('上传失败：标记已拒绝', async () => {
+  it('上传失败：标记已拒绝并 toast 提示', async () => {
     const wrapper = mount(AttachmentUpload, { props: { modelValue: [] } })
 
     await selectFile(wrapper)
@@ -123,6 +128,7 @@ describe('AttachmentUpload 上传与安全检查', () => {
 
     expect(lastFiles(wrapper)[0].status).toBe('rejected')
     expect(wrapper.text()).toContain('已拒绝')
+    expect(toast.error).toHaveBeenCalledWith('网络连接异常')
   })
 
   it('类型/大小不符合要求：本地直接拒绝且不发起上传', async () => {
