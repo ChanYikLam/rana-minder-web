@@ -68,7 +68,10 @@ export interface GroupTemplateMapping {
 
 /** 模板映射注册表（内存态，与 clubAccesses 同步生命周期） */
 const groupTemplateMappings: GroupTemplateMapping[] = [
+  { clubId: 'club-001', groupId: 'grp-001', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
   { clubId: 'club-001', groupId: 'grp-lead-001', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-001', groupId: 'grp-dept-001', templateId: 'tpl-003', createdAt: '2022-09-05T10:00:00+08:00' },
+  { clubId: 'club-002', groupId: 'grp-002', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
   { clubId: 'club-002', groupId: 'grp-lead-002', templateId: 'tpl-001', createdAt: '2022-09-05T10:00:00+08:00' },
 ]
 
@@ -134,6 +137,9 @@ function daysAgo(days: number): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 }
 
+/** 测试隔离快照：Group 树（含 boundClubId 绑定关系） */
+const seedGroups = structuredClone(groups)
+
 /** 接入注册表：club-001/002 已启用；club-004 待接入；club-003 停用中；club-005 同步异常（可演示修复/重绑） */
 export const clubAccesses: MockClubAccess[] = [
   {
@@ -173,6 +179,10 @@ export const clubAccesses: MockClubAccess[] = [
     freezeIntervals: [], readonly: true,
   },
 ]
+
+/** 测试隔离快照（模块加载时捕获初始种子） */
+const seedClubAccesses = structuredClone(clubAccesses)
+const seedGroupTemplateMappings = structuredClone(groupTemplateMappings)
 
 // ================= 工具 =================
 
@@ -555,6 +565,7 @@ export function rebindClub(clubId: string, groupId: string): { ok: boolean; erro
   club.status = 'suspended'
   club.readonly = false
   pushSyncEvent(club, 'rebind', `重新绑定 Group「${groupName(groupId)}」，统一先进入已停用`)
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -574,6 +585,7 @@ export function reaccessClub(clubId: string, groupId: string): { ok: boolean; er
   club.status = 'suspended'
   club.readonly = false
   pushSyncEvent(club, 'reaccess', `重新接入 Group「${groupName(groupId)}」，统一先进入已停用`)
+  createTemplateMappings(club)
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
@@ -587,4 +599,11 @@ export function triggerGroupLost(clubId: string): { ok: boolean; error?: string;
   club.readonly = true
   pushSyncEvent(club, 'group_lost', '对账检测到 Group 删除/移动/失权，进入同步异常只读')
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
+}
+
+/** 测试隔离：恢复种子数据与模板映射（P1-005 注册表随之重置） */
+export function resetOrgDb(): void {
+  groups.splice(0, groups.length, ...structuredClone(seedGroups))
+  clubAccesses.splice(0, clubAccesses.length, ...structuredClone(seedClubAccesses))
+  groupTemplateMappings.splice(0, groupTemplateMappings.length, ...structuredClone(seedGroupTemplateMappings))
 }

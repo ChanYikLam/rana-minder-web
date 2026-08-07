@@ -9,15 +9,16 @@ import type { PageState } from '@/types/machine'
 import { Users, CheckCircle2, XCircle, AlertTriangle, ArrowLeft, ArrowRight, FolderTree } from '@lucide/vue'
 interface CasdoorGroupRow {
   id: string
-  path: string
   name: string
-  parentPath: string | null
-  kind: 'org' | 'club' | 'dept' | 'role'
-  memberCount: number
+  stableId: string
+  path: string
+  parentId: string | null
+  purpose: 'club' | 'department' | 'position'
   boundClubId: string | null
+  memberCount: number
 }
 
-interface ClubRow { id: string; name: string; status: string; memberCount: number; createdAt: string; groupMapped: boolean }
+interface ClubRow { clubId: string; clubName: string; status: string }
 
 type Step = 'group' | 'info' | 'structure' | 'validate' | 'done'
 
@@ -36,6 +37,7 @@ const searchResults = ref<SearchResult[]>([])
 const searchFailed = ref(false)
 const selectedGroup = ref<CasdoorGroupRow | null>(null)
 const candidateGroups = ref<CasdoorGroupRow[]>([])
+const searchRaw = ref<CasdoorGroupRow[]>([])
 
 const form = ref({
   name: '',
@@ -60,16 +62,16 @@ const fuzzyExampleMembers = computed(() => {
 const checks = computed(() => {
   const list: { label: string; ok: boolean; detail: string }[] = []
   const g = selectedGroup.value
-  list.push({ label: 'Group 存在且为社团级', ok: !!g && g.kind === 'club', detail: g ? `${g.path}（${g.kind}）` : '未选择' })
+  list.push({ label: 'Group 存在且为社团级', ok: !!g && g.purpose === 'club', detail: g ? `${g.path}（${g.purpose}）` : '未选择' })
   list.push({ label: '无重复绑定', ok: !!g && !g.boundClubId, detail: g?.boundClubId ? `已绑定 ${g.boundClubId}` : '未绑定' })
-  list.push({ label: '名称唯一', ok: !!form.value.name.trim() && !existingClubs.value.some((c) => c.name === form.value.name.trim()), detail: form.value.name.trim() || '未填写' })
-  const leader = roleCandidates.value.find((r) => r.path === form.value.leaderRoleGroup)
-  const leaderInTree = !!g && !!leader && leader.path.startsWith(g.path + '/')
+  list.push({ label: '名称唯一', ok: !!form.value.name.trim() && !existingClubs.value.some((c) => c.clubName === form.value.name.trim()), detail: form.value.name.trim() || '未填写' })
+  const leader = roleCandidates.value.find((r) => r.id === form.value.leaderRoleGroup)
+  const leaderInTree = !!g && !!leader && leader.purpose === 'position' && leader.parentId === g.id
   list.push({ label: '负责人职位已指定且在层级下', ok: !!g && leaderInTree, detail: leader ? leader.path : '未指定' })
-  list.push({ label: '负责人职位有效（≥1 名负责人）', ok: !!g && leaderInTree && leader!.kind === 'role' && leader!.memberCount >= 1, detail: leader ? `成员 ${leader.memberCount} 名` : '-' })
-  const deptOk = form.value.deptGroups.every((p) => !!g && p.startsWith(g.path + '/') && deptCandidates.value.some((d) => d.path === p))
+  list.push({ label: '负责人职位有效（≥1 名负责人）', ok: !!g && leaderInTree && leader!.memberCount >= 1, detail: leader ? `成员 ${leader.memberCount} 名` : '-' })
+  const deptOk = form.value.deptGroups.every((p) => deptCandidates.value.some((d) => d.id === p))
   list.push({ label: '部门 Group 层级正确', ok: deptOk, detail: `${form.value.deptGroups.length} 个已选` })
-  const roleOk = form.value.roleGroups.every((p) => !!g && p.startsWith(g.path + '/') && roleCandidates.value.some((r) => r.path === p))
+  const roleOk = form.value.roleGroups.every((p) => roleCandidates.value.some((r) => r.id === p))
   list.push({ label: '职位 Group 层级正确', ok: roleOk, detail: `${form.value.roleGroups.length} 个已选` })
   return list
 })
@@ -98,7 +100,7 @@ function toSearchResult(g: CasdoorGroupRow): SearchResult {
     id: g.id,
     name: g.name,
     subtitle: `${g.path} · ${g.memberCount} 名成员${bound}`,
-    group: g.kind === 'club' ? '社团级 Group' : g.kind === 'org' ? '组织级' : g.kind === 'dept' ? '部门级' : '角色级',
+    group: g.purpose === 'club' ? '社团级 Group' : g.purpose === 'department' ? '部门级' : '角色级',
     match: 'exact',
     score: 0,
   }
@@ -108,7 +110,8 @@ const { searching, seq, schedule } = useDebouncedSearch({
   onSearch: async (kw) => {
     if (!kw) {
       // 空关键字：立即重置为候选列表，不发请求
-      searchResults.value = candidateGroups.value.filter((g) => g.kind === 'club').map(toSearchResult)
+      searchRaw.value = candidateGroups.value
+      searchResults.value = candidateGroups.value.filter((g) => g.purpose === 'club').map(toSearchResult)
       searchFailed.value = false
       return
     }
@@ -118,6 +121,7 @@ const { searching, seq, schedule } = useDebouncedSearch({
     if (mySeq !== seq.value) return
     if (result.kind === 'completed') {
       const data = (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data
+      searchRaw.value = data.items
       searchResults.value = data.items.map(toSearchResult)
       searchFailed.value = false
     } else {
@@ -132,34 +136,28 @@ const { searching, seq, schedule } = useDebouncedSearch({
 watch(keyword, (kw) => schedule(kw))
 
 async function onSelectGroup(r: SearchResult) {
-  const g = candidateGroups.value.find((c) => c.id === r.id) ?? (await getGroupByPath(r.subtitle?.split(' · ')[0] ?? ''))
+  const g = searchRaw.value.find((x) => x.id === r.id) ?? candidateGroups.value.find((c) => c.id === r.id)
   if (!g) return
   selectedGroup.value = g
   form.value.name = form.value.name || g.name
   const [depts, roles] = await Promise.all([
-    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { under: g.path, kind: 'dept' }),
-    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { under: g.path, kind: 'role' }),
+    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { under: g.id, kind: 'department' }),
+    get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { under: g.id, kind: 'position' }),
   ])
   if (depts.kind === 'completed') deptCandidates.value = (depts as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items
   if (roles.kind === 'completed') roleCandidates.value = (roles as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items
 }
 
-async function getGroupByPath(path: string): Promise<CasdoorGroupRow | null> {
-  const result = await get<{ items: CasdoorGroupRow[] }>('/admin/casdoor/groups', { keyword: path })
-  if (result.kind !== 'completed') return null
-  return (result as { kind: 'completed'; data: { items: CasdoorGroupRow[] } }).data.items.find((x) => x.path === path) ?? null
-}
-
 async function submit() {
   importing.value = true
   const result = await post<{ id: string; status: string }>('/admin/clubs/wizard', {
-    groupPath: selectedGroup.value?.path,
+    groupId: selectedGroup.value?.id,
     name: form.value.name,
     description: form.value.description,
     email: form.value.email,
     deptGroups: form.value.deptGroups,
     roleGroups: form.value.roleGroups,
-    leaderRoleGroup: form.value.leaderRoleGroup,
+    leaderGroupId: form.value.leaderRoleGroup,
   })
   importing.value = false
   if (result.kind === 'completed') {
@@ -266,19 +264,19 @@ onMounted(loadInitial)
             <div class="space-y-2 max-h-56 overflow-y-auto">
               <label
                 v-for="d in deptCandidates"
-                :key="d.path"
+                :key="d.id"
                 class="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 cursor-pointer text-sm hover:bg-subtle"
-                :class="form.deptGroups.includes(d.path) ? 'border-primary bg-primary-subtle' : ''"
+                :class="form.deptGroups.includes(d.id) ? 'border-primary bg-primary-subtle' : ''"
               >
                 <span class="flex items-center gap-2 min-w-0">
                   <input
                     type="checkbox"
                     class="accent-primary shrink-0"
-                    :checked="form.deptGroups.includes(d.path)"
+                    :checked="form.deptGroups.includes(d.id)"
                     @change="
-                      form.deptGroups.includes(d.path)
-                        ? form.deptGroups.splice(form.deptGroups.indexOf(d.path), 1)
-                        : form.deptGroups.push(d.path)
+                      form.deptGroups.includes(d.id)
+                        ? form.deptGroups.splice(form.deptGroups.indexOf(d.id), 1)
+                        : form.deptGroups.push(d.id)
                     "
                   />
                   <span class="truncate">{{ d.name }}</span>
@@ -294,19 +292,19 @@ onMounted(loadInitial)
             <div class="space-y-2 max-h-56 overflow-y-auto">
               <label
                 v-for="r in roleCandidates"
-                :key="r.path"
+                :key="r.id"
                 class="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 cursor-pointer text-sm hover:bg-subtle"
-                :class="form.roleGroups.includes(r.path) ? 'border-primary bg-primary-subtle' : ''"
+                :class="form.roleGroups.includes(r.id) ? 'border-primary bg-primary-subtle' : ''"
               >
                 <span class="flex items-center gap-2 min-w-0">
                   <input
                     type="checkbox"
                     class="accent-primary shrink-0"
-                    :checked="form.roleGroups.includes(r.path)"
+                    :checked="form.roleGroups.includes(r.id)"
                     @change="
-                      form.roleGroups.includes(r.path)
-                        ? form.roleGroups.splice(form.roleGroups.indexOf(r.path), 1)
-                        : form.roleGroups.push(r.path)
+                      form.roleGroups.includes(r.id)
+                        ? form.roleGroups.splice(form.roleGroups.indexOf(r.id), 1)
+                        : form.roleGroups.push(r.id)
                     "
                   />
                   <span class="truncate">{{ r.name }}</span>
@@ -325,7 +323,7 @@ onMounted(loadInitial)
             class="w-full rounded-md border border-border bg-elevated px-3 h-10 text-sm text-text-primary focus:border-primary focus:outline-none"
           >
             <option value="">请选择负责人职位</option>
-            <option v-for="r in roleCandidates" :key="r.path" :value="r.path">
+            <option v-for="r in roleCandidates" :key="r.id" :value="r.id">
               {{ r.name }}（{{ r.memberCount }} 名成员）
             </option>
           </select>

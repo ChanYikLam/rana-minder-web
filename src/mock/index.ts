@@ -2372,7 +2372,7 @@ policies: retentionPolicies,
     url: '/api/admin/clubs/:clubId/template-mappings',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
+      if (!isPlatformClubManager(url)) return forbidden()
       return { code: 0, data: { items: orgdb.getTemplateMappings(query.clubId) } }
     },
   },
@@ -2500,20 +2500,23 @@ policies: retentionPolicies,
       const name = (input.name ?? '').trim()
       if (!name) return businessError('请填写社团名称')
       if (!input.leaderGroupId) return businessError('启用前必须指定负责人职位 Group')
-      const leaderGroup = orgdb.getGroupDetail(input.leaderGroupId)
-      if (!leaderGroup || leaderGroup.purpose !== 'position') return businessError('负责人职位必须是角色级 Group')
-      if (leaderGroup.members.length < 1) return businessError('负责人职位 Group 中无有效负责人')
+      const leaderGroup = orgdb.listGroups({ purpose: 'position' }).find((g) => g.id === input.leaderGroupId)
+      if (!leaderGroup) return businessError('负责人职位必须是角色级 Group')
+      if (leaderGroup.parentId !== groupId) return businessError('负责人职位 Group 必须位于所选社团层级之下')
+      if (leaderGroup.memberCount < 1) return businessError('负责人职位 Group 中无有效负责人')
       // 校验部门 Group
       const deptGroups = orgdb.listGroups({ purpose: 'department' })
       for (const p of input.deptGroups ?? []) {
         const d = deptGroups.find((g) => g.id === p)
         if (!d) return businessError(`部门 Group「${p}」不存在或类型不正确`)
+        if (d.parentId !== groupId) return businessError(`部门 Group「${p}」不在所选社团层级之下`)
       }
       // 校验职位 Group
       const positionGroups = orgdb.listGroups({ purpose: 'position' })
       for (const p of input.roleGroups ?? []) {
         const r = positionGroups.find((g) => g.id === p)
         if (!r) return businessError(`职位 Group「${p}」不存在或类型不正确`)
+        if (r.parentId !== groupId) return businessError(`职位 Group「${p}」不在所选社团层级之下`)
       }
       const result = orgdb.createClub({ clubName: name, description: input.description ?? '', groupId, leaderGroupId: input.leaderGroupId, deptGroupIds: input.deptGroups ?? [], roleGroupIds: input.roleGroups ?? [] })
       if (!result.ok) return businessError(result.error || '创建失败')
