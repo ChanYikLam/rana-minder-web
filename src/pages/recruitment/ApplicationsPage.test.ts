@@ -62,4 +62,24 @@ describe('ApplicationsPage 报名申请管理', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('张三')
   })
+
+  it('加载失败后重试恢复：错误态点重试成功渲染列表', async () => {
+    const retryStubs = {
+      ...pageStubs,
+      PageStateBoundary: {
+        props: ['state'],
+        template: '<div><slot /><button v-if="state === \'error\'" class="retry-btn" @click="$emit(\'retry\')">重试</button></div>',
+      },
+    }
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [app] } })
+    const wrapper = mount(ApplicationsPage, { global: { stubs: retryStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('张三')
+
+    await wrapper.find('.retry-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('张三')
+    wrapper.unmount()
+  })
 })

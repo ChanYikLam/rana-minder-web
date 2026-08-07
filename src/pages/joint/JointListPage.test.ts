@@ -37,4 +37,12 @@ describe('JointListPage 联合活动列表', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('联合招新')
   })
+
+  it('越权码（IFC-ERR-003）映射 forbidden：不渲染列表', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    const wrapper = mount(JointListPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('联合招新')
+    wrapper.unmount()
+  })
 })

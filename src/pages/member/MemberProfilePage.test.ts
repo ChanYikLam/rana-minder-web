@@ -49,4 +49,20 @@ describe('MemberProfilePage 成员档案', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('陈雨桐')
   })
+
+  it('越权码（IFC-ERR-003）映射 forbidden：不渲染成员信息', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    const wrapper = mount(MemberProfilePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('陈雨桐')
+    wrapper.unmount()
+  })
+
+  it('accepted（任务处理中）：保持加载态不渲染成员信息', async () => {
+    mockGet.mockResolvedValue({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } })
+    const wrapper = mount(MemberProfilePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('陈雨桐')
+    wrapper.unmount()
+  })
 })

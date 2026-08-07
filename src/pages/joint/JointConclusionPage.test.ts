@@ -38,4 +38,12 @@ describe('JointConclusionPage 联合结论与邀请', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('张三')
   })
+
+  it('越权码（IFC-ERR-003）映射 forbidden：不渲染结论', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('张三')
+    wrapper.unmount()
+  })
 })

@@ -50,4 +50,12 @@ describe('InterviewSchedulePage 招新面试排期', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('秋季招新面试')
   })
+
+  it('越权码（IFC-ERR-003）映射 forbidden：不渲染排期', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    const wrapper = mount(InterviewSchedulePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('秋季招新面试')
+    wrapper.unmount()
+  })
 })

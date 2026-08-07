@@ -19,26 +19,3 @@ export const pageStubs = {
   AttachmentUpload: { template: '<div />' },
   DateTimePicker: { template: '<div />' },
 }
-
-/** 页面测试通用 mock 工厂：vi.hoisted 后作为 vi.mock 工厂的数据源 */
-export interface PageMocks {
-  mockGet: ReturnType<typeof vi.fn>
-  mockPost: ReturnType<typeof vi.fn>
-  mockPut: ReturnType<typeof vi.fn>
-  mockDel: ReturnType<typeof vi.fn>
-  mockPush: ReturnType<typeof vi.fn>
-  mockBack: ReturnType<typeof vi.fn>
-}
-
-import { vi } from 'vitest'
-
-export function createPageMocks(): PageMocks {
-  return {
-    mockGet: vi.fn(),
-    mockPost: vi.fn(),
-    mockPut: vi.fn(),
-    mockDel: vi.fn(),
-    mockPush: vi.fn(),
-    mockBack: vi.fn(),
-  }
-}

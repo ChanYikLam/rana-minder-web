@@ -47,4 +47,48 @@ describe('CorrectionPage 事实纠错', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('状态显示错误')
   })
+
+  it('加载失败后重试恢复：错误态点重试成功渲染列表', async () => {
+    // 局部 stub 暴露 PageStateBoundary 的 retry 事件（共享 pageStubs 不含，避免影响其他文件）
+    const retryStubs = {
+      ...pageStubs,
+      PageStateBoundary: {
+        props: ['state'],
+        template: '<div><slot /><button v-if="state === \'error\'" class="retry-btn" @click="$emit(\'retry\')">重试</button></div>',
+      },
+    }
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [correction] } })
+    const wrapper = mount(CorrectionPage, { global: { stubs: retryStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('状态显示错误')
+
+    await wrapper.find('.retry-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('状态显示错误')
+    wrapper.unmount()
+  })
+
+  it('提交纠错成功：发送表单并展示提交提示', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 打开提交表单并填写
+    await wrapper.findAll('button').find((b) => b.text().includes('发起纠错'))!.trigger('click')
+    const inputs = wrapper.findAll('input[type="text"]')
+    await inputs[0].setValue('成员信息')
+    await inputs[1].setValue('mem-001')
+    await inputs[2].setValue('手机号有误')
+    await inputs[3].setValue('截图')
+    await wrapper.findAll('button').find((b) => b.text().includes('提交纠错'))!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/me/corrections', {
+      targetType: '成员信息', targetId: 'mem-001', reason: '手机号有误', evidence: '截图',
+    })
+    expect(wrapper.text()).toContain('纠错申请已提交')
+    wrapper.unmount()
+  })
 })

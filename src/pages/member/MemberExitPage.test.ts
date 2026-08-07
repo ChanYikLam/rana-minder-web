@@ -11,7 +11,11 @@ vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
 }))
+vi.mock('vue-sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
+import { toast } from 'vue-sonner'
 import MemberExitPage from './MemberExitPage.vue'
 
 const exitData = {
@@ -42,5 +46,44 @@ describe('MemberExitPage 成员退出与移除', () => {
     const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('陈雨桐')
+  })
+
+  it('标记退出成功：填写原因后请求 exit 端点并提示', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: exitData })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 打开标记退出确认
+    await wrapper.findAll('button').find((b) => b.text().includes('标记退出'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('确认标记退出')
+
+    // 填写原因并确认
+    await wrapper.find('textarea').setValue('毕业离校')
+    await wrapper.findAll('button').find((b) => b.text().includes('确认标记退出'))!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/members/exit', {
+      memberId: 'mem-001',
+      action: 'mark_exit',
+      reason: '毕业离校',
+    })
+    expect(toast.success).toHaveBeenCalledWith('已标记退出')
+    wrapper.unmount()
+  })
+
+  it('标记退出：原因必填被拦截', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: exitData })
+    const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('标记退出'))!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('确认标记退出'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('原因不能为空')
+    expect(mockPost).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 })
