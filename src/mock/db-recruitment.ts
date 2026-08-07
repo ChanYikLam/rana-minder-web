@@ -339,6 +339,8 @@ export interface JointReviewExtra {
   authorName: string
   authorRole: string
   version: number
+  /** JNT-012：修改时保留旧值、新值、时间 */
+  history?: { rating: number | null; comment: string; concludedAt: string | null; version: number }[]
 }
 
 // ================= 种子数据 =================
@@ -619,6 +621,7 @@ export const jointReviewExtras: JointReviewExtra[] = [
     jointId: 'jnt-001', applicantId: 'u-006', clubId: 'club-002',
     rating: 4, comment: '编程基础扎实，沟通表达清晰，建议优先考虑。',
     concludedAt: daysFromNow(-2), authorName: '林晓峰', authorRole: 'club_leader', version: 1,
+    history: [],
   },
 ]
 
@@ -629,6 +632,11 @@ export function findJointReviewExtra(jointId: string, applicantId: string, clubI
 export function upsertJointReviewExtra(jointId: string, applicantId: string, clubId: string, input: { rating: number; comment: string; authorName: string; authorRole: string }): JointReviewExtra {
   const existing = findJointReviewExtra(jointId, applicantId, clubId)
   if (existing) {
+    // JNT-012：保留旧值、新值、时间 → 写入 history
+    existing.history = [
+      ...(existing.history || []),
+      { rating: existing.rating, comment: existing.comment, concludedAt: existing.concludedAt, version: existing.version },
+    ]
     existing.rating = input.rating
     existing.comment = input.comment
     existing.concludedAt = new Date().toISOString()
@@ -643,6 +651,7 @@ export function upsertJointReviewExtra(jointId: string, applicantId: string, clu
     concludedAt: new Date().toISOString(),
     authorName: input.authorName, authorRole: input.authorRole,
     version: 1,
+    history: [],
   }
   jointReviewExtras.push(extra)
   return extra
