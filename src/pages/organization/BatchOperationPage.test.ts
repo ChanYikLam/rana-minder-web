@@ -91,3 +91,76 @@ describe('BatchOperationPage 批量操作', () => {
     wrapper.unmount()
   })
 })
+
+describe('BatchOperationPage 重试失败项', () => {
+  beforeEach(() => { mockGet.mockReset(); mockPost.mockReset(); vi.clearAllMocks() })
+  afterEach(() => vi.restoreAllMocks())
+
+  async function mountWithCandidates() {
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [
+      { id: 'mem-001', name: '甲', studentId: '1', department: '计算机', status: 'submitted' },
+      { id: 'mem-002', name: '乙', studentId: '2', department: '计算机', status: 'submitted' },
+    ] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ id: 'u1', name: '李思颖' }] } })
+    const wrapper = mount(BatchOperationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('部分失败后重试：重新走重认证确认，不再复用旧 proof（一次性 proof 已被消费）', async () => {
+    const wrapper = await mountWithCandidates()
+    // 每次 batch/execute 均返回部分成功（mem-002 失败），用于验证重试只提交失败项
+    mockPost.mockResolvedValue({ kind: 'completed', data: { results: [
+      { memberId: 'mem-001', success: true, message: '已发送' },
+      { memberId: 'mem-002', success: false, message: '申请人存在身份异常' },
+    ] } })
+
+    // 选择类型 → 预览 → 勾选全部 → 执行
+    const typeCard = wrapper.findAll('.card').find((c) => c.text().includes('批量发送邀请'))
+    await typeCard!.trigger('click')
+    await flushPromises()
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    for (const cb of checkboxes) { await cb.setValue(true) }
+    await flushPromises()
+    const actionBar = wrapper.findComponent({ name: 'BatchActionBar' })
+    await actionBar.vm.$emit('execute')
+    await flushPromises()
+
+    let hrc = wrapper.find('.hrc')
+    await hrc.find('input[placeholder*="执行原因"]').setValue('社团开放日集中发送邀请')
+    await hrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+
+    // 第一次执行携带 proof
+    const firstCall = mockPost.mock.calls.find((c) => c[0] === '/org/club-001/batch/execute')!
+    const firstBody = firstCall[1] as { reauthProof: string }
+    expect(firstBody.reauthProof).toBe('mock-reauth-proof')
+
+    // 结果页部分成功 → 点重试
+    expect(wrapper.text()).toContain('部分成功')
+    const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('重试失败项'))
+    expect(retryBtn, '重试按钮').toBeTruthy()
+    const callsBeforeRetry = mockPost.mock.calls.length
+    await retryBtn!.trigger('click')
+    await flushPromises()
+
+    // 修复前：retryFailed 直接用旧 proof 重发（mockPost 立即 +1）
+    // 修复后：重新打开高危确认，等待用户重新认证后再提交
+    expect(mockPost.mock.calls.length, '重试不应立即用旧 proof 重发请求').toBe(callsBeforeRetry)
+    hrc = wrapper.find('.hrc')
+    expect(hrc.exists(), '重试应重新打开高危确认').toBe(true)
+    expect(hrc.find('input[placeholder*="执行原因"]').exists(), '重试确认应有原因输入').toBe(true)
+
+    // 重新填写原因并确认 → 携带新的 reauthProof 提交，且只提交失败项
+    await hrc.find('input[placeholder*="执行原因"]').setValue('重试身份异常失败项')
+    await hrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+
+    const retryCall = mockPost.mock.calls.find((c) => c[0] === '/org/club-001/batch/execute' && c !== firstCall)!
+    const retryBody = retryCall[1] as { memberIds: string[]; reauthProof: string }
+    expect(retryBody.memberIds).toEqual(['mem-002'])
+    expect(retryBody.reauthProof).toBe('mock-reauth-proof')
+    wrapper.unmount()
+  })
+})
+

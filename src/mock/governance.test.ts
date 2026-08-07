@@ -340,6 +340,21 @@ describe('P1-011 治理安全机制', () => {
       expect(auditLogsDb.some((l) => l.action === '更新 OIDC 安全配置')).toBe(true)
     })
 
+    it('非法 TTL 时不消费 proof（proof 仍可复用）', async () => {
+      resolveMockUser('/api/auth/session?_mock_user=admin')
+      const proof = await reauthAs('admin')
+      // 第一次：TTL 越界 → 422，proof 未被消费
+      const bad = await invokeHandler('/api/admin/security/oidc', 'post', '/api/admin/security/oidc?_mock_user=admin', {
+        input: { sessionTtlMinutes: 99999, reason: '非法 TTL 应被拒绝', reauthProof: proof },
+      })
+      expect(bad.statusCode).toBe(422)
+      // 第二次：同一 proof + 合法值 → 成功（证明 proof 未被前面 422 消费）
+      const ok = await invokeHandler('/api/admin/security/oidc', 'post', '/api/admin/security/oidc?_mock_user=admin', {
+        input: { sessionTtlMinutes: 60, reason: '缩短会话有效期提升安全', reauthProof: proof },
+      })
+      expect(ok.statusCode, JSON.stringify(ok.body)).toBe(200)
+    })
+
     it('非超管查询/更新 OIDC 配置被 403 拒绝', async () => {
       const get = await invokeHandler('/api/admin/security/oidc', 'get', '/api/admin/security/oidc?_mock_user=leader')
       expect(get.statusCode).toBe(403)

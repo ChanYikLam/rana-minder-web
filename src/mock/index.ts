@@ -3387,9 +3387,7 @@ response: ({ url }: { url: string }) => {
     response: ({ url, body }: { url: string; body: { input: Record<string, unknown> & { reason?: string; reauthProof?: string } } }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden(url)
-      if (!consumeReauthProof(body.input?.reauthProof, user?.id)) {
-        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
-      }
+      // 先校验原因与字段边界（避免无效请求白白消费一次性 proof），再消费 proof
       if (!body.input?.reason || body.input.reason.trim().length < 5) {
         return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '修改 OIDC 安全配置必须填写原因（至少 5 字）' } }
       }
@@ -3409,6 +3407,9 @@ response: ({ url }: { url: string }) => {
       if (typeof input.stepUpTtlMinutes === 'number') {
         if (input.stepUpTtlMinutes < 1 || input.stepUpTtlMinutes > 60) return businessError('重认证有效期需在 1-60 分钟之间')
         patch.stepUpTtlMinutes = input.stepUpTtlMinutes
+      }
+      if (!consumeReauthProof(body.input?.reauthProof, user?.id)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
       const cfg = updateOidcConfig(patch)
       writeAuditLog({
