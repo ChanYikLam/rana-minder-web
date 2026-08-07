@@ -3,9 +3,10 @@ import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUs
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
-import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead } from './notifications'
+import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
-import { correctionsDb, type CorrectionRecord } from './db-corrections'
+import { correctionsDb, type CorrectionRecord, type CorrectionAuditEntry } from './db-corrections'
+import { auditLogsDb, writeAuditLog } from './db-audit'
 import * as formdb from './db-forms'
 
 /** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
@@ -27,6 +28,46 @@ function consumeReauthProof(proof: unknown, operatorId: string | undefined | nul
   if (!operatorId || !record || record.userId !== operatorId || record.expiresAt <= Date.now()) return false
   reauthProofs.delete(proof)
   return true
+}
+
+/** 纠错状态机守卫（SM-AUD-001）：仅 submitted（含 overdue 未处置）可被批准/拒绝/撤回， */
+function isCorrectionActable(record: CorrectionRecord): boolean {
+  return record.status === 'submitted' || record.status === 'overdue'
+}
+
+function correctionStateConflict(): { statusCode: number; body: { code: string; message: string; supportId: string } } {
+  return {
+    statusCode: 409,
+    body: {
+      code: 'IFC-ERR-007',
+      message: '对象状态已变化，请刷新后重新选择操作',
+      supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+    },
+  }
+}
+
+/** 纠错审计闭环辅助：向记录追加审计轨迹条目 */
+function appendCorrectionAudit(record: CorrectionRecord, entry: CorrectionAuditEntry): void {
+  if (!record.auditTrail) record.auditTrail = []
+  record.auditTrail.push(entry)
+}
+
+/** 纠错审计闭环辅助：将纠错动作写入审计日志库（org = 社团域，platform = 平台域） */
+function writeCorrectionAuditLog(entry: CorrectionAuditEntry, record: CorrectionRecord, scope: 'org' | 'platform'): void {
+  const actionMap: Record<CorrectionAuditEntry['action'], string> = {
+    submit: '提交事实纠错',
+    approve: '批准事实纠错',
+    reject: '拒绝事实纠错',
+    withdraw: '撤回事实纠错',
+  }
+  writeAuditLog({
+    actorName: entry.actorName,
+    action: actionMap[entry.action],
+    targetType: record.targetType,
+    targetId: record.targetId,
+    detail: `${record.targetType} #${record.targetId}：${record.reason}`,
+    scope,
+  })
 }
 
 /** 业务规则拒绝（HTTP 422 + IFC-ERR-006；008 保留给版本/影响预览冲突 409） */
@@ -168,6 +209,115 @@ const retentionPolicies: RetentionPolicy[] = [
   { id: 'rp-003', scope: '审计日志', retentionDays: 1095, action: 'keep', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
 ]
 let retentionPreviewVersion = 1
+
+/**
+ * 保留策略执行器（P1-010：策略不再是静态数据，具备真实执行语义 + 审计日志写入）。
+ * retentionSubjects 模拟受策略约束的数据对象（按 scope 与已存续天数匹配策略）；
+ * 执行时对每个 active 策略扫描到期数据，按 action 处置：
+ *   auto_delete → 从生效数据中删除；archive → 标记归档；keep → 跳过（仅计数）。
+ * 每次执行产生 runId、处置明细，并逐策略写入审计日志（scope=platform）。
+ */
+interface RetentionSubject {
+  id: string
+  /** 与 RetentionPolicy.scope 匹配 */
+  scope: string
+  label: string
+  /** 已存续天数（模拟数据年龄） */
+  agedDays: number
+  state: 'active' | 'archived' | 'deleted'
+}
+export const retentionSubjects: RetentionSubject[] = [
+  { id: 'rs-001', scope: '已退出成员数据', label: '成员：赵一鸣（2023 届毕业）', agedDays: 720, state: 'active' },
+  { id: 'rs-002', scope: '已退出成员数据', label: '成员：钱多多（2022 届毕业）', agedDays: 1100, state: 'active' },
+  { id: 'rs-003', scope: '已退出成员数据', label: '成员：孙小美（2024 届转出）', agedDays: 300, state: 'active' },
+  { id: 'rs-004', scope: '过期招新活动', label: '招新活动：2023 春季补录', agedDays: 820, state: 'active' },
+  { id: 'rs-005', scope: '过期招新活动', label: '招新活动：2023 秋季招新', agedDays: 900, state: 'active' },
+  { id: 'rs-006', scope: '过期招新活动', label: '招新活动：2025 春季补录', agedDays: 100, state: 'active' },
+  { id: 'rs-007', scope: '审计日志', label: '审计日志批次：2022-Q4', agedDays: 1400, state: 'active' },
+]
+
+export interface RetentionExecutionResult {
+  policyId: string
+  scope: string
+  action: RetentionPolicy['action']
+  retentionDays: number
+  /** 本次实际处置（删除/归档）的对象数 */
+  executedCount: number
+  /** 本次未到期 / 已处置过的对象数 */
+  skippedCount: number
+  executedAt: string
+  auditRef: string
+}
+
+let lastRetentionExecution: { runId: string; executedAt: string; results: RetentionExecutionResult[] } | null = null
+
+const retentionSubjectsSeed: RetentionSubject[] = structuredClone(retentionSubjects)
+
+/** 测试/演示用：重置保留策略执行器状态（受控对象恢复 active、清空上次执行记录） */
+export function resetRetentionState(): void {
+  retentionSubjects.splice(0, retentionSubjects.length, ...structuredClone(retentionSubjectsSeed))
+  lastRetentionExecution = null
+}
+
+function retentionExecutionRunId(): string {
+  return 'RPX-' + Date.now()
+}
+
+function runRetentionExecutor(runId: string): RetentionExecutionResult[] {
+  const now = new Date().toISOString()
+  const results: RetentionExecutionResult[] = []
+  for (const policy of retentionPolicies) {
+    if (policy.status !== 'active') continue
+    let executedCount = 0
+    let skippedCount = 0
+    for (const subject of retentionSubjects) {
+      if (subject.scope !== policy.scope) continue
+      if (subject.state !== 'active') { skippedCount += 1; continue }
+      if (subject.agedDays < policy.retentionDays) { skippedCount += 1; continue }
+      if (policy.action === 'auto_delete') subject.state = 'deleted'
+      else if (policy.action === 'archive') subject.state = 'archived'
+      // keep：保留，不处置
+      executedCount += 1
+    }
+    results.push({
+      policyId: policy.id,
+      scope: policy.scope,
+      action: policy.action,
+      retentionDays: policy.retentionDays,
+      executedCount,
+      skippedCount,
+      executedAt: now,
+      auditRef: runId,
+    })
+  }
+  return results
+}
+
+function recordRetentionExecution(operatorName: string): { runId: string; executedAt: string; results: RetentionExecutionResult[] } {
+  const runId = retentionExecutionRunId()
+  const executedAt = new Date().toISOString()
+  const results = runRetentionExecutor(runId)
+  lastRetentionExecution = { runId, executedAt, results }
+  for (const r of results) {
+    writeAuditLog({
+      actorName: operatorName,
+      action: `执行保留策略（${r.action === 'auto_delete' ? '自动删除' : r.action === 'archive' ? '归档' : '保留（keep）'}）`,
+      targetType: '保留策略',
+      targetId: r.policyId,
+      detail: `「${r.scope}」处置 ${r.executedCount} 条 / 跳过 ${r.skippedCount} 条（保留 ${r.retentionDays} 天）`,
+      scope: 'platform',
+    })
+  }
+  writeAuditLog({
+    actorName: operatorName,
+    action: '触发保留策略批量执行',
+    targetType: '保留策略',
+    targetId: runId,
+    detail: `共执行 ${results.length} 个生效策略`,
+    scope: 'platform',
+  })
+  return { runId, executedAt, results }
+}
 
 /** 辞职申请审批（MEM-005，仅社团负责人/人事可查看与审批） */
 function canApproveResignation(user: MockUser, clubId: string): boolean {
@@ -1265,12 +1415,27 @@ const memberHandlers: MockMethod[] = [
       return { code: 0, data: { id: r.invitation?.id, status: r.invitation?.status } }
     },
   },
-  // 个人通知偏好
+  // 个人通知偏好（P1-009：真实落库，支持读取/保存；缺省全订阅）
+  {
+    url: '/api/me/notifications/preferences',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: null } }
+    },
+  },
   {
     url: '/api/me/notifications/preferences',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      const prefs = (body.input ?? body) as Record<string, unknown>
+      for (const [kind, value] of Object.entries(prefs)) {
+        if (kind in notificationTemplates && typeof value === 'boolean') {
+          setNotificationPreference(user.id, kind, value)
+        }
+      }
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: new Date().toISOString() } }
     },
   },
   // 任命/调岗/免职：候选成员 + 预约命令列表
@@ -1513,6 +1678,7 @@ const memberHandlers: MockMethod[] = [
           canExecute: t.candidates.length + t.appointments.length > 0 && t.executedAt === null,
           executedAt: t.executedAt,
           results: t.results,
+          syncFailures: t.syncFailures,
           failOn: t.failOn,
         },
       }
@@ -1552,6 +1718,7 @@ const memberHandlers: MockMethod[] = [
       }
       t.results = results
       t.executedAt = new Date().toISOString()
+      t.syncFailures = []
       // 至少保留一名负责人：candidates 中的"负责人"全部成功后旧任保留
       const leaderCandidate = results.find((r) => r.targetTitle === '负责人')
       if (leaderCandidate && leaderCandidate.success) {
@@ -1561,10 +1728,15 @@ const memberHandlers: MockMethod[] = [
           if (pos) { pos.endDate = new Date().toISOString().slice(0, 10); pos.status = 'ended' }
           old.status = 'exited'
           old.exitedAt = new Date().toISOString()
+          // ORG-001/017：换届同步——旧任退出负责人职位 Group，新任加入
+          const oldSync = orgdb.syncPositionMembership({ clubId: query.clubId, memberId: old.id, memberName: old.name, departmentName: pos?.departmentName ?? null, title: '负责人', active: false })
+          if (!oldSync.ok && oldSync.error) t.syncFailures.push({ memberId: old.id, memberName: old.name, title: '负责人', active: false, error: oldSync.error })
           t.currentLeader = { id: leaderCandidate.memberId, name: leaderCandidate.name, title: leaderCandidate.targetTitle }
         }
+        const newSync = orgdb.syncPositionMembership({ clubId: query.clubId, memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, departmentName: null, title: '负责人', active: true })
+        if (!newSync.ok && newSync.error) t.syncFailures.push({ memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, title: '负责人', active: true, error: newSync.error })
       }
-      return { code: 0, data: { executedAt: t.executedAt, results, finishedAt: null } }
+      return { code: 0, data: { executedAt: t.executedAt, results, finishedAt: null, syncFailures: t.syncFailures } }
     },
   },
   // 换届失败项重试
@@ -1832,34 +2004,56 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 邮件配置
+  // 邮件配置（P1-009：真实存储；未通过测试不可保存 —— US-NTF-02）
   {
     url: '/api/org/:clubId/notifications/email-config',
     method: 'get',
-    response: () => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const cfg = getEmailConfig(emailConfigKey('club', query.clubId))
       return {
         code: 0,
         data: {
-          smtpHost: 'smtp.example.edu.cn', smtpPort: 465, smtpUser: 'club@example.edu.cn',
-          fromName: '计算机协会', encryption: 'ssl', verified: true,
+          smtpHost: cfg.smtpHost, smtpPort: cfg.smtpPort, smtpUser: cfg.smtpUser,
+          fromName: cfg.fromName, encryption: cfg.encryption, verified: cfg.verified,
+          lastTestPassedAt: cfg.lastTestPassedAt, keyRotatedAt: cfg.keyRotatedAt,
         },
       }
     },
   },
-  // 保存邮件配置
+  // 保存邮件配置（未测试通过 → 拒绝保存并提示先测试）
   {
     url: '/api/org/:clubId/notifications/email-config',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, verified: true, savedAt: new Date().toISOString() } }
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const key = emailConfigKey('club', query.clubId)
+      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; fromName: string; encryption: string }>
+      const result = saveEmailConfig(key, {
+        smtpHost: String(input.smtpHost ?? ''),
+        smtpPort: Number(input.smtpPort) || 465,
+        smtpUser: String(input.smtpUser ?? ''),
+        fromName: String(input.fromName ?? ''),
+        encryption: (['ssl', 'tls', 'none'].includes(String(input.encryption)) ? String(input.encryption) : 'ssl') as 'ssl' | 'tls' | 'none',
+      })
+      if (!result.ok) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '发信配置未通过测试，请先发送测试邮件', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+      }
+      return { code: 0, data: { ...result.config, savedAt: new Date().toISOString() } }
     },
   },
-  // 测试邮件配置
+  // 测试邮件配置（通过后标记 verified）
   {
     url: '/api/org/:clubId/notifications/email-config/test',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { status: 'sent', sentAt: new Date().toISOString(), to: 'config-owner@example.edu.cn' } }
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const key = emailConfigKey('club', query.clubId)
+      const cfg = markEmailTestPassed(key)
+      return { code: 0, data: { status: 'sent', sentAt: cfg.lastTestPassedAt, to: user.email ?? cfg.smtpUser } }
     },
   },
   // 保存社团配置
@@ -2046,6 +2240,7 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
       const user = resolveMockUser(url)
+      const submittedAt = new Date().toISOString()
       const record: CorrectionRecord = {
         id: 'cor-' + Date.now(),
         targetType: String(body.input?.targetType || ''),
@@ -2053,10 +2248,12 @@ response: ({ url }: { url: string }) => {
         reason: String(body.input?.reason || ''),
         evidence: String(body.input?.evidence || ''),
         status: 'submitted',
-        submittedAt: new Date().toISOString(),
+        submittedAt,
         submitterName: user.name,
+        auditTrail: [{ action: 'submit', actorName: user.name, at: submittedAt }],
       }
       correctionsDb.unshift(record)
+      writeCorrectionAuditLog(record.auditTrail[0], record, 'org')
       return { code: 0, data: record }
     },
   },
@@ -2071,8 +2268,16 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
-      record.status = body.input?.decision === 'approve' ? 'approved' : 'rejected'
-      return { code: 0, data: { id: record.id, status: record.status, decidedAt: new Date().toISOString() } }
+      if (!isCorrectionActable(record)) return correctionStateConflict()
+      const approved = body.input?.decision === 'approve'
+      const decidedAt = new Date().toISOString()
+      record.status = approved ? 'approved' : 'rejected'
+      record.decidedBy = user.name
+      record.decidedAt = decidedAt
+      const entry: CorrectionAuditEntry = { action: approved ? 'approve' : 'reject', actorName: user.name, at: decidedAt }
+      appendCorrectionAudit(record, entry)
+      writeCorrectionAuditLog(entry, record, 'org')
+      return { code: 0, data: { id: record.id, status: record.status, decidedAt, decidedBy: user.name } }
     },
   },
   // 撤回事实纠错
@@ -2086,8 +2291,15 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
+      if (!isCorrectionActable(record)) return correctionStateConflict()
+      const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
-      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+      record.withdrawnBy = user.name
+      record.withdrawnAt = withdrawnAt
+      const entry: CorrectionAuditEntry = { action: 'withdraw', actorName: user.name, at: withdrawnAt }
+      appendCorrectionAudit(record, entry)
+      writeCorrectionAuditLog(entry, record, 'org')
+      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt, withdrawnBy: user.name } }
     },
   },
   // 个人中心：我的纠错列表（本人提交的纠错，数据与社团版共用）
@@ -2111,6 +2323,7 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
       const user = resolveMockUser(url)
+      const submittedAt = new Date().toISOString()
       const record: CorrectionRecord = {
         id: 'cor-' + Date.now(),
         targetType: String(body.input?.targetType || ''),
@@ -2118,10 +2331,12 @@ response: ({ url }: { url: string }) => {
         reason: String(body.input?.reason || ''),
         evidence: String(body.input?.evidence || ''),
         status: 'submitted',
-        submittedAt: new Date().toISOString(),
+        submittedAt,
         submitterName: user.name,
+        auditTrail: [{ action: 'submit', actorName: user.name, at: submittedAt }],
       }
       correctionsDb.unshift(record)
+      writeCorrectionAuditLog(record.auditTrail[0], record, 'org')
       return { code: 0, data: record }
     },
   },
@@ -2137,8 +2352,16 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
-      record.status = body.input?.decision === 'approve' ? 'approved' : 'rejected'
-      return { code: 0, data: { id: record.id, status: record.status, decidedAt: new Date().toISOString() } }
+      if (!isCorrectionActable(record)) return correctionStateConflict()
+      const approved = body.input?.decision === 'approve'
+      const decidedAt = new Date().toISOString()
+      record.status = approved ? 'approved' : 'rejected'
+      record.decidedBy = user.name
+      record.decidedAt = decidedAt
+      const entry: CorrectionAuditEntry = { action: approved ? 'approve' : 'reject', actorName: user.name, at: decidedAt }
+      appendCorrectionAudit(record, entry)
+      writeCorrectionAuditLog(entry, record, 'org')
+      return { code: 0, data: { id: record.id, status: record.status, decidedAt, decidedBy: user.name } }
     },
   },
   // 个人中心：撤回事实纠错
@@ -2152,23 +2375,25 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
+      if (!isCorrectionActable(record)) return correctionStateConflict()
+      const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
-      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+      record.withdrawnBy = user.name
+      record.withdrawnAt = withdrawnAt
+      const entry: CorrectionAuditEntry = { action: 'withdraw', actorName: user.name, at: withdrawnAt }
+      appendCorrectionAudit(record, entry)
+      writeCorrectionAuditLog(entry, record, 'org')
+      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt, withdrawnBy: user.name } }
     },
   },
-  // 审计日志
+  // 审计日志（读取共享可写审计库 auditLogsDb；纠错/保留策略等动作实时落库可见）
   {
     url: '/api/org/:clubId/audit/logs',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, query.clubId).includes('club:audit:view')) return forbidden()
-      const allLogs = [
-        { id: 'log-001', actorName: '张明远', action: '发布招新活动', targetType: '活动', targetId: 'act-001', detail: '2025 秋季招新', createdAt: '2025-08-01T10:30:00+08:00' },
-        { id: 'log-002', actorName: '李思颖', action: '审批部门申请', targetType: '成员', targetId: 'mem-001', detail: '陈雨桐 技术->运营', createdAt: '2025-07-29T14:00:00+08:00' },
-        { id: 'log-003', actorName: '王浩然', action: '提交评价', targetType: '申请', targetId: 'app-003', detail: '王梓涵 4分', createdAt: '2025-08-04T11:00:00+08:00' },
-        { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'rinv-001', detail: '陈雨桐 技术部', createdAt: '2025-08-04T12:00:00+08:00' },
-      ]
+      const allLogs = auditLogsDb.filter((l) => l.scope === 'org')
       const search = query.search
       const items = search ? allLogs.filter((l) => l.actorName.includes(search) || l.action.includes(search) || l.detail.includes(search)) : allLogs
       return { code: 0, data: { items, nextCursor: null } }
@@ -2194,7 +2419,7 @@ response: ({ url }: { url: string }) => {
       }
     },
   },
-  // 数据保留策略（US-AUD-04：不可变版本，草稿与已发布并存）
+  // 数据保留策略（US-AUD-04：不可变版本，草稿与已发布并存；附最近一次执行记录）
   {
     url: '/api/admin/retention',
     method: 'get',
@@ -2203,8 +2428,9 @@ response: ({ url }: { url: string }) => {
       return {
         code: 0,
         data: {
-policies: retentionPolicies,
+          policies: retentionPolicies,
           draftVersion: retentionPolicies.some((p) => p.status === 'draft') ? Math.max(...retentionPolicies.filter((p) => p.status === 'draft').map((p) => p.version)) : null,
+          lastExecution: lastRetentionExecution,
         },
       }
     },
@@ -2257,6 +2483,15 @@ policies: retentionPolicies,
       policy.updatedAt = new Date().toISOString()
       policy.publishedAt = new Date().toISOString()
       retentionPreviewVersion += 1
+      const auditRef = 'RP-' + Date.now()
+      writeAuditLog({
+        actorName: resolveMockUser(url).name,
+        action: '发布保留策略',
+        targetType: '保留策略',
+        targetId: policy.id,
+        detail: `「${policy.scope}」保留 ${policy.retentionDays} 天 · ${policy.action === 'auto_delete' ? '自动删除' : policy.action === 'archive' ? '归档' : '保留'}（v${policy.version}）`,
+        scope: 'platform',
+      })
       return {
         code: 0,
         data: {
@@ -2264,7 +2499,33 @@ policies: retentionPolicies,
           publishedAt: policy.publishedAt,
           bufferDays: shortening ? 7 : 0,
           notice: shortening ? '保留期限被缩短，已有数据将获得至少 7 天缓冲期后按新策略处理' : null,
-          auditRef: 'RP-' + Date.now(),
+          auditRef,
+        },
+      }
+    },
+  },
+  // 保留策略执行（P1-010：执行器真实处置到期数据，逐策略写审计日志；需重认证 + 原因）
+  {
+    url: '/api/admin/retention/execute',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: { reason?: string; reauthProof?: string } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden()
+      if (!consumeReauthProof(body.input?.reauthProof, user?.id)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      if (!body.input?.reason?.trim()) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '必须填写执行原因' } }
+      }
+      const record = recordRetentionExecution(user.name)
+      return {
+        code: 0,
+        data: {
+          runId: record.runId,
+          executedAt: record.executedAt,
+          results: record.results,
+          totalExecuted: record.results.reduce((sum, r) => sum + r.executedCount, 0),
+          auditRef: 'AUD-' + Date.now(),
         },
       }
     },
@@ -2686,10 +2947,7 @@ policies: retentionPolicies,
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
-      const allLogs = [
-        { id: 'log-101', actorName: '超级管理员', action: '强制关闭联合活动', targetType: '联合活动', targetId: 'jnt-001', detail: '计算机+电子联合招新', createdAt: '2025-08-01T09:00:00+08:00' },
-        { id: 'log-102', actorName: '超级管理员', action: '批准社团接入', targetType: '社团', targetId: 'club-001', detail: '计算机协会', createdAt: '2025-07-01T10:00:00+08:00' },
-      ]
+      const allLogs = auditLogsDb.filter((l) => l.scope === 'platform')
       const search = query.search
       const items = search ? allLogs.filter((l) => l.actorName.includes(search) || l.action.includes(search) || l.detail.includes(search)) : allLogs
       return { code: 0, data: { items, nextCursor: null } }
@@ -2717,6 +2975,7 @@ policies: retentionPolicies,
     response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden()
+      const submittedAt = new Date().toISOString()
       const record: CorrectionRecord = {
         id: 'cor-' + Date.now(),
         targetType: String(body.input?.targetType || ''),
@@ -2724,10 +2983,12 @@ policies: retentionPolicies,
         reason: String(body.input?.reason || ''),
         evidence: String(body.input?.evidence || ''),
         status: 'submitted',
-        submittedAt: new Date().toISOString(),
+        submittedAt,
         submitterName: user.name,
+        auditTrail: [{ action: 'submit', actorName: user.name, at: submittedAt }],
       }
       correctionsDb.unshift(record)
+      writeCorrectionAuditLog(record.auditTrail[0], record, 'platform')
       return { code: 0, data: record }
     },
   },
@@ -2741,8 +3002,16 @@ policies: retentionPolicies,
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
-      record.status = body.input?.decision === 'approve' ? 'approved' : 'rejected'
-      return { code: 0, data: { id: record.id, status: record.status, decidedAt: new Date().toISOString() } }
+      if (!isCorrectionActable(record)) return correctionStateConflict()
+      const approved = body.input?.decision === 'approve'
+      const decidedAt = new Date().toISOString()
+      record.status = approved ? 'approved' : 'rejected'
+      record.decidedBy = user.name
+      record.decidedAt = decidedAt
+      const entry: CorrectionAuditEntry = { action: approved ? 'approve' : 'reject', actorName: user.name, at: decidedAt }
+      appendCorrectionAudit(record, entry)
+      writeCorrectionAuditLog(entry, record, 'platform')
+      return { code: 0, data: { id: record.id, status: record.status, decidedAt, decidedBy: user.name } }
     },
   },
   {
@@ -2756,20 +3025,30 @@ policies: retentionPolicies,
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
+      if (!isCorrectionActable(record)) return correctionStateConflict()
+      const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
-      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt: new Date().toISOString() } }
+      record.withdrawnBy = user.name
+      record.withdrawnAt = withdrawnAt
+      const entry: CorrectionAuditEntry = { action: 'withdraw', actorName: user.name, at: withdrawnAt }
+      appendCorrectionAudit(record, entry)
+      writeCorrectionAuditLog(entry, record, 'platform')
+      return { code: 0, data: { id: record.id, status: 'withdrawn', withdrawnAt, withdrawnBy: user.name } }
     },
   },
-  // 管理员路由：邮件配置
+  // 管理员路由：邮件配置（P1-009：真实存储；未测试通过不可保存）
   {
     url: '/api/admin/notifications/email-config',
     method: 'get',
-    response: () => {
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const cfg = getEmailConfig(emailConfigKey('platform'))
       return {
         code: 0,
         data: {
-          smtpHost: 'smtp.platform.edu.cn', smtpPort: 465, smtpUser: 'admin@platform.edu.cn',
-          fromName: 'RanaMinder 平台', encryption: 'ssl', verified: true,
+          smtpHost: cfg.smtpHost, smtpPort: cfg.smtpPort, smtpUser: cfg.smtpUser,
+          fromName: cfg.fromName, encryption: cfg.encryption, verified: cfg.verified,
+          lastTestPassedAt: cfg.lastTestPassedAt, keyRotatedAt: cfg.keyRotatedAt,
         },
       }
     },
@@ -2777,29 +3056,82 @@ policies: retentionPolicies,
   {
     url: '/api/admin/notifications/email-config',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, verified: true, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; fromName: string; encryption: string }>
+      const result = saveEmailConfig(emailConfigKey('platform'), {
+        smtpHost: String(input.smtpHost ?? ''),
+        smtpPort: Number(input.smtpPort) || 465,
+        smtpUser: String(input.smtpUser ?? ''),
+        fromName: String(input.fromName ?? ''),
+        encryption: (['ssl', 'tls', 'none'].includes(String(input.encryption)) ? String(input.encryption) : 'ssl') as 'ssl' | 'tls' | 'none',
+      })
+      if (!result.ok) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '发信配置未通过测试，请先发送测试邮件', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+      }
+      return { code: 0, data: { ...result.config, savedAt: new Date().toISOString() } }
     },
   },
   {
     url: '/api/admin/notifications/email-config/test',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { status: 'sent', sentAt: new Date().toISOString(), to: 'admin@platform.edu.cn' } }
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const user = resolveMockUser(url)
+      const cfg = markEmailTestPassed(emailConfigKey('platform'))
+      return { code: 0, data: { status: 'sent', sentAt: cfg.lastTestPassedAt, to: user.email ?? cfg.smtpUser } }
     },
   },
   {
     url: '/api/admin/notifications/email-config/rotate-key',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const cfg = rotateEmailKey(emailConfigKey('platform'))
+      return { code: 0, data: { rotated: true, rotatedAt: cfg.keyRotatedAt, verified: cfg.verified } }
+    },
+  },
+  // 管理员通知偏好（平台默认偏好：管理端统一配置，保存真实落库）
+  {
+    url: '/api/admin/notifications/preferences',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { preferences: listNotificationPreferences('user-admin-001'), savedAt: null } }
     },
   },
   {
     url: '/api/admin/notifications/preferences',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const prefs = (body.input ?? body) as Record<string, unknown>
+      for (const [kind, value] of Object.entries(prefs)) {
+        if (kind in notificationTemplates && typeof value === 'boolean') {
+          setNotificationPreference('user-admin-001', kind, value)
+        }
+      }
+      return { code: 0, data: { preferences: listNotificationPreferences('user-admin-001'), savedAt: new Date().toISOString() } }
+    },
+  },
+  // 紧急关闭（P1-009 kill switch：平台级一键熔断全站通知，US-NTF-01）
+  {
+    url: '/api/admin/notifications/kill-switch',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { ...notificationKillSwitch } }
+    },
+  },
+  {
+    url: '/api/admin/notifications/kill-switch',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      const user = resolveMockUser(url)
+      const input = (body.input ?? body) as { active?: boolean; reason?: string }
+      setNotificationKillSwitch({ active: !!input.active, scope: 'platform', reason: input.reason ?? null, operatorName: user.name })
+      return { code: 0, data: { ...notificationKillSwitch } }
     },
   },
   // 管理员路由：表单（SM-FORM-001：编辑态取最新草稿，无草稿回退最新已发布版本）
@@ -2939,20 +3271,77 @@ policies: retentionPolicies,
       }
     },
   },
-  // 工作空间：邮件密钥轮换
+  // 工作空间：邮件密钥轮换（P1-009：轮换后需重新测试通过）
   {
     url: '/api/org/:clubId/notifications/email-config/rotate-key',
     method: 'post',
-    response: () => {
-      return { code: 0, data: { rotated: true, rotatedAt: new Date().toISOString() } }
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const cfg = rotateEmailKey(emailConfigKey('club', query.clubId))
+      return { code: 0, data: { rotated: true, rotatedAt: cfg.keyRotatedAt, verified: cfg.verified } }
     },
   },
-  // 工作空间：通知偏好
+  // 工作空间：通知偏好（P1-009：真实落库）
+  {
+    url: '/api/org/:clubId/notifications/preferences',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: null } }
+    },
+  },
   {
     url: '/api/org/:clubId/notifications/preferences',
     method: 'post',
-    response: ({ body }: { body: { input: Record<string, unknown> } }) => {
-      return { code: 0, data: { ...body.input, savedAt: new Date().toISOString() } }
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      const prefs = (body.input ?? body) as Record<string, unknown>
+      for (const [kind, value] of Object.entries(prefs)) {
+        if (kind in notificationTemplates && typeof value === 'boolean') {
+          setNotificationPreference(user.id, kind, value)
+        }
+      }
+      return { code: 0, data: { preferences: listNotificationPreferences(user.id), savedAt: new Date().toISOString() } }
+    },
+  },
+  // 工作空间：紧急关闭（社团级 kill switch，US-NTF-01）
+  {
+    url: '/api/org/:clubId/notifications/kill-switch',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      return { code: 0, data: { ...clubKillSwitchState(query.clubId) } }
+    },
+  },
+  {
+    url: '/api/org/:clubId/notifications/kill-switch',
+    method: 'post',
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
+      const input = (body.input ?? body) as { active?: boolean; reason?: string }
+      setNotificationKillSwitch({ active: !!input.active, scope: 'club', clubId: query.clubId, reason: input.reason ?? null, operatorName: user.name })
+      return { code: 0, data: { ...clubKillSwitchState(query.clubId) } }
+    },
+  },
+  // 邮件发送记录（P1-009 审计：平台管理员可查）
+  {
+    url: '/api/admin/notifications/email-outbox',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { items: emailOutbox.slice(0, 50) } }
+    },
+  },
+  // 通知模板目录（P1-009 审计/配置：模板清单）
+  {
+    url: '/api/admin/notifications/templates',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden()
+      return { code: 0, data: { items: Object.values(notificationTemplates) } }
     },
   },
   // 工作空间：表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）

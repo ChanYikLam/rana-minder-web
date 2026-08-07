@@ -14,7 +14,9 @@ interface Conclusion {
   id: string; applicantId?: string; applicantName: string; clubId: string; clubName: string; status: string
   conclusion: 'admit' | 'not_admit' | null; reviewFlag: boolean
   rating: number | null; comment: string; concludedAt: string | null
-  authorName?: string | null; versions?: { conclusion: 'admit' | 'not_admit'; changedBy: string; changedByRole: string; reason: string | null; at: string }[]
+  authorName?: string | null
+  history?: { rating: number | null; comment: string; concludedAt: string | null; version: number; updatedAt: string }[]
+  versions?: { conclusion: 'admit' | 'not_admit'; changedBy: string; changedByRole: string; reason: string | null; at: string }[]
   myClub: boolean
 }
 interface JointInvitation {
@@ -266,11 +268,15 @@ onMounted(async () => {
                     <span v-if="c.authorName"> — {{ c.authorName }}</span>
                     <span v-if="c.concludedAt"> · {{ formatDateTime(c.concludedAt) }}</span>
                   </p>
-                  <button v-if="(c.versions ?? []).length > 0" class="text-xs text-primary hover:underline mt-1" @click="historyOpen = historyOpen === c.id ? null : c.id">
-                    修改历史（{{ (c.versions ?? []).length }} 次）
+                  <!-- 修改历史：优先展示评价修改历史（JNT-012），无评价历史时回退结论修改历史（versions） -->
+                  <button v-if="(c.history ?? []).length > 0 || (c.versions ?? []).length > 0" class="text-xs text-primary hover:underline mt-1" @click="historyOpen = historyOpen === c.id ? null : c.id">
+                    修改历史（{{ (c.history ?? []).length + (c.versions ?? []).length }} 次）
                   </button>
-                  <div v-if="historyOpen === c.id && (c.versions ?? []).length > 0" class="mt-1.5 space-y-1">
-                    <p v-for="(v, i) in c.versions ?? []" :key="i" class="text-xs text-text-secondary">
+                  <div v-if="historyOpen === c.id" class="mt-1.5 space-y-1">
+                    <p v-for="(h, i) in c.history ?? []" :key="'h' + i" class="text-xs text-text-secondary">
+                      v{{ h.version }}：评分 {{ h.rating }}<span v-if="h.comment">「{{ h.comment }}」</span> · {{ formatDateTime(h.updatedAt) }}
+                    </p>
+                    <p v-for="(v, i) in c.versions ?? []" :key="'v' + i" class="text-xs text-text-secondary">
                       v{{ i + 1 }}：{{ v.conclusion === 'admit' ? '录用' : '不录用' }} · {{ v.changedBy }}<span v-if="v.reason">（{{ v.reason }}）</span> · {{ formatDateTime(v.at) }}
                     </p>
                   </div>

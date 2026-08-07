@@ -4,6 +4,7 @@
  */
 
 import { assertTransition } from './state-machines/transitions'
+import { syncPositionMembership } from './db-organization'
 
 /** 登录账号 id → 其所属社团成员 id（在 db.members 中按「用户 × 社团」唯一）
  * 原静态映射 auth.USER_MEMBER_MAP 仅按用户维度映射，无法表达多社团用户在不同社团的成员 id，
@@ -135,6 +136,8 @@ export interface MockAppointmentCommand {
   /** 演示：执行失败策略 none=恒成功, first=首次失败 */
   execFailOn: 'none' | 'first'
   execRetried: boolean
+  /** ORG-001/017：职位 Group 成员同步失败留痕（职位已写入但 Group 未同步的可观测提示） */
+  syncWarning?: string
 }
 
 export interface MockResignationRequest {
@@ -149,6 +152,8 @@ export interface MockResignationRequest {
   submittedAt: string
   decidedAt: string | null
   decidedBy: string | null
+  /** ORG-001/017：辞职批准同步移除职位 Group 失败留痕（与 AppointmentCommand.syncWarning 一致的可观测提示） */
+  syncWarning?: string
 }
 
 export interface MockCandidateUser {
@@ -388,6 +393,8 @@ export const transitionState = {
   failOn: 'none' as 'none' | 'partial',
   executedAt: null as string | null,
   results: [] as { memberId: string; name: string; action: string; targetTitle: string; success: boolean; message: string }[],
+  /** ORG-001/017：换届执行时负责人 Group 成员同步失败留痕（position 已写入但 Group 未同步时可观测） */
+  syncFailures: [] as { memberId: string; memberName: string; title: string; active: boolean; error: string }[],
 }
 
 // ================= 业务规则校验与操作 =================
@@ -670,6 +677,9 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
           pos.endDate = new Date().toISOString().slice(0, 10)
           pos.status = 'ended'
         }
+        // ORG-001/017：免职同步移除职位 Group 成员
+        const sync = syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: pos.departmentName, title: pos.title, active: false })
+        if (!sync.ok && sync.error) cmd.syncWarning = sync.error
       }
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: pos?.departmentName || '', title: pos?.title || '', startDate: pos?.startDate || '', endDate: new Date().toISOString().slice(0, 10), endReason: '免职' })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: pos?.departmentName || '', at: now })
@@ -683,6 +693,9 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
             oldPos.endDate = new Date().toISOString().slice(0, 10)
             oldPos.status = 'ended'
           }
+          // ORG-001/017：调岗同步移除原职位 Group 成员
+          const syncRemove = syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: oldPos.departmentName, title: oldPos.title, active: false })
+          if (!syncRemove.ok && syncRemove.error) cmd.syncWarning = syncRemove.error
           member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: oldPos.departmentName, title: oldPos.title, startDate: oldPos.startDate, endDate: oldPos.endDate, endReason: '调岗' })
         }
       }
@@ -690,6 +703,9 @@ export function executeAppointmentCommand(commandId: string): { ok: boolean; err
         id: 'pos-' + Date.now(), departmentId: cmd.departmentId || '', departmentName: cmd.departmentName || '',
         title: cmd.title || '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, status: 'active',
       })
+      // ORG-001/017：任命/调岗生效同步加入职位 Group 成员
+      const syncAdd = syncPositionMembership({ clubId: cmd.clubId, memberId: member.id, memberName: member.name, departmentName: cmd.departmentName || null, title: cmd.title || '成员', active: true })
+      if (!syncAdd.ok && syncAdd.error) cmd.syncWarning = syncAdd.error
       member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: cmd.departmentName || '', title: cmd.title || '成员', startDate: new Date().toISOString().slice(0, 10), endDate: null, endReason: null })
       member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: cmd.action === 'transfer' ? 'transfer' : 'join', departmentName: cmd.departmentName || '', at: now })
     }
@@ -732,6 +748,9 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
         pos.endDate = new Date().toISOString().slice(0, 10)
         pos.status = 'ended'
       }
+      // ORG-001/017：辞职批准同步移除职位 Group 成员
+      const sync = syncPositionMembership({ clubId: req.clubId, memberId: member.id, memberName: member.name, departmentName: pos.departmentName, title: pos.title, active: false })
+      if (!sync.ok && sync.error) req.syncWarning = sync.error
     }
     member.tenures.unshift({ id: 'ten-' + Date.now(), departmentName: req.departmentName, title: req.title, startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), endReason: '辞职' })
     member.departmentHistory.unshift({ id: 'dhis-' + Date.now(), action: 'leave', departmentName: req.departmentName, at: now })

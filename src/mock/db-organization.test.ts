@@ -21,8 +21,11 @@ import {
   saveWizardStep,
   searchGroups,
   suspendClub,
+  syncPositionMembership,
   triggerGroupLost,
   validateGroupForBinding,
+  clubAccesses,
+  groupSyncTraces,
 } from './db-organization'
 
 describe('effectiveChars 有效字符门槛', () => {
@@ -128,6 +131,107 @@ describe('getGroupDetail / getClubAccess / listClubAccesses 查询', () => {
     expect(club1.groupName).toBe('计算机协会')
     expect(club1.freezeExtensionMs).toBe(0)
     expect(club1.hasActiveBusiness).toBe(false)
+  })
+})
+
+describe('syncPositionMembership 职位 Group 成员同步（ORG-001/017：Group 为关系权威）', () => {
+  it('任命负责人：写入社团负责人职位 Group（leaderGroupId）', () => {
+    const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '负责人', active: true })
+    expect(r.ok).toBe(true)
+    expect(r.groupId).toBe('grp-lead-001')
+    expect(getGroupDetail('grp-lead-001')!.members.some((m) => m.id === 'mem-001')).toBe(true)
+  })
+
+  it('免职负责人：从负责人职位 Group 移除', () => {
+    const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-004', memberName: '张明远', departmentName: '技术部', title: '负责人', active: false })
+    expect(r.ok).toBe(true)
+    expect(r.groupId).toBe('grp-lead-001')
+    expect(getGroupDetail('grp-lead-001')!.members.some((m) => m.id === 'mem-004')).toBe(false)
+  })
+
+  it('任命部门职位：在部门 Group 下自动建立同名职位 Group 并写入成员', () => {
+    const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    expect(r.ok).toBe(true)
+    const detail = getGroupDetail(r.groupId!)!
+    expect(detail).toMatchObject({ name: '干事', purpose: 'position', boundClubId: 'club-001', path: '/学校学生组织/计算机协会/技术部/干事' })
+    expect(detail.members.find((m) => m.id === 'mem-001')?.name).toBe('陈雨桐')
+  })
+
+  it('重复任命幂等：同一职位不产生重复成员', () => {
+    const r1 = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    const r2 = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    expect(r1.groupId).toBe(r2.groupId)
+    expect(getGroupDetail(r2.groupId!)!.members.filter((m) => m.id === 'mem-001')).toHaveLength(1)
+  })
+
+  it('部门 Group 歧义消解：同后缀多 Group 时按「社团名+部门名」拼接优先命中目标，不取首个同后缀', () => {
+    // 种子含 grp-dept-001「计算机协会技术部」与 grp-dept-002「计算机协会信息技术部」同以「技术部」结尾
+    const exact = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    expect(exact.ok).toBe(true)
+    expect(getGroupDetail(exact.groupId!)!.path).toBe('/学校学生组织/计算机协会/技术部/干事')
+
+    const it = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '信息技术部', title: '干事', active: true })
+    expect(it.ok).toBe(true)
+    expect(getGroupDetail(it.groupId!)!.path).toBe('/学校学生组织/计算机协会/信息技术部/干事')
+  })
+
+  it('免职部门职位：从既有职位 Group 移除（自带前置入组，不依赖前序用例）', () => {
+    // 前置：先任命入组，再免职移除——独立可运行，不依赖「任命部门职位」用例副作用建组
+    const appointed = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: true })
+    expect(appointed.ok).toBe(true)
+    expect(getGroupDetail(appointed.groupId!)!.members.some((m) => m.id === 'mem-001')).toBe(true)
+
+    const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-001', memberName: '陈雨桐', departmentName: '技术部', title: '干事', active: false })
+    expect(r.ok).toBe(true)
+    expect(r.groupId).toBe(appointed.groupId)
+    expect(getGroupDetail(r.groupId!)!.members.some((m) => m.id === 'mem-001')).toBe(false)
+  })
+
+  it('免职未建组的职位：宽容通过且不自动建组', () => {
+    const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-002', memberName: '王浩然', departmentName: '技术部', title: '不存在的职位', active: false })
+    expect(r.ok).toBe(true)
+    expect(r.groupId).toBeUndefined()
+    expect(searchGroups('不存在的职位')).toHaveLength(0)
+  })
+
+  it('无部门 Group 的职位：挂社团 Group 下自动建组', () => {
+    const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-003', memberName: '李思颖', departmentName: '运营部', title: '部长', active: true })
+    expect(r.ok).toBe(true)
+    const detail = getGroupDetail(r.groupId!)!
+    expect(detail).toMatchObject({ name: '部长', purpose: 'position', path: '/学校学生组织/计算机协会/部长' })
+  })
+
+  it('社团未接入/未绑定 Group：返回 ok:false（宽容不阻断任命）+ 失败留痕', () => {
+    expect(syncPositionMembership({ clubId: 'club-ghost', memberId: 'mem-001', memberName: 'x', departmentName: null, title: '干事', active: true })).toMatchObject({ ok: false, error: '社团未接入' })
+    expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-ghost', title: '干事', active: true, error: '社团未接入' })
+    expect(syncPositionMembership({ clubId: 'club-004', memberId: 'mem-001', memberName: 'x', departmentName: null, title: '干事', active: true })).toMatchObject({ ok: false, error: '社团未绑定 Group' })
+    expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-004', title: '干事', active: true, error: '社团未绑定 Group' })
+  })
+
+  it('负责人任命但社团未配置负责人 Group：返回 ok:false + 失败留痕', () => {
+    expect(syncPositionMembership({ clubId: 'club-003', memberId: 'mem-201', memberName: '郑浩宇', departmentName: null, title: '负责人', active: true })).toMatchObject({ ok: false, error: '未找到对应职位 Group' })
+    expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-003', memberId: 'mem-201', title: '负责人', active: true, error: '未找到对应职位 Group' })
+  })
+
+  it('负责人免职 + leaderGroupId 未配置（空）：容忍 ok:true 且不留痕（向导未配置 ≠ 配置损坏）', () => {
+    const tracesBefore = groupSyncTraces.length
+    const r = syncPositionMembership({ clubId: 'club-003', memberId: 'mem-201', memberName: '郑浩宇', departmentName: null, title: '负责人', active: false })
+    expect(r).toMatchObject({ ok: true })
+    expect(groupSyncTraces.length).toBe(tracesBefore)
+  })
+
+  it('负责人免职 + leaderGroupId 悬空：返回明确错误并留痕（不静默吞错）', () => {
+    const access = clubAccesses.find((c) => c.clubId === 'club-001')!
+    const prev = access.leaderGroupId
+    access.leaderGroupId = 'grp-lead-ghost'
+    try {
+      const r = syncPositionMembership({ clubId: 'club-001', memberId: 'mem-004', memberName: '张明远', departmentName: null, title: '负责人', active: false })
+      expect(r.ok).toBe(false)
+      expect(r.error).toBe('负责人职位 Group 不存在或已失效')
+      expect(groupSyncTraces[0]).toMatchObject({ clubId: 'club-001', memberId: 'mem-004', title: '负责人', active: false, error: '负责人职位 Group 不存在或已失效' })
+    } finally {
+      access.leaderGroupId = prev
+    }
   })
 })
 
