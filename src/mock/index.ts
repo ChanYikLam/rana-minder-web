@@ -462,64 +462,6 @@ const identityHandlers: MockMethod[] = [
 
 /** 公开目录处理器 */
 
-/** 社团种子：平台接入管理（admin/clubs）与公开目录（explore/clubs）共用同一数据源 */
-const mockClubs: { id: string; name: string; description: string; status: string; createdAt: string; groupMapped: boolean }[] = [
-  { id: 'club-001', name: '计算机协会', description: '专注计算机技术交流与项目实践', status: 'approved', createdAt: '2022-09-01', groupMapped: true },
-  { id: 'club-002', name: '电子设计协会', description: '电子设计与嵌入式开发', status: 'approved', createdAt: '2022-09-01', groupMapped: true },
-  { id: 'club-003', name: '数学建模协会', description: '数学建模竞赛与学术研究', status: 'approved', createdAt: '2023-03-15', groupMapped: true },
-  { id: 'club-004', name: '摄影协会', description: '摄影艺术与后期制作', status: 'approved', createdAt: '2025-07-28', groupMapped: true },
-]
-
-const clubMemberCount = (id: string) => db.getMemberStats(id).total
-
-/** Casdoor Group 目录（虚拟）：接入向导分层搜索与绑定校验数据源；本系统不创建/改名/移动真实 Group */
-interface CasdoorGroup {
-  id: string
-  path: string
-  name: string
-  parentPath: string | null
-  kind: 'org' | 'club' | 'dept' | 'role'
-  memberCount: number
-  boundClubId: string | null
-}
-
-const casdoorGroups: CasdoorGroup[] = [
-  { id: 'g-cs', path: '/cs', name: '计算机学院', parentPath: null, kind: 'org', memberCount: 1200, boundClubId: null },
-  { id: 'g-cs-cc', path: '/cs/computer-club', name: '计算机协会', parentPath: '/cs', kind: 'club', memberCount: 5, boundClubId: 'club-001' },
-  { id: 'g-cs-cc-dev', path: '/cs/computer-club/dept-dev', name: '开发部', parentPath: '/cs/computer-club', kind: 'dept', memberCount: 3, boundClubId: 'club-001' },
-  { id: 'g-cs-cc-prod', path: '/cs/computer-club/dept-prod', name: '宣传部', parentPath: '/cs/computer-club', kind: 'dept', memberCount: 2, boundClubId: 'club-001' },
-  { id: 'g-cs-cc-leader', path: '/cs/computer-club/role-leader', name: '负责人', parentPath: '/cs/computer-club', kind: 'role', memberCount: 1, boundClubId: 'club-001' },
-  { id: 'g-cs-cc-member', path: '/cs/computer-club/role-member', name: '成员', parentPath: '/cs/computer-club', kind: 'role', memberCount: 4, boundClubId: 'club-001' },
-  { id: 'g-cs-ec', path: '/cs/electronics-club', name: '电子设计协会', parentPath: '/cs', kind: 'club', memberCount: 86, boundClubId: 'club-002' },
-  { id: 'g-cs-mc', path: '/cs/math-club', name: '数学建模协会', parentPath: '/cs', kind: 'club', memberCount: 64, boundClubId: 'club-003' },
-  { id: 'g-cs-pc', path: '/cs/photography-club', name: '摄影协会', parentPath: '/cs', kind: 'club', memberCount: 42, boundClubId: 'club-004' },
-  { id: 'g-cs-pc-leader', path: '/cs/photography-club/role-leader', name: '负责人', parentPath: '/cs/photography-club', kind: 'role', memberCount: 1, boundClubId: 'club-004' },
-  { id: 'g-cs-ai', path: '/cs/ai-club', name: '人工智能协会', parentPath: '/cs', kind: 'club', memberCount: 31, boundClubId: null },
-  { id: 'g-cs-ai-dev', path: '/cs/ai-club/dept-algo', name: '算法部', parentPath: '/cs/ai-club', kind: 'dept', memberCount: 12, boundClubId: null },
-  { id: 'g-cs-ai-op', path: '/cs/ai-club/dept-op', name: '运营部', parentPath: '/cs/ai-club', kind: 'dept', memberCount: 8, boundClubId: null },
-  { id: 'g-cs-ai-leader', path: '/cs/ai-club/role-leader', name: '负责人', parentPath: '/cs/ai-club', kind: 'role', memberCount: 1, boundClubId: null },
-  { id: 'g-cs-ai-member', path: '/cs/ai-club/role-member', name: '成员', parentPath: '/cs/ai-club', kind: 'role', memberCount: 30, boundClubId: null },
-  { id: 'g-cs-staff', path: '/cs/staff-ops', name: '学院行政', parentPath: '/cs', kind: 'role', memberCount: 8, boundClubId: null },
-]
-
-let nextClubSeq = 5
-
-/** 分层搜索：精确 -> 子串 -> 近似；不足 3 个有效字符仅做精确与子串 */
-function searchCasdoorGroups(keyword: string): CasdoorGroup[] {
-  const kw = keyword.trim()
-  if (!kw) return casdoorGroups.filter((g) => g.kind === 'club')
-  const valid = kw.replace(/[\s\u3000]/g, '')
-  const exact: CasdoorGroup[] = []
-  const substring: CasdoorGroup[] = []
-  const fuzzy: CasdoorGroup[] = []
-  for (const g of casdoorGroups) {
-    if (g.name === kw || g.path === kw) exact.push(g)
-    else if (g.name.includes(kw) || g.path.includes(kw)) substring.push(g)
-    else if (valid.length >= 3 && editDistance(g.name, valid) <= 1) fuzzy.push(g)
-  }
-  return [...exact, ...substring, ...fuzzy]
-}
-
 // ================= 公开目录（REC-047） =================
 
 type SearchLayer = 'exact' | 'substring' | 'fuzzy'
@@ -622,13 +564,14 @@ const publicHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const kw = (query.q || '').trim()
-      const clubs = mockClubs
-        .filter((c) => c.status === 'approved')
+      const clubs = orgdb
+        .listClubAccesses()
+        .filter((c) => c.status === 'enabled')
         .map((c) => ({
-          id: c.id,
-          name: c.name,
+          id: c.clubId,
+          name: c.clubName,
           description: c.description,
-          memberCount: clubMemberCount(c.id),
+          memberCount: db.getMemberStats(c.clubId).total,
           logo: null,
           layer: 'exact' as SearchLayer,
         }))
@@ -1685,6 +1628,15 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { items, nextCursor: null } }
     },
   },
+  // Group 目录（接入向导候选：SM-ORG-001 唯一 Group 数据源，仅暴露社团级候选，不泄露内部职位/部门层级）
+  {
+    url: '/api/admin/groups',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
+      return { code: 0, data: { items: orgdb.listGroups().filter((g) => g.purpose === 'club') } }
+    },
+  },
   // Group 分层搜索（精确 → 中文连续子串 → 受控错别字近似，3 有效字符门槛）
   {
     url: '/api/admin/groups/search',
@@ -1709,11 +1661,21 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/clubs/wizard/save-step',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null } } }) => {
+    response: ({ url, body }: { url: string; body: { input: { clubId?: string; step?: number; selectedGroupId?: string | null; leaderGroupId?: string | null; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
       if (!isPlatformClubManager(url)) return forbidden()
       const input = body.input || {}
       if (!input.clubId) return businessError('缺少社团 ID')
-      const result = orgdb.saveWizardStep(input.clubId, { step: input.step ?? 0, selectedGroupId: input.selectedGroupId, leaderGroupId: input.leaderGroupId })
+      const email = (input.email ?? '').trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return businessError('联系邮箱格式不正确')
+      const result = orgdb.saveWizardStep(input.clubId, {
+        step: input.step ?? 0,
+        selectedGroupId: input.selectedGroupId,
+        leaderGroupId: input.leaderGroupId,
+        email,
+        deptGroups: input.deptGroups,
+        roleGroups: input.roleGroups,
+        leaderRoleGroup: input.leaderRoleGroup,
+      })
       if (!result.ok) return businessError(result.error || '保存失败')
       return { code: 0, data: result.data }
     },
@@ -2561,166 +2523,22 @@ policies: retentionPolicies,
   },
   // 保存权限模板草稿
   // 发布权限模板
-  // Casdoor Group 目录（接入向导：分层搜索 / 层级候选）
-  {
-    url: '/api/admin/casdoor/groups',
-    method: 'get',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const under = query.under
-      if (under) {
-        const parent = casdoorGroups.find((g) => g.path === under)
-        if (!parent) return businessError('Group 不存在')
-        let kids = casdoorGroups.filter((g) => g.parentPath === parent.path)
-        if (query.kind) kids = kids.filter((g) => g.kind === query.kind)
-        return {
-          code: 0,
-          data: {
-            items: kids.map((g) => ({
-              id: g.id, path: g.path, name: g.name, parentPath: g.parentPath, kind: g.kind,
-              memberCount: g.memberCount, boundClubId: g.boundClubId,
-            })),
-          },
-        }
-      }
-      const items = query.keyword ? searchCasdoorGroups(query.keyword) : casdoorGroups.filter((g) => g.kind === 'club')
-      return {
-        code: 0,
-        data: {
-          items: items.map((g) => ({
-            id: g.id, path: g.path, name: g.name, parentPath: g.parentPath, kind: g.kind,
-            memberCount: g.memberCount, boundClubId: g.boundClubId,
-          })),
-        },
-      }
-    },
-  },
-  // 提交新社团接入向导（校验通过后进入待审核）
+  // 提交新社团接入向导（ORG-005 从既有 Group 接入；创建进入 wizard_pending，无审批环节，完成接入见 admin/clubs/wizard/save-step + complete）
   {
     url: '/api/admin/clubs/wizard',
     method: 'post',
-    response: ({ url, body }: { url: string; body: { input: { groupPath?: string; name?: string; description?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
+    response: ({ url, body }: { url: string; body: { input: { groupId?: string; name?: string; description?: string; leaderGroupId?: string; email?: string; deptGroups?: string[]; roleGroups?: string[]; leaderRoleGroup?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden()
       const input = body.input ?? {}
-      const group = casdoorGroups.find((g) => g.path === input.groupPath)
-      if (!group) return businessError('所选 Group 不存在')
-      if (group.kind !== 'club') return businessError('仅社团级 Group 可接入，请选择社团类 Group')
-      if (group.boundClubId) return businessError('该 Group 已绑定其他社团（重复绑定）')
-      const name = (input.name ?? '').trim()
-      if (!name) return businessError('请填写社团名称')
-      if (mockClubs.some((c) => c.name === name)) return businessError('社团名称已存在，请检查用途唯一性')
-      if (!input.leaderRoleGroup) return businessError('启用前必须指定负责人职位 Group')
-      const leader = casdoorGroups.find((g) => g.path === input.leaderRoleGroup)
-      if (!leader || !leader.path.startsWith(group.path + '/')) return businessError('负责人职位 Group 不在所选社团层级下')
-      if (leader.kind !== 'role') return businessError('负责人职位必须是角色级 Group')
-      if (leader.memberCount < 1) return businessError('负责人职位 Group 中无有效负责人')
-      for (const p of input.deptGroups ?? []) {
-        const d = casdoorGroups.find((g) => g.path === p)
-        if (!d || !d.path.startsWith(group.path + '/') || d.kind !== 'dept') return businessError(`部门 Group「${p}」层级或类型不正确`)
-      }
-      for (const p of input.roleGroups ?? []) {
-        const r = casdoorGroups.find((g) => g.path === p)
-        if (!r || !r.path.startsWith(group.path + '/') || r.kind !== 'role') return businessError(`职位 Group「${p}」层级或类型不正确`)
-      }
-      const id = `club-${String(nextClubSeq++).padStart(3, '0')}`
-      mockClubs.push({
-        id,
-        name,
-        description: (input.description ?? '').trim(),
-        status: 'pending_review',
-        createdAt: new Date().toISOString().slice(0, 10),
-        groupMapped: true,
+      if (!input.groupId) return businessError('缺少 Group ID')
+      const email = (input.email ?? '').trim()
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return businessError('联系邮箱格式不正确')
+      const result = orgdb.createClubAccess({
+        groupId: input.groupId, name: input.name ?? '', description: input.description, leaderGroupId: input.leaderGroupId ?? '',
+        email, deptGroups: input.deptGroups, roleGroups: input.roleGroups, leaderRoleGroup: input.leaderRoleGroup,
       })
-      group.boundClubId = id
-      return { code: 0, data: { id, status: 'pending_review', pendingAt: new Date().toISOString() } }
-    },
-  },
-  // 批准社团接入
-  {
-    url: '/api/admin/clubs/:clubId/approve',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const club = mockClubs.find((c) => c.id === query.clubId)
-      if (!club) return businessError('社团不存在')
-      if (club.status !== 'pending_review') return businessError(`当前状态「${club.status}」不允许批准`)
-      club.status = 'approved'
-      return { code: 0, data: { id: club.id, status: club.status, approvedAt: new Date().toISOString() } }
-    },
-  },
-  // 拒绝社团接入
-  {
-    url: '/api/admin/clubs/:clubId/reject',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const club = mockClubs.find((c) => c.id === query.clubId)
-      if (!club) return businessError('社团不存在')
-      if (club.status !== 'pending_review') return businessError(`当前状态「${club.status}」不允许拒绝`)
-      club.status = 'rejected'
-      return { code: 0, data: { id: club.id, status: club.status, rejectedAt: new Date().toISOString() } }
-    },
-  },
-  // 停用社团（approved -> suspended）
-  {
-    url: '/api/admin/clubs/:clubId/suspend',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const club = mockClubs.find((c) => c.id === query.clubId)
-      if (!club) return businessError('社团不存在')
-      if (club.status !== 'approved') return businessError(`当前状态「${club.status}」不允许停用，仅已批准社团可停用`)
-      club.status = 'suspended'
-      return { code: 0, data: { id: club.id, status: club.status, suspendedAt: new Date().toISOString() } }
-    },
-  },
-  // 紧急停用社团（approved -> emergency_suspended）
-  {
-    url: '/api/admin/clubs/:clubId/emergency-suspend',
-    method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
-        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
-      }
-      const club = mockClubs.find((c) => c.id === query.clubId)
-      if (!club) return businessError('社团不存在')
-      if (club.status !== 'approved') return businessError(`当前状态「${club.status}」不允许紧急停用，仅已批准社团可紧急停用`)
-      club.status = 'emergency_suspended'
-      return { code: 0, data: { id: club.id, status: club.status, suspendedAt: new Date().toISOString() } }
-    },
-  },
-  // 恢复社团（suspended | emergency_suspended -> approved）
-  {
-    url: '/api/admin/clubs/:clubId/re-enable',
-    method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const club = mockClubs.find((c) => c.id === query.clubId)
-      if (!club) return businessError('社团不存在')
-      if (club.status !== 'suspended' && club.status !== 'emergency_suspended') {
-        return businessError(`当前状态「${club.status}」不允许恢复，仅停用或紧急停用中的社团可恢复`)
-      }
-      club.status = 'approved'
-      return { code: 0, data: { id: club.id, status: club.status, reEnabledAt: new Date().toISOString() } }
-    },
-  },
-  // 解除接入（approved | suspended | emergency_suspended -> removed）
-  {
-    url: '/api/admin/clubs/:clubId/revoke',
-    method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reauthProof?: string } } }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
-        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
-      }
-      const club = mockClubs.find((c) => c.id === query.clubId)
-      if (!club) return businessError('社团不存在')
-      if (!['approved', 'suspended', 'emergency_suspended'].includes(club.status)) {
-        return businessError(`当前状态「${club.status}」不允许解除接入`)
-      }
-      club.status = 'removed'
-      return { code: 0, data: { id: club.id, status: club.status, revokedAt: new Date().toISOString() } }
+      if (!result.ok || !result.data) return businessError(result.error || '接入失败')
+      return { code: 0, data: { id: result.data.clubId, status: result.data.status, wizardStep: result.data.wizardStep, createdAt: result.data.createdAt } }
     },
   },
   // 运维状态
@@ -2773,9 +2591,9 @@ policies: retentionPolicies,
     url: '/api/admin/stats',
     method: 'get',
     response: () => {
-      const clubs = mockClubs.filter((c) => c.status === 'approved')
+      const clubs = orgdb.listClubAccesses().filter((c) => c.status === 'enabled')
       const distribution = clubs
-        .map((c) => ({ name: c.name, count: db.listMembers(c.id).filter((m) => m.status === 'active').length }))
+        .map((c) => ({ name: c.clubName, count: db.listMembers(c.clubId).filter((m) => m.status === 'active').length }))
         .filter((d) => d.count > 0)
       const totalMembers = distribution.reduce((s, d) => s + d.count, 0)
       const activeRec = rdb.recruitmentActivities.filter((a) => a.status === 'in_progress').length

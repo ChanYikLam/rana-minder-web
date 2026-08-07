@@ -173,4 +173,43 @@ describe('P0-002 录取接受后成员创建桥（SM-MEM 关系模型）', () =>
     const member = listMembers('club-002').find((m) => m.studentId === '20240006')!
     expect(member.positions.map((p) => p.departmentName)).toContain('嵌入式组')
   })
+
+  it('P2-1：普通招新确认创建的成员联系方式来自申请人档案（非空，不再回退占位/空串）', () => {
+    const accepted = respondRecInvitation('rinv-001', 'accept', 'u-002')
+    expect(accepted.ok).toBe(true)
+    expect(confirmRecInvitationSync('rinv-001').ok).toBe(true)
+    const member = listMembers('club-001').find((m) => m.studentId === '20240002')!
+    // u-002 → user-applicant-002（applicant2）联系方式
+    expect(member.email).toBe('applicant2@example.edu.cn')
+    expect(member.phone).toBe('13800000002')
+  })
+
+  it('P2-1：联合录取确认创建的成员联系方式来自申请人档案（非空）', () => {
+    const created = createJointInvitation('jnt-001', 'u-006', 'club-001', 7)
+    expect(created.ok, created.error || '').toBe(true)
+    const invite = jointInvitations.find((i) => i.applicantId === 'u-006' && i.clubId === 'club-001')!
+    expect(respondJointInvitation(invite.id, 'accept', 'u-006').ok).toBe(true)
+    expect(confirmJointInvitationSync(invite.id).ok).toBe(true)
+    const member = listMembers('club-001').find((m) => m.studentId === '20240006')!
+    // u-006 → user-applicant-003（applicant3）联系方式
+    expect(member.email).toBe('applicant3@example.edu.cn')
+    expect(member.phone).toBe('13800000003')
+  })
+
+  it('P2-1：动态注册申请人（无 auth 用户）回退候选人档案联系方式', () => {
+    const member = createMemberFromAdmission('club-001', { studentId: '20240010', name: '周明轩', departmentId: null, departmentName: null, acceptedAt: new Date().toISOString() })
+    expect(member.ok).toBe(true)
+    const created = members.find((m) => m.studentId === '20240010')!
+    // 20240010 → candidates.cand-001
+    expect(created.email).toBe('candidate@example.edu.cn')
+    expect(created.phone).toBe('13800000010')
+  })
+
+  it('P2-1：调用方透传联系方式优先于候选人档案', () => {
+    const member = createMemberFromAdmission('club-001', { studentId: '20240010', name: '周明轩', departmentId: null, departmentName: null, acceptedAt: new Date().toISOString(), email: 'override@example.edu.cn', phone: '13000000000' })
+    expect(member.ok).toBe(true)
+    const created = members.find((m) => m.studentId === '20240010')!
+    expect(created.email).toBe('override@example.edu.cn')
+    expect(created.phone).toBe('13000000000')
+  })
 })
