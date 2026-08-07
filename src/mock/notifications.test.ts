@@ -14,6 +14,8 @@ import {
   listNotificationPreferences,
   setNotificationKillSwitch,
   notificationKillSwitch,
+  clubKillSwitchState,
+  clubKillSwitches,
   emailOutbox,
 } from './notifications'
 import { resetNotifications } from './reset'
@@ -138,6 +140,34 @@ describe('P1-009 紧急关闭 kill switch（US-NTF-01）', () => {
     const passed = pushNotification(['ntf-test-user'], 'application', { activityTitle: 'B', dedupRef: 'apply:act-002:u-001' }, { clubId: 'club-002' })
     expect(passed.delivered).toBe(1)
   })
+
+  it('多社团熔断状态互相隔离：互不覆盖、互不串读、互不影响开关', () => {
+    setNotificationKillSwitch({ active: true, scope: 'club', clubId: 'club-001', reason: '社团A故障' })
+    setNotificationKillSwitch({ active: true, scope: 'club', clubId: 'club-002', reason: '社团B故障' })
+
+    // 各自独立开启，互不覆盖
+    expect(clubKillSwitchState('club-001').active).toBe(true)
+    expect(clubKillSwitchState('club-002').active).toBe(true)
+    expect(clubKillSwitchState('club-001').reason).toBe('社团A故障')
+
+    // 关闭 club-002 不影响 club-001
+    setNotificationKillSwitch({ active: false, scope: 'club', clubId: 'club-002' })
+    expect(clubKillSwitchState('club-002').active).toBe(false)
+    expect(clubKillSwitchState('club-001').active).toBe(true)
+    expect(clubKillSwitches.size).toBe(2)
+
+    // 无记录的社团不熔断
+    expect(clubKillSwitchState('club-999').active).toBe(false)
+  })
+
+  it('社团级熔断计数计入对应社团 droppedCount（可审计）', () => {
+    setNotificationKillSwitch({ active: true, scope: 'club', clubId: 'club-001', reason: '社团故障' })
+    pushNotification(['ntf-test-user'], 'application', { activityTitle: 'A', dedupRef: 'apply:act-001:u-001' }, { clubId: 'club-001' })
+    pushNotification(['ntf-test-user'], 'application', { activityTitle: 'B', dedupRef: 'apply:act-002:u-001' }, { clubId: 'club-001' })
+    expect(clubKillSwitchState('club-001').droppedCount).toBe(2)
+    // 平台级计数不受社团熔断影响
+    expect(notificationKillSwitch.droppedCount).toBe(0)
+  })
 })
 
 describe('P1-009 通知偏好（US-NTF-01）', () => {
@@ -174,5 +204,14 @@ describe('P1-009 邮件渠道（US-NTF-02）', () => {
   it('纯内部通知（channel 覆盖为 inbox）不产生邮件', () => {
     pushNotification(['applicant2'], 'conclusion', { dedupRef: 'review:jnt-001:u-002' }, { channel: ['inbox'], title: '结论被修改', body: '您的结论已被复核修改' })
     expect(emailOutbox.length).toBe(0)
+  })
+
+  it('业务侧传入真实用户 id（user-applicant-002）也能匹配邮箱产生邮件', () => {
+    pushNotification(['user-applicant-002'], 'invitation', { clubName: '计算机协会', dedupRef: 'invite:rinv-101' })
+    const email = emailOutbox[0]
+    expect(email).toBeDefined()
+    expect(email.toUserId).toBe('user-applicant-002')
+    expect(email.toEmail).toBe('applicant2@example.edu.cn')
+    expect(email.subject).toBe('【RanaMinder】收到录取邀请')
   })
 })

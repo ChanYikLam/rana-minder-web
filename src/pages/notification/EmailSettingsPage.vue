@@ -21,12 +21,28 @@ const saving = ref(false)
 const savingPrefs = ref(false)
 const refilling = ref(false)
 
+// 页面 UI 仅展示 4 类常用偏好；fullPreferences 持有全部 8 类（含页面未展示的结论/成员/换届/纠错）
 const preferences = ref({
   applicationStatus: true,
   interviewNotify: true,
   admissionInvite: true,
   systemMaintenance: false,
 })
+
+// kind -> UI 字段映射（保存时合并回全量 8 类，读取时回显）
+const KIND_TO_UI: Record<string, keyof typeof preferences.value> = {
+  application: 'applicationStatus',
+  interview: 'interviewNotify',
+  invitation: 'admissionInvite',
+  system: 'systemMaintenance',
+}
+const UI_TO_KIND: Record<keyof typeof preferences.value, string> = {
+  applicationStatus: 'application',
+  interviewNotify: 'interview',
+  admissionInvite: 'invitation',
+  systemMaintenance: 'system',
+}
+const fullPreferences = ref<Record<string, boolean>>({})
 
 const scope = computed(() => (route.meta.scope as string) || 'personal')
 const scopeLabel = computed(() => {
@@ -37,7 +53,23 @@ const scopeLabel = computed(() => {
 const isConfig = computed(() => scope.value !== 'personal')
 
 async function loadData() {
-  if (!isConfig.value) { state.value = 'normal'; return }
+  if (!isConfig.value) {
+    state.value = 'loading'
+    const apiScope = resolveApiScope(route)
+    if (apiScope) {
+      const result = await get<{ preferences: Record<string, boolean> }>(`${apiScope.prefix}/notifications/preferences`)
+      if (result.kind === 'completed') {
+        fullPreferences.value = result.data.preferences
+        for (const [kind, uiKey] of Object.entries(KIND_TO_UI)) {
+          if (typeof fullPreferences.value[kind] === 'boolean') {
+            preferences.value[uiKey] = fullPreferences.value[kind]
+          }
+        }
+      }
+    }
+    state.value = 'normal'
+    return
+  }
   state.value = 'loading'
   const apiScope = resolveApiScope(route)
   if (!apiScope) { state.value = 'error'; return }
@@ -67,7 +99,7 @@ async function handleTest() {
   if (result.kind === 'completed') {
     testResult.value = '测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收'
   } else {
-    testError.value = '测试邮件发送失败，请稍后重试'
+    testError.value = result.kind === 'rejected' && result.error?.message ? result.error.message : '测试邮件发送失败，请稍后重试'
   }
 }
 
@@ -75,9 +107,11 @@ async function handleSavePreferences() {
   savingPrefs.value = true
   const apiScope = resolveApiScope(route)
   if (!apiScope) { savingPrefs.value = false; return }
-  const result = await post(`${apiScope.prefix}/notifications/preferences`, {
-    ...preferences.value,
-  })
+  const nextPrefs: Record<string, boolean> = { ...fullPreferences.value }
+  for (const [uiKey, kind] of Object.entries(UI_TO_KIND)) {
+    nextPrefs[kind] = preferences.value[uiKey as keyof typeof preferences.value]
+  }
+  const result = await post(`${apiScope.prefix}/notifications/preferences`, nextPrefs)
   savingPrefs.value = false
   if (result.kind === 'completed') {
     toast.success('偏好已保存')
@@ -113,8 +147,11 @@ async function handleSave() {
   saving.value = false
   if (result.kind === 'completed') {
     config.value.verified = true
+    toast.success('发信配置已保存')
   } else {
-    toast.error('保存失败，请稍后重试')
+    // IFC-ERR-006：未通过测试的配置不可保存（US-NTF-02），展示服务端具体原因
+    const msg = result.kind === 'rejected' && result.error?.message ? result.error.message : '保存失败，请稍后重试'
+    toast.error(msg)
   }
 }
 

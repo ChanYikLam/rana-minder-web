@@ -1,4 +1,4 @@
-import { mockUsers, USER_APPLICANT_MAP } from './auth'
+import { mockUsers, USER_APPLICANT_MAP, type MockUser } from './auth'
 import { applicantStudentIdOf } from './db-recruitment'
 import { MEMBER_BY_USER } from './db'
 
@@ -194,8 +194,16 @@ export const killSwitchInitial: KillSwitchState = {
 
 export const notificationKillSwitch: KillSwitchState = { ...killSwitchInitial }
 
-/** 紧急关闭（幂等：重复开启保留首次时间；开启后保留 droppedCount 累计） */
-export function setNotificationKillSwitch(input: {
+/** 社团级紧急关闭（按社团独立存储，互不覆盖；平台级见 notificationKillSwitch） */
+export const clubKillSwitches = new Map<string, KillSwitchState>()
+
+/** 读取某社团的熔断状态（无记录时返回初始态副本） */
+export function clubKillSwitchState(clubId: string): KillSwitchState {
+  return clubKillSwitches.get(clubId) ?? { ...killSwitchInitial }
+}
+
+/** 应用一次开关变更（active=true 幂等保留首次 stoppedAt；关闭保留 droppedCount 审计计数） */
+function applyKillSwitch(prev: KillSwitchState, input: {
   active: boolean
   scope?: 'platform' | 'club'
   clubId?: string | null
@@ -203,30 +211,61 @@ export function setNotificationKillSwitch(input: {
   operatorName?: string | null
 }): KillSwitchState {
   if (input.active) {
-    const firstStop = notificationKillSwitch.active ? notificationKillSwitch.stoppedAt : now()
-    notificationKillSwitch.active = true
-    notificationKillSwitch.scope = input.scope ?? 'platform'
-    notificationKillSwitch.clubId = input.clubId ?? null
-    notificationKillSwitch.reason = input.reason ?? notificationKillSwitch.reason ?? null
-    notificationKillSwitch.operatorName = input.operatorName ?? null
-    notificationKillSwitch.stoppedAt = firstStop ?? now()
-  } else {
-    notificationKillSwitch.active = false
-    notificationKillSwitch.scope = null
-    notificationKillSwitch.clubId = null
-    notificationKillSwitch.reason = null
-    notificationKillSwitch.operatorName = null
-    notificationKillSwitch.stoppedAt = null
+    const firstStop = prev.active ? prev.stoppedAt : now()
+    return {
+      ...prev,
+      active: true,
+      scope: input.scope ?? 'platform',
+      clubId: input.clubId ?? prev.clubId ?? null,
+      reason: input.reason ?? prev.reason ?? null,
+      operatorName: input.operatorName ?? null,
+      stoppedAt: firstStop ?? now(),
+    }
   }
+  return {
+    ...prev,
+    active: false,
+    scope: null,
+    clubId: null,
+    reason: null,
+    operatorName: null,
+    stoppedAt: null,
+  }
+}
+
+/** 紧急关闭（幂等：重复开启保留首次时间；开启后保留 droppedCount 累计）
+ *  平台级写入 notificationKillSwitch；社团级写入 clubKillSwitches（按 clubId 隔离） */
+export function setNotificationKillSwitch(input: {
+  active: boolean
+  scope?: 'platform' | 'club'
+  clubId?: string | null
+  reason?: string | null
+  operatorName?: string | null
+}): KillSwitchState {
+  if (input.scope === 'club' && input.clubId) {
+    const next = applyKillSwitch(clubKillSwitches.get(input.clubId) ?? { ...killSwitchInitial }, input)
+    clubKillSwitches.set(input.clubId, next)
+    return { ...next }
+  }
+  Object.assign(notificationKillSwitch, applyKillSwitch(notificationKillSwitch, input))
   return { ...notificationKillSwitch }
 }
 
-/** 当前熔断是否命中（平台级全命中；社团级需匹配 clubId；关闭态永不命中） */
+export function resetClubKillSwitches(): void {
+  clubKillSwitches.clear()
+}
+
+/** 当前熔断是否命中（平台级全命中；社团级匹配对应社团开关；关闭态永不命中） */
 function killSwitchBlocks(clubId?: string | null): boolean {
   const ks = notificationKillSwitch
-  if (!ks.active) return false
-  if (ks.scope === 'platform') return true
-  if (ks.scope === 'club') return clubId != null && ks.clubId === clubId
+  if (ks.active) {
+    if (ks.scope === 'platform') return true
+    if (ks.scope === 'club' && clubId != null && ks.clubId === clubId) return true
+  }
+  if (clubId) {
+    const cks = clubKillSwitches.get(clubId)
+    if (cks?.active) return true
+  }
   return false
 }
 
@@ -475,7 +514,13 @@ export function pushNotification(
     }
     // 2) 紧急关闭熔断（平台级 / 匹配社团级；熔断丢弃不占用去重窗口）
     if (killSwitchBlocks(opts.clubId)) {
-      notificationKillSwitch.droppedCount += 1
+      // 计数落到命中的开关：平台级未开且社团开关命中时计到该社团，否则计到平台级
+      const clubKs = opts.clubId ? clubKillSwitches.get(opts.clubId) : undefined
+      if (clubKs?.active && !notificationKillSwitch.active) {
+        clubKs.droppedCount += 1
+      } else {
+        notificationKillSwitch.droppedCount += 1
+      }
       dropped += 1
       reason = reason ?? 'killswitch'
       continue
@@ -502,7 +547,7 @@ export function pushNotification(
     delivered += 1
     // 5) 邮件渠道（模板声明 email 且用户有邮箱才产生 outbox 记录）
     if (channel.includes('email')) {
-      const user = mockUsers[userId]
+      const user = mockUserById(userId)
       if (user?.email) {
         pushEmail({
           toUserId: userId,
@@ -516,6 +561,16 @@ export function pushNotification(
     }
   }
   return { delivered, dropped, reason }
+}
+
+/** 按用户 id 查找 mock 用户：优先直接 key，其次遍历匹配真实 id（业务侧传入的是 user.id） */
+function mockUserById(userId: string): MockUser | undefined {
+  const direct = mockUsers[userId]
+  if (direct) return direct
+  for (const u of Object.values(mockUsers)) {
+    if (u.id === userId) return u
+  }
+  return undefined
 }
 
 /** 兼容层：旧调用点可直接使用（不走模板/去重/偏好，仅站内信），供非模板化场景与测试保留 */

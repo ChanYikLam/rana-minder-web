@@ -3,7 +3,7 @@ import { resolveMockUser, getPermissions, getWorkspace, clearMockSession, mockUs
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
-import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox } from './notifications'
+import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 import { correctionsDb, type CorrectionRecord } from './db-corrections'
 import * as formdb from './db-forms'
@@ -3255,7 +3255,7 @@ policies: retentionPolicies,
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
-      return { code: 0, data: { ...notificationKillSwitch } }
+      return { code: 0, data: { ...clubKillSwitchState(query.clubId) } }
     },
   },
   {
@@ -3266,7 +3266,7 @@ policies: retentionPolicies,
       if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
       const input = (body.input ?? body) as { active?: boolean; reason?: string }
       setNotificationKillSwitch({ active: !!input.active, scope: 'club', clubId: query.clubId, reason: input.reason ?? null, operatorName: user.name })
-      return { code: 0, data: { ...notificationKillSwitch } }
+      return { code: 0, data: { ...clubKillSwitchState(query.clubId) } }
     },
   },
   // 邮件发送记录（P1-009 审计：平台管理员可查）
