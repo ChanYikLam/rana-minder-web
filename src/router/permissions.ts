@@ -21,6 +21,8 @@ export const WORKSPACE_PERMISSIONS: Record<string, string | string[]> = {
   'P-REC-05': INTERVIEW_ACCESS_PERMISSIONS,
   'P-JNT': 'club:joint:manage',
   'P-MEM': 'club:member:manage',
+  'P-MEM-list': ['club:member:manage', 'club:member:view-self'],
+  'P-MEM-01': ['club:member:manage', 'club:member:view-self'],
   'P-MEM-03-manage': 'club:invite:manage',
   'P-MEM-04': 'club:appointment:manage',
   'P-MEM-05': ['club:member:manage', 'club:member:view-self'],
