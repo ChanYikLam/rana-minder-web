@@ -15,7 +15,8 @@ import {
   clubAccesses,
 } from './db-organization'
 import { cloneForm, listForms } from './db-forms'
-import { resetRecruitmentDB, resetOrgDb } from './reset'
+import { getOidcConfig, updateOidcConfig } from './governance'
+import { resetRecruitmentDB, resetOrgDb, resetGovernance } from './reset'
 
 /**
  * MRM-013 回归：模拟「写入用例中断后重跑」场景——
@@ -105,5 +106,21 @@ describe('MRM-013 reset 补齐模块级可变状态重置（回归）', () => {
     // 序号归位：重跑首个克隆 id 的序号回到 1，而非继续膨胀到 3+
     const again = cloneForm('form-001', '招新报名表 2028')
     expect(again.ok && again.data.id).toMatch(/.+1$/)
+  })
+
+  it('governance 域：OIDC 安全配置随 resetGovernance 还原（updateOidcConfig 残留不泄漏）', () => {
+    // —— 污染阶段 ——
+    updateOidcConfig({ sessionTtlMinutes: 240, mfaRequired: false, enforceStateNonce: false, stepUpTtlMinutes: 60 })
+    expect(getOidcConfig().sessionTtlMinutes).toBe(240)
+    expect(getOidcConfig().mfaRequired).toBe(false)
+
+    // —— reset 后（模拟重跑）——
+    resetGovernance()
+
+    expect(getOidcConfig().sessionTtlMinutes).toBe(120)
+    expect(getOidcConfig().mfaRequired).toBe(true)
+    expect(getOidcConfig().enforceStateNonce).toBe(true)
+    expect(getOidcConfig().stepUpTtlMinutes).toBe(10)
+    expect(getOidcConfig().updatedAt).toBeNull()
   })
 })
