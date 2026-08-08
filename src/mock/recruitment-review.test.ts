@@ -49,8 +49,8 @@ const SEED_ACTIVITY_ID = 'act-001'
 const SEED_REVIEW_ID = 'rev-001'
 const SEED_APPLICANT_ID = USER_APPLICANT_MAP['user-applicant-002']
 
-const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude'
-const plainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${SEED_REVIEW_ID}/conclude`
+const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:applicantId/conclude'
+const plainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${SEED_APPLICANT_ID}/conclude`
 
 /** 提交评价会真实写入 recruitmentReviews 并 push 活动 reviewIds；beforeEach 深拷贝快照，afterEach 还原，避免用例间共享状态污染 */
 let reviewsSnapshot: typeof rdb.recruitmentReviews
@@ -111,15 +111,65 @@ describe('面试官提交评价（conclude）权限链路', () => {
 
   it('面试官对未分配面试的申请人（u-003）提交评价仍被 403（assigned 分支负路径）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
-    // u-003 无面试记录，需先种一条评价记录，conclude 才能定位到申请人（否则会先 404 而非 403）
-    const seeded = rdb.submitReview(SEED_ACTIVITY_ID, 'u-003', {
-      comment: '', rating: 0, authorId: 'mem-004', authorName: '张明远', authorRole: 'club_leader',
-    })
-    if (!seeded.data) throw new Error('种子评价未写入')
-    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${seeded.data.id}/conclude`)
+    // 契约按 applicantId 定位，u-003 无需预种评价记录即可进入权限校验
+    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/u-003/conclude`)
     expect(out.statusCode, JSON.stringify(out.body)).toBe(403)
     // 关键守卫：403 时评价不得以面试官本人 memberId 落库
     expect(rdb.recruitmentReviews.some((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === 'u-003' && r.authorId === INTERVIEWER_MEMBER_ID)).toBe(false)
+  })
+
+  it('未知申请人 id 提交评价返回 404（旧契约 app-xxx 不再可命中评价）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
+    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/app-002/conclude`)
+    expect(out.statusCode).toBe(404)
+  })
+
+  it('首评（无既有评价记录）按 applicantId 可直接提交（200），不再依赖 rev-xxx 种子', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
+    // u-001 无种子评价记录（rev-001 属于 u-002），走新建分支
+    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/u-001/conclude`, 'post')
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const written = rdb.recruitmentReviews.find((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === 'u-001' && r.authorId === INTERVIEWER_MEMBER_ID)
+    expect(written, '首评未按面试官本人 memberId 落库').toBeTruthy()
+  })
+})
+
+// ================= 评价列表端点（契约上下文：roundName/interviewAt + reviews[].id） =================
+
+const reviewsListUrl = '/api/org/:clubId/recruitment/:activityId/reviews'
+const reviewsListPlainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews`
+
+describe('评价列表端点（Issue-4.0-1 契约修复）', () => {
+  beforeEach(() => {
+    clearMockSession()
+  })
+
+  it('列表项返回轮次/面试时间上下文，且 reviews[] 含评价主键 id', async () => {
+    const leaderKey = mockUserKeyOf('user-leader-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${leaderKey}`)
+    const out = await invokeHandler(reviewsListUrl, reviewsListPlainUrl, 'get')
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const items = (out.body.data as { items: Array<Record<string, unknown>> }).items
+    // 上下文：轮次与面试时间（u-001 对应 int-001/rd-001，已有排期）
+    const u1 = items.find((i) => i.applicantId === 'u-001')
+    expect(u1, 'u-001 应在列表内').toBeTruthy()
+    expect(u1?.roundName).toBe('第一轮')
+    expect(u1?.interviewAt).toBeTruthy()
+    // 管理视角可查看 u-002 的最新评价（rev-001），且 reviews[] 携带评论主键
+    const u2 = items.find((i) => i.applicantId === SEED_APPLICANT_ID)
+    const revs = (u2?.reviews as Array<{ id: string; authorName: string }>)
+    expect(revs[0]?.id).toBe(SEED_REVIEW_ID)
+    expect(revs[0]?.authorName).toBe('张明远')
+  })
+
+  it('行 id 为申请 id（app-xxx），applicantId 为申请人标识（u-xxx）——契约两端清晰', async () => {
+    const leaderKey = mockUserKeyOf('user-leader-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${leaderKey}`)
+    const out = await invokeHandler(reviewsListUrl, reviewsListPlainUrl, 'get')
+    const items = (out.body.data as { items: Array<Record<string, unknown>> }).items
+    const u2 = items.find((i) => i.applicantId === SEED_APPLICANT_ID)
+    expect(u2?.id).toBe('app-002')
+    expect(u2?.applicantId).toBe('u-002')
   })
 })
 

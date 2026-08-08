@@ -11,12 +11,16 @@ vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
 }))
+vi.mock('vue-sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
 import ReviewPage from './ReviewPage.vue'
 
 const review = {
-  id: 'rv-1', applicantId: 'app-1', applicantName: '张三', departmentName: '技术部',
+  id: 'app-1', applicantId: 'u-1', applicantName: '张三', departmentName: '技术部',
   status: 'in_progress', rating: null, comment: null, concludedAt: null, concludedBy: null,
+  roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
   myRating: null, myComment: null, peerViewLocked: false, reviews: [],
 }
 
@@ -100,7 +104,7 @@ describe('ReviewPage 评审页', () => {
     await clickReviewRow(wrapper)
 
     // 申请详情接口被调用（面试官视角可访问）
-    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/applications/app-1')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/applications/u-1')
     // 表单答案展示
     expect(wrapper.text()).toContain('报名信息')
     expect(wrapper.text()).toContain('自我介绍')
@@ -125,5 +129,37 @@ describe('ReviewPage 评审页', () => {
     // 不展示报名信息块，但评价面板仍可渲染
     expect(wrapper.text()).not.toContain('报名信息')
     expect(wrapper.text()).toContain('张三')
+  })
+
+  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），成功后刷新列表', async () => {
+    setupGetRouter()
+    mockPost.mockResolvedValue({ kind: 'completed', data: { status: 'concluded' } })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await clickReviewRow(wrapper)
+    await wrapper.find('button[aria-label="4 星"]').trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('提交评价'))!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
+      rating: 4,
+      comment: '',
+    })
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews')
+  })
+
+  it('提交评价失败：错误信息展示，不再静默吞掉', async () => {
+    setupGetRouter()
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '申请人不存在' } })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await clickReviewRow(wrapper)
+    await wrapper.find('button[aria-label="4 星"]').trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('提交评价'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('申请人不存在')
   })
 })

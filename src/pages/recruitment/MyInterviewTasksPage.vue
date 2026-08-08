@@ -116,6 +116,12 @@ onMounted(loadData)
                   <AlertTriangle :size="12" /> 时间冲突
                 </span>
                 <StateTag :status="t.status" />
+                <router-link
+                  :to="`/org/${t.clubId}/recruitment/${t.activityId}/review`"
+                  class="inline-flex items-center gap-1 px-3 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover transition-colors"
+                >
+                  去评价
+                </router-link>
               </div>
             </div>
             <p v-if="t.conflict.conflict && t.conflict.detail" class="mt-2 text-xs text-danger">{{ t.conflict.detail }}</p>

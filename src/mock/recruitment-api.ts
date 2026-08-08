@@ -1263,13 +1263,22 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
           if (anyPublished) status = 'published'
           else if (shown) status = 'concluded'
           else if (anyEvaluating) status = 'evaluating'
+          // 轮次/面试时间上下文（面试官评价入口跳转用）
+          const interviews = rdb.recruitmentInterviews
+            .filter((i) => i.activityId === query.activityId && i.applicantId === app.applicantId && i.status !== 'cancelled')
+            .sort((x, y) => ((x.startAt || '').localeCompare(y.startAt || '')))
+          const lastInterview = interviews[interviews.length - 1]
+          const round = lastInterview ? act?.rounds.find((r) => r.id === lastInterview.roundId) : undefined
           return {
             id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
             departmentName: app.preferences[0]?.departmentName || '', status,
+            roundName: round?.name || lastInterview?.roundId || '',
+            interviewAt: lastInterview?.startAt || null,
             rating: shown?.rating ?? null, comment: shown?.comment || '',
             concludedAt: shown?.updatedAt || null, concludedBy: shown?.authorName || null,
             peerViewLocked,
             reviews: peerViewLocked ? [] : sorted.map((r) => ({
+              id: r.id,
               authorName: r.authorName, authorRole: r.authorRole, comment: r.comment,
               version: r.version, createdAt: r.createdAt, updatedAt: r.updatedAt,
             })),
@@ -1281,18 +1290,15 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     },
   },
   // 提交评价（单个申请人；轮次关闭锁定 + 提交人面试任务校验）
+  // 契约：:applicantId 为申请人标识（列表行 id 的 applicantId），首评无 rev-xxx 亦可提交
   {
-    url: '/api/org/:clubId/recruitment/:activityId/reviews/:reviewId/conclude',
+    url: '/api/org/:clubId/recruitment/:activityId/reviews/:applicantId/conclude',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { rating?: number; comment?: string }
-      // reviewId 对应 recruitmentReviews.id（如 rev-001），需先定位到 applicantId
-      const review = rdb.recruitmentReviews.find((r) => r.id === query.reviewId && r.activityId === query.activityId)
-      const applicantId = review?.applicantId
-      const app = applicantId
-        ? rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
-        : undefined
+      const applicantId = query.applicantId
+      const app = rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
       if (!app) return notFound('申请人不存在')
       const me = actorInfo(url, query.clubId)
       const ws = interviewerWorkspace(url, query.clubId, query.activityId)
@@ -1316,7 +1322,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         authorId: me.memberId || '', authorName: me.name, authorRole: me.role, roundId,
       })
       if (!r.ok) return businessError(r.error || '提交失败')
-      return ok({ id: query.reviewId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
+      return ok({ id: r.data?.id || query.applicantId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
     },
   },
   // 统一发布结论
