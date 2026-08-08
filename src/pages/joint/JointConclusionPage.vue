@@ -33,7 +33,6 @@ const rating = ref(0)
 const comment = ref('')
 const evaluating = ref(false)
 const invitingName = ref<string | null>(null)
-const actionError = ref('')
 
 const clubId = computed(() => (route.params.clubId as string) || '')
 const jointId = computed(() => (route.params.jointId as string) || '')
@@ -63,7 +62,6 @@ function openEvaluate(c: Conclusion) {
 async function handleEvaluate() {
   if (!selected.value || rating.value === 0) return
   evaluating.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${selected.value.id}/evaluate`, {
     rating: rating.value,
     comment: comment.value,
@@ -82,13 +80,12 @@ async function handleEvaluate() {
     comment.value = ''
     toast.success('评价已提交')
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '评价提交失败'
+    toast.error((result.error as { message?: string }).message || '评价提交失败')
   }
 }
 
 async function handleInvite(c: Conclusion) {
   invitingName.value = c.applicantName
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations`, {
     applicantId: c.applicantId || '',
   })
@@ -97,19 +94,18 @@ async function handleInvite(c: Conclusion) {
     toast.success(`邀请已发送至 ${c.applicantName}`)
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '邀请发送失败'
+    toast.error((result.error as { message?: string }).message || '邀请发送失败')
   }
 }
 
 async function handleSetConclusion(c: Conclusion, conclusion: 'admit' | 'not_admit') {
   if (!c.applicantId) return
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/set`, { conclusion })
   if (result.kind === 'completed') {
     toast.success(`已设定结论：${conclusion === 'admit' ? '录用' : '不录用'}`)
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '设定结论失败'
+    toast.error((result.error as { message?: string }).message || '设定结论失败')
   }
 }
 
@@ -117,7 +113,6 @@ const reviewingId = ref<string | null>(null)
 
 async function handleReview(c: Conclusion, action: 'keep' | 'modify', newConclusion?: 'admit' | 'not_admit') {
   if (!c.applicantId) return
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/review`, {
     action,
     newConclusion,
@@ -127,18 +122,17 @@ async function handleReview(c: Conclusion, action: 'keep' | 'modify', newConclus
     reviewingId.value = null
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '复核失败'
+    toast.error((result.error as { message?: string }).message || '复核失败')
   }
 }
 
 async function handleInvitationAction(invitationId: string, action: string) {
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations/${invitationId}/${action}`, {})
   if (result.kind === 'completed') {
     toast.success(action === 'withdraw' ? '邀请已撤回' : '邀请已同步生效')
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -338,8 +332,6 @@ onMounted(async () => {
           </Card>
         </div>
       </PermissionGuard>
-
-      <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
 
       <!-- 评价面板 -->
       <Card v-if="selected" class="mt-4">

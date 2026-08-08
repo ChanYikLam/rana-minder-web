@@ -136,7 +136,7 @@ describe('ReviewPage 评审页', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
-  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败展示 toast + 内联错误，成功后刷新列表', async () => {
+  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败仅 toast 展示，成功后刷新列表', async () => {
     setupGetRouter()
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '申请人不存在' } })
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
@@ -154,9 +154,9 @@ describe('ReviewPage 评审页', () => {
       rating: 4,
       comment: '',
     })
-    // 失败不再静默：toast + 内联错误展示
+    // 失败不再静默：仅 toast 提示（操作结果反馈走独立反馈层，页面内联不再承载）
     expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
-    expect(wrapper.text()).toContain('申请人不存在')
+    expect(wrapper.text()).not.toContain('申请人不存在')
   })
 
   it('提交评价成功：toast 提示并刷新列表', async () => {

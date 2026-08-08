@@ -6,6 +6,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { ApplicantCard, type ApplicantEntry } from '@/components/display'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { ArrowLeft, ChevronDown } from '@lucide/vue'
 
@@ -25,7 +26,6 @@ const items = ref<Application[]>([])
 const activeStatus = ref('all')
 const expandedId = ref<string | null>(null)
 const actionBusy = ref(false)
-const actionError = ref<Record<string, string>>({})
 const deptInput = ref<Record<string, string>>({})
 const textInput = ref<Record<string, string>>({})
 const deadlineInput = ref<Record<string, string>>({})
@@ -69,7 +69,6 @@ function switchStatus(s: string) {
 
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? null : id
-  actionError.value[id] = ''
 }
 
 function toApplicantEntry(app: Application): ApplicantEntry {
@@ -86,7 +85,6 @@ function toApplicantEntry(app: Application): ApplicantEntry {
 async function runAppAction(app: Application, action: string, input?: Record<string, unknown>) {
   if (actionBusy.value) return
   actionBusy.value = true
-  actionError.value[app.id] = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/${action}`, { ...(input || {}) })
   actionBusy.value = false
@@ -94,18 +92,17 @@ async function runAppAction(app: Application, action: string, input?: Record<str
     expandedId.value = null
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value[app.id] = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
 async function runPathAction(app: Application, action: 'decision' | 'waitlist' | 'publish' | 'label', decision?: string, label?: boolean) {
   if (actionBusy.value) return
   actionBusy.value = true
-  actionError.value[app.id] = ''
   const clubId = route.params.clubId as string
   const deptId = deptInput.value[app.id] || app.preferences[0]?.departmentId
   if (!deptId) {
-    actionError.value[app.id] = '请选择部门'
+    toast.error('请选择部门')
     actionBusy.value = false
     return
   }
@@ -115,7 +112,7 @@ async function runPathAction(app: Application, action: 'decision' | 'waitlist' |
     expandedId.value = null
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value[app.id] = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -125,7 +122,6 @@ async function handlePublishResult() {
   actionBusy.value = true
   publishSucceeded.value = false
   publishError.value = ''
-  actionError.value[app.id] = ''
   const clubId = route.params.clubId as string
   const deptId = deptInput.value[app.id] || app.preferences[0]?.departmentId
   if (!deptId) {
@@ -325,7 +321,7 @@ onMounted(loadData)
                   </button>
                 </div>
 
-                <p v-if="actionError[app.id]" class="text-xs text-destructive">{{ actionError[app.id] }}</p>
+                <!-- 操作结果反馈统一走 toast，页面内联不再承载 -->
               </div>
             </div>
           </PermissionGuard>

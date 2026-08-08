@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Mail, Send, RefreshCw, XCircle, CheckCircle2, Plus, Users } from '@lucide/vue'
 
@@ -23,7 +24,6 @@ const sendOpen = ref(false)
 const sendForm = ref({ applicantId: '', departmentId: '', expireDays: 7 })
 const departments = ref<{ id: string; name: string }[]>([])
 const actionLoading = ref(false)
-const actionError = ref('')
 
 const clubId = computed(() => (route.params.clubId as string) || '')
 const actId = computed(() => (route.params.activityId as string) || '')
@@ -58,20 +58,18 @@ async function loadOptions() {
 async function runAction(invitationId: string, action: string) {
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations/${invitationId}/${action}`, {})
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
 async function handleSend() {
   if (!sendForm.value.applicantId || !sendForm.value.departmentId || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations`, {
     applicantId: sendForm.value.applicantId,
     departmentId: sendForm.value.departmentId,
@@ -83,7 +81,7 @@ async function handleSend() {
     sendForm.value = { applicantId: '', departmentId: '', expireDays: 7 }
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '发送失败'
+    toast.error((result.error as { message?: string }).message || '发送失败')
   }
 }
 
@@ -170,7 +168,7 @@ onMounted(async () => {
         </p>
       </Card>
 
-      <p v-if="actionError" class="mb-3 text-xs text-destructive">{{ actionError }}</p>
+      <!-- 操作结果反馈统一走 toast -->
 
       <DataTable
         :columns="columns"

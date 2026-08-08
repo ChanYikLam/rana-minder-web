@@ -37,7 +37,6 @@ const formErrors = ref<Record<string, string[]>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const allowAdjustment = ref(true)
 const submitting = ref(false)
-const submitError = ref<string | null>(null)
 const savingDraft = ref(false)
 
 /** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[]（逻辑见 src/lib/formFile） */
@@ -264,7 +263,6 @@ function isFilled(value: unknown, field: FormField): boolean {
 async function handleSubmit() {
   if (!showApplyForm.value) return
   formErrors.value = {}
-  submitError.value = null
   for (const field of formFields.value) {
     const value = formData.value[field.id]
     if (field.required && !isFilled(value, field)) {
@@ -278,7 +276,7 @@ async function handleSubmit() {
     }
   }
   if (preferences.value.length === 0) {
-    submitError.value = '请至少选择一个意向方向'
+    toast.error('请至少选择一个意向方向')
     return
   }
   if (Object.keys(formErrors.value).length > 0) return
@@ -457,8 +455,7 @@ onUnmounted(() => {
         <DynamicForm :fields="formFields" v-model="formData" :field-errors="formErrors" />
       </Card>
 
-      <!-- 错误提示 -->
-      <p v-if="submitError && showApplyForm" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
+      <!-- 错误提示：操作结果反馈统一走 toast（字段级校验由 formErrors 承载） -->
 
       <!-- 操作区（已提交/已归档/终态后隐藏） -->
       <ResponsiveActionRegion v-if="showApplyForm" page-family="form">

@@ -14,6 +14,7 @@ vi.mock('vue-sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
+import { toast } from 'vue-sonner'
 import JointInterviewPage from './JointInterviewPage.vue'
 
 const interview = { id: 'jiv-1', jointId: 'jnt-1', applicantId: 'a1', applicantName: '张三', status: 'scheduled', scheduledTime: '2026-08-10T10:00:00Z', attendance: 'none', invalidReason: null, attempt: 1, reviews: [] }
@@ -103,7 +104,9 @@ describe('JointInterviewPage 联合面试管理', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('确认预约'))!.trigger('click')
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/interviews/book', { applicantId: 'a2', slotId: 's1' })
-    expect(wrapper.text()).toContain('时段已被约满')
+    // 失败以 toast 提示（操作结果反馈走独立反馈层）
+    expect(toast.error).toHaveBeenCalledWith('时段已被约满')
+    expect(wrapper.text()).not.toContain('时段已被约满')
     // 失败后面板保持打开
     expect(wrapper.text()).toContain('代申请人预约联合面试')
     wrapper.unmount()
@@ -132,7 +135,9 @@ describe('JointInterviewPage 联合面试管理', () => {
 
     await wrapper.findAll('button').find((b) => b.text().includes('开始面试'))!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('联合面试已结束')
+    // 操作结果反馈统一走 toast，页面内联不再承载
+    expect(toast.error).toHaveBeenCalledWith('联合面试已结束')
+    expect(wrapper.text()).not.toContain('联合面试已结束')
     wrapper.unmount()
   })
 

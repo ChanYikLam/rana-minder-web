@@ -6,6 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post, put } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import {
   ClipboardList, Users, Mail, Rocket, PauseCircle, Flag, XCircle, PlayCircle,
@@ -25,7 +26,8 @@ const router = useRouter()
 const state = ref<PageState>('loading')
 const detail = ref<ActivityManage | null>(null)
 const actionLoading = ref(false)
-const actionError = ref('')
+const tightenError = ref('')
+const riskError = ref('')
 const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 const riskAction = ref<'complete' | 'cancel' | null>(null)
@@ -51,28 +53,28 @@ function formatDeadline(iso: string): string {
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/${action}`, { ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    const message = (result.error as { message?: string }).message || '操作失败'
+    riskError.value = message
+    toast.error(message)
   }
 }
 
 async function runChannel(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/channel`, { action, ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -93,11 +95,11 @@ const tightenResult = ref<{ affectedCount: number } | null>(null)
 async function runTighten() {
   if (!detail.value || actionLoading.value) return
   if (!tightenForm.value.reason.trim()) {
-    actionError.value = '必须填写收紧原因'
+    tightenError.value = '必须填写收紧原因'
     return
   }
   actionLoading.value = true
-  actionError.value = ''
+  tightenError.value = ''
   tightenResult.value = null
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/rules/tighten`, {
@@ -110,7 +112,7 @@ async function runTighten() {
     tightenOpen.value = false
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -144,7 +146,7 @@ async function handleSaveEdit() {
     editOpen.value = false
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    editError.value = (result.error as { message?: string }).message || '保存失败'
+    toast.error((result.error as { message?: string }).message || '保存失败')
   }
 }
 
@@ -331,6 +333,7 @@ onMounted(loadDetail)
                   取消
                 </button>
               </div>
+              <p v-if="tightenError" class="text-xs text-destructive">{{ tightenError }}</p>
               <p v-if="tightenResult" class="text-xs text-primary">
                 已为 {{ tightenResult.affectedCount }} 名已提交申请人开放补救窗口，通道已暂停。
               </p>
@@ -367,8 +370,6 @@ onMounted(loadDetail)
               <p v-if="editError" class="text-xs text-destructive">{{ editError }}</p>
             </div>
           </div>
-
-          <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
         </Card>
       </PermissionGuard>
 
@@ -456,7 +457,7 @@ onMounted(loadDetail)
         impact-summary="操作后活动状态不可自行恢复；取消仅限未发出邀请的活动。"
         confirm-label="确认执行"
         :executing="actionLoading"
-        :error="actionError || null"
+        :error-message="riskError"
         @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
       />
     </div>
