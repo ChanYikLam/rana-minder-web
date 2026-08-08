@@ -254,4 +254,25 @@ describe('JointApplyPage 交互流程', () => {
 
     expect(wrapper.text()).toContain('报名通道状态未知')
   })
+
+  it('无报名资格（403 / IFC-ERR-003）：展示阻断提示并隐藏表单，而非整页错误态（与 ApplicationPage.applyDenied 一致）', async () => {
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDetail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { versions: [{ fields: mockFormFields }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限' } })
+
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 阻断提示可见（非整页「无权限访问」错误态）
+    expect(wrapper.text()).toContain('当前账号无报名资格')
+    expect(wrapper.text()).not.toContain('无权限访问')
+
+    // 表单/意向社团/提交与暂存按钮均不可见
+    expect(wrapper.text()).not.toContain('共享报名表')
+    expect(wrapper.text()).not.toContain('意向社团')
+    expect(wrapper.text()).not.toContain('提交联合报名')
+    expect(wrapper.text()).not.toContain('暂存草稿')
+  })
 })

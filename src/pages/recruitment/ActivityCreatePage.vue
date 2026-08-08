@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Card } from '@/components/common'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import { ArrowLeft, Plus, X, Save, FileText, Copy } from '@lucide/vue'
 
 const route = useRoute()
@@ -10,7 +11,6 @@ const router = useRouter()
 
 const step = ref(1)
 const submitting = ref(false)
-const submitError = ref<string | null>(null)
 
 const form = reactive({
   title: '',
@@ -71,14 +71,14 @@ const steps = [
 
 async function handlePublish() {
   submitting.value = true
-  submitError.value = null
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment`, form)
   submitting.value = false
   if (result.kind === 'completed') {
+    toast.success('招新活动已创建并发布')
     router.push(`/org/${clubId}/recruitment/${(result.data as { id: string }).id}`)
   } else {
-    submitError.value = '发布失败，请稍后重试'
+    toast.error('发布失败，请稍后重试')
   }
 }
 </script>
@@ -244,8 +244,6 @@ async function handlePublish() {
         </div>
       </dl>
     </Card>
-
-    <p v-if="submitError" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
 
     <!-- 操作按钮 -->
     <div class="flex gap-3">
