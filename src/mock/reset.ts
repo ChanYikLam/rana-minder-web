@@ -1,9 +1,13 @@
-import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, APPLICANT_PROFILES } from './db-recruitment'
-import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, transitionState } from './db'
+import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, jointReviewExtras, APPLICANT_PROFILES } from './db-recruitment'
+import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, exitRequests, transitionState } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
+import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
 export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
+// P2-017：平台共享状态（导出任务含 processing / platformConfig 版本 / 异常序号）纳入统一重置；
+// 函数定义在 index.ts（持有导出任务与配置内存态），此处仅透传，避免用例间串扰。
+export { resetSharedState } from './index'
 
 const seed = {
   recruitmentActivities: structuredClone(recruitmentActivities),
@@ -17,6 +21,7 @@ const seed = {
   jointConclusions: structuredClone(jointConclusions),
   jointInvitations: structuredClone(jointInvitations),
   jointSlots: structuredClone(jointSlots),
+  jointReviewExtras: structuredClone(jointReviewExtras),
   departments: structuredClone(departments),
   candidates: structuredClone(candidates),
   members: structuredClone(members),
@@ -24,10 +29,12 @@ const seed = {
   membershipInvitations: structuredClone(membershipInvitations),
   appointmentCommands: structuredClone(appointmentCommands),
   resignationRequests: structuredClone(resignationRequests),
+  exitRequests: structuredClone(exitRequests),
   transitionState: structuredClone(transitionState),
   sysNotifications: structuredClone(sysNotifications),
   notificationSeq: notificationSeqBase,
   correctionsDb: structuredClone(correctionsDb),
+  auditLogsDb: structuredClone(auditLogsDb) as AuditLogEntry[],
   applicantProfiles: structuredClone(APPLICANT_PROFILES),
 } as const
 
@@ -43,6 +50,7 @@ export function resetRecruitmentDB(): void {
   jointConclusions.splice(0, jointConclusions.length, ...structuredClone(seed.jointConclusions))
   jointInvitations.splice(0, jointInvitations.length, ...structuredClone(seed.jointInvitations))
   jointSlots.splice(0, jointSlots.length, ...structuredClone(seed.jointSlots))
+  jointReviewExtras.splice(0, jointReviewExtras.length, ...structuredClone(seed.jointReviewExtras))
   Object.keys(APPLICANT_PROFILES).forEach((k) => { if (k.startsWith('u-auto-')) delete APPLICANT_PROFILES[k] })
   resetForms()
 }
@@ -55,6 +63,7 @@ export function resetDb(): void {
   membershipInvitations.splice(0, membershipInvitations.length, ...structuredClone(seed.membershipInvitations))
   appointmentCommands.splice(0, appointmentCommands.length, ...structuredClone(seed.appointmentCommands))
   resignationRequests.splice(0, resignationRequests.length, ...structuredClone(seed.resignationRequests))
+  exitRequests.splice(0, exitRequests.length, ...structuredClone(seed.exitRequests))
   Object.assign(transitionState, structuredClone(seed.transitionState))
 }
 
@@ -73,4 +82,9 @@ export function resetNotifications(): void {
 
 export function resetCorrections(): void {
   correctionsDb.splice(0, correctionsDb.length, ...structuredClone(seed.correctionsDb))
+}
+
+export function resetAuditLogs(): void {
+  auditLogsDb.splice(0, auditLogsDb.length, ...structuredClone(seed.auditLogsDb))
+  setAuditLogSeq(1000)
 }

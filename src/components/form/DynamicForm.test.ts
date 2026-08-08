@@ -111,6 +111,14 @@ describe('DynamicForm 基础字段类型交互', () => {
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ n: 42 }])
   })
 
+  it('number 清空输入提交空字符串而非 0（避免被误判为已填）', async () => {
+    const wrapper = mountForm([field({ id: 'n', type: 'number', required: true })], { n: 42 })
+
+    await wrapper.find('input[type="number"]').setValue('')
+
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ n: '' }])
+  })
+
   it('radio 选中提交对应选项', async () => {
     const wrapper = mountForm([field({ id: 'r', type: 'radio', options: ['甲', '乙'] })], { r: '' })
 

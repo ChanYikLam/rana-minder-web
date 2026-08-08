@@ -153,6 +153,27 @@ describe('JointApplyPage 交互流程', () => {
     expect((wrapper.findAll('input[type="checkbox"]')[0].element as HTMLInputElement).checked).toBe(true)
   })
 
+  it('已提交态：image 附件字段只读回显为占位文案，而非 FileMeta 原始 JSON', async () => {
+    const imageField = { id: 'img', type: 'image', label: '证件照', description: null, required: false, readonly: false, permission: 'read_write', options: null }
+    const imageMeta = { id: 'joint-image-001', name: 'p.jpg', size: 1024, mimeType: 'image/jpeg', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDetail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { versions: [{ fields: [...mockFormFields, imageField] }] } })
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { status: 'submitted', answers: { f1: '张三', img: [imageMeta] }, volunteerClubIds: ['club-001'], preferences: [], allowJointAdjustment: true, consented: true, submittedAt: '2026-08-07T00:00:00Z' },
+    })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('您已提交联合报名')
+    expect(wrapper.text()).toContain('证件照')
+    expect(wrapper.text()).toContain('已上传附件')
+    expect(wrapper.text()).not.toContain('joint-image-001')
+    expect(wrapper.text()).not.toContain('p.jpg')
+  })
+
   it('提交被拒绝：展示服务端错误且不跳转', async () => {
     setupGetMocks()
     const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
@@ -181,6 +202,38 @@ describe('JointApplyPage 交互流程', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('报名通道开放中')
+  })
+
+  it('保存草稿：瞬态附件不落库——uploading 丢弃、checking 降级 uploaded', async () => {
+    const now = '2026-08-07T00:00:00Z'
+    const checkingFile = { id: 'file-9', name: 'a.pdf', size: 1024, mimeType: 'application/pdf', status: 'checking', uploadedAt: now, checkedAt: null, downloadUrl: null }
+    const uploadingFile = { id: 'pending-1', name: 'b.pdf', size: 1024, mimeType: 'application/pdf', status: 'uploading', uploadedAt: now, checkedAt: null, downloadUrl: null }
+    const fileField = { id: 'f2', type: 'file', label: '简历', description: null, required: false, readonly: false, permission: 'read_write', options: null }
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDetail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { versions: [{ fields: [...mockFormFields, fileField] }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { status: 'draft', answers: { f1: '草稿内容' }, volunteerClubIds: ['club-001'], preferences: [], allowJointAdjustment: true, consented: true } })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    const upload = wrapper.findComponent({ name: 'AttachmentUpload' })
+    expect(upload.exists()).toBe(true)
+    upload.vm.$emit('update:modelValue', [checkingFile, uploadingFile])
+    await nextTick()
+
+    mockPost.mockResolvedValue({ kind: 'completed', data: { savedAt: '2026-08-07T12:00:00Z' } })
+    await wrapper.findAll('button').find((b) => b.text().includes('暂存草稿'))!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockPost).toHaveBeenCalledWith('/activity/joint/jnt-001/draft', {
+      answers: { f1: '草稿内容', f2: [{ ...checkingFile, status: 'uploaded', checkedAt: null }] },
+      volunteerClubIds: ['club-001'],
+      preferences: [],
+      allowJointAdjustment: true,
+      consented: true,
+    })
   })
 
   it('通道关闭态展示关闭提示（danger 色调类）', async () => {

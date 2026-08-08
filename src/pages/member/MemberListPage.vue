@@ -14,7 +14,7 @@ import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import type { PageState } from '@/types/machine'
 import {
   UserCircle, ChevronRight, UserPlus, ArrowRightLeft,
-  LogOut, Users, Mail, RefreshCw, Building2,
+  LogOut, Users, Mail, RefreshCw, Building2, CalendarClock,
 } from '@lucide/vue'
 
 interface MemberPosition {
@@ -35,6 +35,7 @@ interface Member {
   status: string
   joinedAt: string
   exitedAt: string | null
+  termEndAt: string | null
 }
 interface Stats {
   total: number
@@ -173,6 +174,8 @@ onMounted(loadData)
 const deptSeries = computed<ChartSeries[]>(() =>
   (stats.value?.byDepartment ?? []).map((d) => ({ label: d.name, value: d.count })),
 )
+
+const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt).length)
 </script>
 
 <template>
@@ -332,6 +335,15 @@ const deptSeries = computed<ChartSeries[]>(() =>
         另有 {{ stats.zeroDepartment }} 名成员待分配部门
       </div>
 
+      <!-- 任期提醒（MEM-004） -->
+      <div
+        v-if="upcomingTermCount > 0"
+        class="flex items-center gap-2 text-xs text-warning mb-4"
+        role="status"
+      >
+        <CalendarClock :size="14" /> {{ upcomingTermCount }} 名成员任期将到期，须在到期日交接或续任安排
+      </div>
+
       <!-- 筛选工具栏 -->
       <FilterPanel
         class="mb-4"
@@ -368,6 +380,9 @@ const deptSeries = computed<ChartSeries[]>(() =>
                   <p class="text-sm font-medium text-text-primary">{{ m.name }}</p>
                   <StateTag :status="m.status" />
                   <SyncIndicator v-if="m.status === 'pending_casdoor_sync'" status="syncing" label="关系同步中" />
+                  <span v-if="m.termEndAt" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-warning-subtle text-warning" title="任期将到期">
+                    <CalendarClock :size="11" /> 任期 {{ m.termEndAt.slice(0, 10) }} 到期
+                  </span>
                 </div>
                 <div class="flex items-center gap-3 mt-0.5">
                   <p class="text-xs text-text-secondary">{{ m.studentId }}</p>

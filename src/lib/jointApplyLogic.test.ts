@@ -113,19 +113,71 @@ describe('validateJointForm 表单校验', () => {
     { id: 'f1', type: 'text', label: '姓名', required: true },
     { id: 'f2', type: 'file', label: '简历', required: false },
   ]
+  const baseFile = { name: 'a.pdf', size: 1, mimeType: 'application/pdf', uploadedAt: '', checkedAt: null as string | null, downloadUrl: null as string | null }
+  const checking = [{ ...baseFile, id: 'x', status: 'checking' as const }]
+  const rejected = [{ ...baseFile, id: 'y', status: 'rejected' as const }]
+  const deleted = [{ ...baseFile, id: 'd', status: 'deleted' as const }]
+  const approved = [{ ...baseFile, id: 'z', status: 'approved' as const }]
 
   it('必填缺失与文件检查中/失败分别报错', () => {
-    expect(validateJointForm(fields, {}, {})).toEqual({ f1: '姓名为必填项' })
-    expect(validateJointForm(fields, { f1: 'x' }, { f2: { checking: true, error: false } })).toEqual({
+    expect(validateJointForm(fields, {})).toEqual({ f1: '姓名为必填项' })
+    expect(validateJointForm(fields, { f1: 'x', f2: checking })).toEqual({
       f2: '文件安全检查中，请稍候再提交',
     })
-    expect(validateJointForm(fields, { f1: 'x' }, { f2: { checking: false, error: true } })).toEqual({
+    expect(validateJointForm(fields, { f1: 'x', f2: rejected })).toEqual({
       f2: '文件上传失败，请重新上传',
     })
   })
 
+  it('deleted 文件视为需重新处理', () => {
+    expect(validateJointForm(fields, { f1: 'x', f2: deleted })).toEqual({
+      f2: '文件已移除，请重新上传',
+    })
+  })
+
+  it('必填 file 字段以附件数组非空为准', () => {
+    const fileRequired = [{ id: 'f2', type: 'file', label: '简历', required: true }]
+    expect(validateJointForm(fileRequired, {})).toEqual({ f2: '简历为必填项' })
+    expect(validateJointForm(fileRequired, { f2: approved })).toEqual({})
+  })
+
+  it('必填缺失优先且不叠加附件错误，同一轮多字段错误全部报出', () => {
+    expect(validateJointForm([{ id: 'f2', type: 'file', label: '简历', required: true }], { f2: [] })).toEqual({ f2: '简历为必填项' })
+    const two = [
+      { id: 'f1', type: 'text', label: '姓名', required: true },
+      { id: 'f3', type: 'text', label: '学号', required: true },
+    ]
+    expect(validateJointForm(two, {})).toEqual({ f1: '姓名为必填项', f3: '学号为必填项' })
+  })
+
+  it('image 字段同样受附件状态拦截', () => {
+    const image = [{ id: 'f4', type: 'image', label: '证件照', required: false }]
+    expect(validateJointForm(image, { f4: checking })).toEqual({ f4: '文件安全检查中，请稍候再提交' })
+  })
+
   it('通过时无错误', () => {
-    expect(validateJointForm(fields, { f1: 'x' }, { f2: { checking: false, error: false } })).toEqual({})
+    expect(validateJointForm(fields, { f1: 'x', f2: approved })).toEqual({})
+  })
+
+  it('必填 number/checkbox/multi_select/array 按类型判空，不误报', () => {
+    const typed = [
+      { id: 'n', type: 'number', label: '年级', required: true },
+      { id: 'c', type: 'checkbox', label: '特长', required: true },
+      { id: 'm', type: 'multi_select', label: '渠道', required: true },
+      { id: 'a', type: 'array', label: '经历', required: true },
+    ]
+    expect(validateJointForm(typed, {})).toEqual({
+      n: '年级为必填项',
+      c: '特长为必填项',
+      m: '渠道为必填项',
+      a: '经历为必填项',
+    })
+    expect(validateJointForm(typed, { n: 0, c: ['编程'], m: ['校内'], a: [{ _uid: 'u1' }] })).toEqual({})
+    expect(validateJointForm(typed, { n: 2, c: [], m: [], a: [] })).toEqual({
+      c: '特长为必填项',
+      m: '渠道为必填项',
+      a: '经历为必填项',
+    })
   })
 })
 
@@ -180,11 +232,44 @@ describe('restoreDraftState 草稿回填', () => {
       [{ id: 'f1', type: 'text' }, { id: 'f2', type: 'file' }, { id: 'f3', type: 'text' }],
     )
     expect(restored.answers).toEqual({ f1: '文本', f2: 'file-001' })
-    expect(restored.fileIds).toEqual({ f2: 'file-001' })
     expect(restored.volunteerClubIds).toEqual(['c1'])
     expect(restored.preferences).toEqual([{ departmentId: 'd1', departmentName: '技术部' }])
     expect(restored.consented).toBe(true)
     expect(restored.allowJointAdjustment).toBe(true)
+  })
+
+  it('draft 态：FileMeta[] 附件值原样保留', () => {
+    const fileMeta = [{ id: 'm1', name: 'a.pdf', size: 1, mimeType: 'application/pdf', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }]
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { f2: fileMeta } },
+      [{ id: 'f2', type: 'file' }],
+    )
+    expect(restored.answers).toEqual({ f2: fileMeta })
+  })
+
+  it('draft 态：number 归一并回填（不再被静默清空）', () => {
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { n: '2024' } },
+      [{ id: 'n', type: 'number' }],
+    )
+    expect(restored.answers).toEqual({ n: 2024 })
+  })
+
+  it('draft 态：multi_select/checkbox/array 草稿重开原样恢复', () => {
+    const rows = [{ _uid: 'u1', course: '高数' }]
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { m: ['a', 'b'], c: ['编程'], a: rows } },
+      [{ id: 'm', type: 'multi_select' }, { id: 'c', type: 'checkbox' }, { id: 'a', type: 'array' }],
+    )
+    expect(restored.answers).toEqual({ m: ['a', 'b'], c: ['编程'], a: rows })
+  })
+
+  it('draft 态：历史 multi_select 字符串归一为数组', () => {
+    const restored = restoreDraftState(
+      { status: 'draft', answers: { m: 'a' } },
+      [{ id: 'm', type: 'multi_select' }],
+    )
+    expect(restored.answers).toEqual({ m: ['a'] })
   })
 
   it('缺省字段使用默认值', () => {

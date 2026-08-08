@@ -346,6 +346,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ query }: { query: Record<string, string> }) => {
       const j = rdb.findJoint(query.id || 'jnt-001')
       if (!j) return notFound('活动不存在')
+      rdb.autoAdvanceJointDeadlines(j.id)
       if (j.status !== 'published') return notFound('活动不存在或未开放')
       return ok({
         id: j.id, title: j.title, type: 'joint',
@@ -640,6 +641,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         paths: app.paths, submittedAt: app.submittedAt, withdrawnAt: app.withdrawnAt,
         identityAnomalyAt: app.identityAnomalyAt, recoveryWindowDeadline: app.recoveryWindowDeadline,
         adjustmentDeadline: app.adjustmentDeadline, adjustmentReason: app.adjustmentReason, notQualifiedReason: app.notQualifiedReason,
+        eligibilitySnapshot: app.eligibilitySnapshot,
         version: app.version,
       })
     },
@@ -713,6 +715,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         submittedAt: app.submittedAt, withdrawnAt: app.withdrawnAt, identityAnomalyAt: app.identityAnomalyAt,
         recoveryWindowDeadline: app.recoveryWindowDeadline, adjustmentDeadline: app.adjustmentDeadline,
         adjustmentReason: app.adjustmentReason, notQualifiedReason: app.notQualifiedReason,
+        eligibilitySnapshot: app.eligibilitySnapshot,
         paths: app.paths, version: app.version,
       })
     },
@@ -790,7 +793,30 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       const member = me.memberId ? db.findMember(query.clubId, me.memberId) : undefined
       const isDeptLeader = !!member && member.positions.some((p) => p.status === 'active' && p.departmentId === query.departmentId && (p.title === '部长' || p.title === '负责人'))
       const applicantUserId = me.memberId ? Object.keys(db.MEMBER_BY_USER).find((uid) => db.MEMBER_BY_USER[uid][query.clubId] === me.memberId) || null : null
-      return result(rdb.setDeptLabel(query.activityId, query.applicantId, query.departmentId, !!input.label, me.memberId || '', me.name, me.role, isDeptLeader, applicantUserId))
+      const r = rdb.setDeptLabel(query.activityId, query.applicantId, query.departmentId, !!input.label, me.memberId || '', me.name, me.role, isDeptLeader, applicantUserId)
+      // 标签改判通知原设置者（REC-018 同语义：改判需通知原结论设置者；label 层补充）
+      if (r.ok && r.data?.override && r.data?.prevUserId && r.data.prevUserId !== resolveMockUser(url).id) {
+        const act = rdb.findAnyActivity(query.activityId)
+        const app = rdb.findApplication(query.activityId, query.applicantId)
+        if (act && app) {
+          const deptInfo = act.departments.find((d) => d.id === query.departmentId)
+          pushNotification([r.data.prevUserId], 'label_override', {
+            activityTitle: act.title,
+            activityId: query.activityId,
+            applicantId: query.applicantId,
+            applicantName: app.applicantName,
+            departmentId: query.departmentId,
+            departmentName: deptInfo?.name || '',
+            actorName: me.name,
+            clubName: act.clubName,
+          }, {
+            clubId: act.clubId,
+            // 实际路由为 /org/:clubId/recruitment/:activityId/applications；模板默认链接缺少 :clubId 会导致点击 404，故显式覆盖
+            link: `/org/${act.clubId}/recruitment/${query.activityId}/applications`,
+          })
+        }
+      }
+      return result(r)
     },
   },
   // 部门路径决策（admit / not_admit / hold）
@@ -800,7 +826,34 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { decision: 'admit' | 'not_admit' | 'hold'; holdDeadline?: string }
-      return result(rdb.decidePath(query.activityId, query.applicantId, query.departmentId, input.decision, input.holdDeadline))
+      const r = rdb.decidePath(query.activityId, query.applicantId, query.departmentId, input.decision, input.holdDeadline)
+      // 整体未录取通知（所有路径都 not_admit 且无待定/暂缓时触发）
+      if (r.ok && r.overallNotAdmitted) {
+        const act = rdb.findAnyActivity(query.activityId)
+        const app = rdb.findApplication(query.activityId, query.applicantId)
+        if (act && app) {
+          const userId = userIdOfApplicant(query.applicantId)
+          if (userId) {
+            pushNotification([userId], 'overall_not_admitted', {
+              activityTitle: act.title,
+              activityId: query.activityId,
+              applicantId: query.applicantId,
+            }, { clubId: act.clubId })
+          }
+        }
+      }
+      return result(r)
+    },
+  },
+  // 调剂路径创建（REC-036：管理员为申请人添加 source='adjustment' 的部门路径）
+  {
+    url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId/paths/adjustment',
+    method: 'post',
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
+      if (!canManageRec(url, query.clubId)) return forbidden()
+      const input = unwrap(body) as { departmentId: string; departmentName: string; reason: string }
+      if (!input.departmentId || !input.departmentName) return businessError('必须指定调剂部门')
+      return result(rdb.addAdjustmentPath(query.activityId, query.applicantId, input.departmentId, input.departmentName, input.reason))
     },
   },
   // 候补名单
@@ -1369,6 +1422,18 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return result(r)
     },
   },
+  // 本人：确认录取邀请生效（Casdoor 同步确认；新-2 补申请人侧入口）
+  {
+    url: '/api/me/invitations/recruitment/:invitationId/sync-confirm',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const inv = rdb.recruitmentInvitations.find((i) => i.id === query.invitationId)
+      if (inv && inv.applicantId !== applicantId) return forbidden()
+      return result(rdb.confirmRecInvitationSync(query.invitationId))
+    },
+  },
   // 动态表单定义（报名表）：由 db-forms 提供（SM-FORM-001）
   {
     url: '/api/org/:clubId/forms/:formId',
@@ -1452,6 +1517,7 @@ function jointConclusionRows(jointId: string, clubId?: string) {
         rating: extra?.rating || null, comment: extra?.comment || '',
         concludedAt: extra?.concludedAt || null, version: extra?.version || con?.version || 1,
         authorName: extra?.authorName || null, authorRole: extra?.authorRole || null,
+        history: extra?.history ?? [],
         versions: con?.versions ?? [],
         myClub: clubId ? c.clubId === clubId : true,
       })
@@ -1467,6 +1533,7 @@ const jointHandlers: MockMethod[] = [
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!canManageJoint(url, query.clubId)) return forbidden()
+      rdb.autoAdvanceAllJointDeadlines()
       return ok({
         items: rdb.jointActivities.filter((j) => j.clubs.some((c) => c.clubId === query.clubId)).map((j) => jointRow(j, query.clubId)),
         nextCursor: null,
@@ -1497,6 +1564,7 @@ const jointHandlers: MockMethod[] = [
       if (!canManageJoint(url, query.clubId)) return forbidden()
       const ja = rdb.findJoint(query.jointId)
       if (!ja) return notFound('联合活动不存在')
+      rdb.autoAdvanceJointDeadlines(ja.id)
       return ok({
         ...jointRow(ja, query.clubId),
         description: ja.description,
@@ -1704,6 +1772,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
+      rdb.autoAdvanceJointDeadlines(query.jointId)
       const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown>; preferences?: { departmentId: string; departmentName: string }[] }
       const r = rdb.submitJointApplication(query.jointId, applicantId, input)
       return result(r)
@@ -1716,6 +1785,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
+      rdb.autoAdvanceJointDeadlines(query.jointId)
       const me = resolveMockUser(url)
       const input = unwrap(body) as { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[] }
       const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId, {
@@ -1732,6 +1802,7 @@ const jointHandlers: MockMethod[] = [
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const applicantId = applicantIdOf(url)
       if (!applicantId) return forbidden()
+      rdb.autoAdvanceJointDeadlines(query.jointId)
       const app = rdb.findJointApplication(query.jointId, applicantId)
       if (!app) return notFound('尚未提交联合申请')
       return ok(app)
@@ -2040,6 +2111,7 @@ const jointHandlers: MockMethod[] = [
         id: query.conclusionId, status: 'concluded',
         rating: extra.rating, comment: extra.comment, concludedAt: extra.concludedAt,
         author: extra.authorName, authorRole: extra.authorRole, version: extra.version,
+        history: extra.history,
       })
     },
   },
@@ -2123,6 +2195,18 @@ const jointHandlers: MockMethod[] = [
       const inv = rdb.jointInvitations.find((i) => i.id === query.invitationId)
       if (inv && inv.applicantId !== applicantId) return forbidden()
       return result(rdb.respondJointInvitation(query.invitationId, input.action, applicantId))
+    },
+  },
+  // 本人：确认联合录取邀请生效（Casdoor 同步确认；新-2 补申请人侧入口）
+  {
+    url: '/api/me/invitations/joint/:invitationId/sync-confirm',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const applicantId = applicantIdOf(url)
+      if (!applicantId) return forbidden()
+      const inv = rdb.jointInvitations.find((i) => i.id === query.invitationId)
+      if (inv && inv.applicantId !== applicantId) return forbidden()
+      return result(rdb.confirmJointInvitationSync(query.invitationId))
     },
   },
 ]

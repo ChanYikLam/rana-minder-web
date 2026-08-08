@@ -8,7 +8,7 @@ import type { PageState } from '@/types/machine'
 import { Plus, FileSearch } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
-interface Correction { id: string; targetType: string; targetId: string; reason: string; evidence: string; status: string; submittedAt: string; submitterName: string }
+interface Correction { id: string; targetType: string; targetId: string; reason: string; evidence: string; status: string; submittedAt: string; submitterName: string; decidedBy?: string; decidedAt?: string; withdrawnBy?: string; withdrawnAt?: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -170,6 +170,14 @@ onMounted(loadData)
           </div>
           <p class="text-sm text-text-secondary">{{ item.reason }}</p>
           <p class="text-xs text-text-secondary mt-2">提交人：{{ item.submitterName }} · {{ formatDate(item.submittedAt) }}</p>
+          <!-- 审计轨迹：审批/撤回闭环可追溯（P1-010） -->
+          <p v-if="item.decidedBy && item.decidedAt" class="text-xs text-text-secondary mt-1">
+            审批人：{{ item.decidedBy }} · {{ formatDate(item.decidedAt) }}
+            <span>（{{ item.status === 'approved' ? '已批准' : '已拒绝' }}）</span>
+          </p>
+          <p v-if="item.withdrawnBy && item.withdrawnAt" class="text-xs text-text-secondary mt-1">
+            撤回人：{{ item.withdrawnBy }} · {{ formatDate(item.withdrawnAt) }}
+          </p>
 
           <div v-if="view !== 'self' && item.status === 'submitted'" class="mt-3 flex gap-2">
             <button

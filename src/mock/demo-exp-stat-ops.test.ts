@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest'
 import handlers from './index'
 import { resolveMockUser, clearMockSession } from './auth'
-import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb } from './reset'
+import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb, resetSharedState } from './reset'
 import * as db from './db'
 import { rdb } from './recruitment-api'
 
@@ -49,6 +49,11 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     resetCorrections()
     resetDb()
     resetOrgDb()
+    resetSharedState()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('P2-1：admin exports GET 清单越权拦截——非平台管理员 403', async () => {
@@ -116,7 +121,7 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
       id: 'mem-stats-1', clubId: 'club-001', studentId: '20990001',
       name: '本月新人', email: 'new@example.edu.cn', phone: '13800000099',
       status: 'active', joinedAt: new Date().toISOString(), exitedAt: null,
-      positions: [{ id: 'pos-stats-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, status: 'active' }],
+      positions: [{ id: 'pos-stats-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, plannedEndDate: null, status: 'active' }],
       tenures: [], departmentHistory: [], anomalies: [],
     })
 
@@ -203,7 +208,7 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
       id: 'mem-stats-2', clubId: 'club-001', studentId: '20990002',
       name: '趋势新人', email: 'trend@example.edu.cn', phone: '13800000088',
       status: 'active', joinedAt: new Date().toISOString(), exitedAt: null,
-      positions: [{ id: 'pos-stats-2', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, status: 'active' }],
+      positions: [{ id: 'pos-stats-2', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2026-08-01', endDate: null, plannedEndDate: null, status: 'active' }],
       tenures: [], departmentHistory: [], anomalies: [],
     })
 
@@ -229,5 +234,143 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     // 部门口径：注入新人本月入社（技术部）→ 总成员数 up/1；进行中 1 vs 已结束 0 → 活跃招新 up/1
     expect(deptByLabel['总成员数']).toMatchObject({ trend: 'up', trendValue: 1 })
     expect(deptByLabel['活跃招新']).toMatchObject({ trend: 'up', trendValue: 1 })
+  })
+
+  it('P2-017：总成员数趋势纳入本月退出——上月基数不再等于「当前−本月入社」', async () => {
+    db.members.push({
+      id: 'mem-stats-exit', clubId: 'club-001', studentId: '20990003',
+      name: '本月退出', email: 'exit@example.edu.cn', phone: '13800000077',
+      status: 'exited', joinedAt: '2024-01-01T00:00:00+08:00', exitedAt: new Date().toISOString(),
+      positions: [{ id: 'pos-exit-1', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2024-01-01', endDate: new Date().toISOString().slice(0, 10), plannedEndDate: null, status: 'ended' }],
+      tenures: [], departmentHistory: [], anomalies: [],
+    })
+
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const out = await invokeHandler('/api/org/:clubId/stats', 'get', '/api/org/club-001/stats')
+    const byLabel = Object.fromEntries(
+      ((out.body.data as { summary: { label: string; trend: string; trendValue: number }[] }).summary).map((s) => [s.label, s]),
+    )
+    // 本月无入社，但成员本月退出 → 上期基线为当前+1 → down/1（旧口径按「当前−本月入社」会误报 flat/0）
+    expect(byLabel['总成员数']).toMatchObject({ trend: 'down', trendValue: 1 })
+  })
+
+  it('P2-017：maxMembers 数值范围校验——0/负数/小数拒绝，1 与合法整数可通过', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const zero = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { maxMembers: 0 } })
+    expect(zero.statusCode).toBe(422)
+    expect((zero.body as { message: string }).message).toContain('1 以上整数')
+
+    const negative = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { maxMembers: -5 } })
+    expect(negative.statusCode).toBe(422)
+
+    const decimal = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { maxMembers: 12.5 } })
+    expect(decimal.statusCode).toBe(422)
+
+    const ok = await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { maxMembers: 12 } })
+    expect(ok.statusCode).toBe(200)
+    expect((ok.body.data as { maxMembers: number }).maxMembers).toBe(12)
+  })
+
+  it('P2-017：导出任务状态机补 processing 中间态——ops-status 的 processing 取自真实状态非恒 0', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    expect(created.statusCode).toBe(200)
+
+    // 刚创建（elapsed≈0）：generating（排队等待调度）→ pending 计入
+    let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    let items = (list.body.data as { items: { id: string; status: string }[] }).items
+    const createdId = (created.body.data as { id: string }).id
+    expect(items.find((t) => t.id === createdId)?.status).toBe('generating')
+
+    // 越过 500ms 起始阈值：进入 processing（生成中）
+    vi.advanceTimersByTime(1000)
+    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.find((t) => t.id === createdId)?.status).toBe('processing')
+
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const out = await invokeHandler('/api/admin/ops-status', 'get', '/api/admin/ops-status')
+    const queue = (out.body.data as { taskQueue: { pending: number; processing: number; failed: number } }).taskQueue
+    expect(queue.processing).toBeGreaterThanOrEqual(1)
+
+    // 越过 3000ms 阈值：processing → completed
+    vi.advanceTimersByTime(3000)
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.find((t) => t.id === createdId)?.status).toBe('completed')
+  })
+
+  it('P2-015：admin 对账端点触发成员外部变更——成员详情出现数据异常（闭环真实调用方）', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const r = await invokeHandler('/api/admin/clubs/:clubId/reconcile', 'post', '/api/admin/clubs/club-001/reconcile')
+    expect(r.statusCode).toBe(200)
+    const data = r.body.data as { registered: number; checked: number; deduped: number; triggered: { memberId: string; memberName: string; registered: boolean; anomalyId: string | null }[] }
+    expect(data.checked).toBeGreaterThan(0)
+    expect(data.registered).toBe(data.checked)
+    expect(data.deduped).toBe(0)
+    // 返回逐成员可观测明细：含成员名与登记出的异常 id
+    expect(data.triggered.length).toBe(data.checked)
+    expect(data.triggered.every((t) => t.registered && t.anomalyId)).toBe(true)
+    expect(data.triggered[0].memberName.length).toBeGreaterThan(0)
+
+    const detail = await invokeHandler('/api/org/:clubId/members/:memberId', 'get', '/api/org/club-001/members/mem-001')
+    const anomalies = (detail.body.data as { anomalies: { id: string; kind: string }[] }).anomalies
+    expect(anomalies.some((a) => a.kind === 'external_change')).toBe(true)
+  })
+
+  it('P2-015：对账幂等——重复对账不重复登记异常（去重窗口内 registered=false）', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const first = await invokeHandler('/api/admin/clubs/:clubId/reconcile', 'post', '/api/admin/clubs/club-001/reconcile')
+    const firstData = first.body.data as { registered: number; checked: number }
+    expect(firstData.registered).toBe(firstData.checked)
+
+    // 第二次对账：同成员同类异常已在窗口内 → 全部幂等跳过
+    const second = await invokeHandler('/api/admin/clubs/:clubId/reconcile', 'post', '/api/admin/clubs/club-001/reconcile')
+    expect(second.statusCode).toBe(200)
+    const secondData = second.body.data as { registered: number; deduped: number; checked: number; triggered: { memberId: string; registered: boolean }[] }
+    expect(secondData.registered).toBe(0)
+    expect(secondData.deduped).toBe(secondData.checked)
+    expect(secondData.triggered.every((t) => !t.registered)).toBe(true)
+
+    // 成员异常数量不再膨胀
+    const detail = await invokeHandler('/api/org/:clubId/members/:memberId', 'get', '/api/org/club-001/members/mem-001')
+    const anomalies = (detail.body.data as { anomalies: { id: string; kind: string }[] }).anomalies
+    expect(anomalies.filter((a) => a.kind === 'external_change')).toHaveLength(1)
+  })
+
+  it('P2-017：resetSharedState 还原导出任务/平台配置/异常序号——处理用例后不再残留', async () => {
+    // 制造共享状态污染：触发异常 + 修改平台配置 + 创建新导出任务
+    db.triggerMemberExternalChange('club-001', 'mem-001')
+    db.triggerMemberExternalChange('club-001', 'mem-001')
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    await invokeHandler('/api/admin/config', 'post', '/api/admin/config', { input: { maxMembers: 999 } })
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    expect(created.statusCode).toBe(200)
+
+    resetSharedState()
+
+    // 配置还原到种子 maxMembers=500
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const got = await invokeHandler('/api/admin/config', 'get', '/api/admin/config')
+    expect((got.body.data as { maxMembers: number }).maxMembers).toBe(500)
+
+    // 导出任务还原为种子集（新建任务被清除）
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const exports = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const items = (exports.body.data as { items: { id: string }[] }).items
+    expect(items.some((t) => t.id === (created.body.data as { id: string }).id)).toBe(false)
+    expect(items.map((t) => t.id).sort()).toEqual(['exp-001', 'exp-002'])
+
+    // 异常序号还原：重置后再次触发，id 序号从 0 重新计数
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    db.triggerMemberExternalChange('club-001', 'mem-001')
+    const detail = await invokeHandler('/api/org/:clubId/members/:memberId', 'get', '/api/org/club-001/members/mem-001')
+    const anomalies = (detail.body.data as { anomalies: { id: string }[] }).anomalies
+    expect(anomalies[0].id.endsWith('-0')).toBe(true)
   })
 })

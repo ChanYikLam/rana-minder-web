@@ -23,6 +23,8 @@ const TYPE_LABELS: Record<string, string> = {
   transition: '换届',
   conclusion: '结论',
   correction: '纠错',
+  label_override: '标签改判',
+  overall_not_admitted: '整体未录取',
 }
 
 const clubOptions = computed(() => {

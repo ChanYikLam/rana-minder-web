@@ -20,6 +20,8 @@ const state = ref<PageState>('loading')
 const detail = ref<JointInvitationDetail | null>(null)
 const responding = ref(false)
 const respondError = ref<string | null>(null)
+const syncing = ref(false)
+const syncError = ref<string | null>(null)
 
 async function loadDetail() {
   state.value = 'loading'
@@ -39,8 +41,23 @@ async function handleRespond(action: 'accept' | 'reject') {
   responding.value = false
   if (result.kind === 'completed') {
     detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
+    if (action === 'accept') detail.value.casdoorSync = 'processing'
   } else if (result.kind === 'rejected' && result.error) {
     respondError.value = (result.error as { message?: string }).message || '操作失败，请稍后重试'
+  }
+}
+
+// 新-2：申请人侧「确认生效」——接受联合录取后主动触发 Casdoor 同步确认（原仅有管理端点）
+async function handleSyncConfirm() {
+  if (!detail.value || syncing.value) return
+  syncing.value = true
+  syncError.value = null
+  const result = await post(`/me/invitations/joint/${detail.value.id}/sync-confirm`)
+  syncing.value = false
+  if (result.kind === 'completed') {
+    detail.value.casdoorSync = 'confirmed'
+  } else if (result.kind === 'rejected' && result.error) {
+    syncError.value = (result.error as { message?: string }).message || '确认失败，请稍后重试'
   }
 }
 
@@ -126,6 +143,25 @@ onMounted(loadDetail)
           <p class="text-sm font-medium">您已接受联合邀请</p>
         </div>
         <p class="text-xs text-text-secondary mt-1">系统正在与统一身份认证同步，生效后您将成为正式成员</p>
+
+        <!-- 新-2：申请人侧确认生效入口（casdoorSync=processing 时） -->
+        <div v-if="detail.casdoorSync === 'processing'" class="mt-3">
+          <div class="rounded-lg bg-warning-subtle p-2.5 mb-3 flex items-center gap-2">
+            <Clock :size="14" class="text-warning shrink-0" />
+            <p class="text-xs text-warning">已接受，正在等待成员身份生效确认</p>
+          </div>
+          <button
+            class="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+            :disabled="syncing"
+            @click="handleSyncConfirm"
+          >
+            <CheckCircle2 :size="14" /> {{ syncing ? '确认中...' : '确认生效' }}
+          </button>
+          <p v-if="syncError" class="text-xs text-danger mt-2" role="alert">{{ syncError }}</p>
+        </div>
+        <p v-else-if="detail.casdoorSync === 'confirmed'" class="text-xs text-success mt-2 flex items-center gap-1">
+          <CheckCircle2 :size="12" /> 已生效，欢迎加入
+        </p>
       </Card>
 
       <Card v-else-if="detail.status === 'rejected'">

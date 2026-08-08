@@ -30,8 +30,15 @@ interface PolicyPreview {
   previewVersion: number
 }
 
+interface RetentionExecution {
+  runId: string
+  executedAt: string
+  results: Array<{ policyId: string; scope: string; action: string; retentionDays: number; executedCount: number; skippedCount: number }>
+}
+
 const state = ref<PageState>('loading')
 const policies = ref<Policy[]>([])
+const lastExecution = ref<RetentionExecution | null>(null)
 const showForm = ref(false)
 const creating = ref(false)
 const form = ref({ scope: '', retentionDays: 30, action: 'clean' })
@@ -51,13 +58,20 @@ const publishOpen = ref(false)
 const publishSucceeded = ref(false)
 const publishError = ref('')
 
+// 执行保留策略（P1-010：执行器真实处置到期数据，写审计日志）
+const executeOpen = ref(false)
+const executing = ref(false)
+const executeSucceeded = ref(false)
+const executeError = ref('')
+
 const actionLabels: Record<string, string> = { auto_delete: '自动删除', archive: '归档', keep: '保留', clean: '清理' }
 
 async function loadData() {
   state.value = 'loading'
-  const result = await get<{ policies: Policy[] }>('/admin/retention')
+  const result = await get<{ policies: Policy[]; lastExecution?: RetentionExecution | null }>('/admin/retention')
   if (result.kind === 'completed') {
     policies.value = result.data.policies
+    lastExecution.value = result.data.lastExecution ?? null
     preview.value = null
     previewTarget.value = null
     publishReason.value = ''
@@ -166,6 +180,33 @@ async function handlePublishSimple() {
   }
 }
 
+async function handleExecute(proof?: string) {
+  if (!proof) {
+    toast.error('身份验证失败，请重试')
+    executeOpen.value = false
+    return
+  }
+  executing.value = true
+  executeSucceeded.value = false
+  executeError.value = ''
+  const result = await post('/admin/retention/execute', {
+    reason: '例行保留策略执行',
+    reauthProof: proof,
+  })
+  executing.value = false
+  if (result.kind === 'completed') {
+    executeSucceeded.value = true
+    const data = result.data as { totalExecuted: number }
+    toast.success(`保留策略执行完成，共处置 ${data.totalExecuted} 条数据`)
+    await loadData()
+  } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
+    toast.error('身份验证已失效，请重新认证后重试')
+    executeOpen.value = false
+  } else {
+    executeError.value = (result as { error?: { message?: string } }).error?.message || '执行失败，请重试'
+  }
+}
+
 onMounted(loadData)
 </script>
 
@@ -218,6 +259,27 @@ onMounted(loadData)
           <ShieldAlert :size="18" class="text-warning mt-0.5 shrink-0" />
           <p class="text-xs text-text-secondary">策略发布为高风险操作，需重新认证并先预览影响。缩短保留期限时，已有数据将获得至少 7 天缓冲期。</p>
         </div>
+      </Card>
+
+      <!-- 执行器（P1-010）：保留策略真实处置到期数据，并写入审计日志 -->
+      <Card class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-sm font-medium text-text-primary">保留策略执行器</p>
+          <button
+            class="flex items-center gap-1.5 px-3 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+            @click="executeOpen = true"
+          >
+            <Calendar :size="14" /> 立即执行
+          </button>
+        </div>
+        <div v-if="lastExecution" class="space-y-1.5 text-xs text-text-secondary">
+          <p>最近执行：{{ lastExecution.runId }} · {{ lastExecution.executedAt }}</p>
+          <p v-for="r in lastExecution.results" :key="r.policyId">
+            「{{ r.scope }}」{{ actionLabels[r.action] || r.action }} 处置 {{ r.executedCount }} 条 / 跳过 {{ r.skippedCount }} 条
+          </p>
+        </div>
+        <p v-else class="text-xs text-text-secondary">尚未执行。点击「立即执行」扫描到期数据并按生效策略处置（处置结果写入审计日志）。</p>
+        <p class="text-xs text-text-secondary mt-2">执行需重新认证身份，处置明细将逐策略写入平台审计日志。</p>
       </Card>
 
       <div class="space-y-3">
@@ -311,6 +373,20 @@ onMounted(loadData)
       :succeeded="publishSucceeded"
       :error-message="publishError"
       @confirm="handlePublishSimple"
+    />
+
+    <HighRiskConfirm
+      v-model:open="executeOpen"
+      title="执行保留策略"
+      description="按所有生效策略扫描到期数据并执行处置（自动删除 / 归档 / 保留），处置明细将写入审计日志，此操作不可撤销。"
+      :targets="lastExecution?.results?.length ? lastExecution.results.map((r) => ({ id: r.policyId, label: r.scope, detail: `${actionLabels[r.action] || r.action} · 保留 ${r.retentionDays} 天` })) : []"
+      impact-summary="执行结果实时可见，并逐策略写入平台审计日志。"
+      confirm-label="确认执行"
+      reauth-required
+      :executing="executing"
+      :succeeded="executeSucceeded"
+      :error-message="executeError"
+      @confirm="handleExecute"
     />
   </PageStateBoundary>
 </template>
