@@ -407,12 +407,32 @@ export function submitFormSubmission(
   if (!found.ok) return found
   const f = found.data
 
-  const existing = formSubmissions.find((s) => s.idempotencyKey === input.idempotencyKey)
+  // 幂等：相同 idempotencyKey 且非草稿的既有提交直接返回（草稿记录不参与幂等命中，
+  // 否则「先存草稿再提交相同内容」会被草稿“吞掉”，正式提交静默失败、状态仍为 draft）
+  const existing = formSubmissions.find(
+    (s) => s.idempotencyKey === input.idempotencyKey && s.status !== 'draft',
+  )
   if (existing) return ok(existing)
 
   const v = versionOf(f, input.version)
   if (!v) return err('表单版本不存在')
   if (v.status !== 'published') return err('当前版本未发布，不可提交')
+
+  // 同表单同版本的既有草稿：就地升级为正式提交（复用记录，不重复落库），
+  // 避免同一用户「保存草稿后直接提交」产生两条记录
+  const sameVersionDraft = formSubmissions.find(
+    (s) => s.formId === formId && s.version === input.version && s.status === 'draft',
+  )
+  if (sameVersionDraft) {
+    sameVersionDraft.data = structuredClone(input.formData)
+    const t1 = assertTransition('SM-FORM-002', sameVersionDraft.status, 'checking', 'submit_request')
+    if (!t1.ok) return err(t1.reason || '提交请求不合法')
+    sameVersionDraft.status = 'checking'
+    const t2 = assertTransition('SM-FORM-002', sameVersionDraft.status, 'submitted', 'all_pass')
+    if (!t2.ok) return err(t2.reason || '提交检查未通过')
+    sameVersionDraft.status = 'submitted'
+    return ok(sameVersionDraft)
+  }
 
   const submission: FormSubmission = {
     id: `sub-${Date.now().toString(36)}-${formSubmissions.length + 1}`,

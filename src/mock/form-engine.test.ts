@@ -146,6 +146,59 @@ describe('P0-003 动态表单引擎（SM-FORM-001 / SM-FORM-002）', () => {
     expect(formSubmissions).toHaveLength(1)
   })
 
+  it('SM-FORM-002 回归（P1）：先保存草稿再提交相同内容，草稿不被幂等键吞掉，就地升级为 submitted', () => {
+    // 先保存草稿（与提交相同 formData/idempotencyKey）
+    const draft = saveFormSubmissionDraft('form-001', {
+      version: 1,
+      formData: { f1: '热爱编程', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-abc',
+    })
+    expect(draft.ok).toBe(true)
+    expect(draft.ok && draft.data.status).toBe('draft')
+
+    // 内容不变直接提交：不得命中草稿静默返回，必须走 draft→checking→submitted 状态机
+    const sub = submitFormSubmission('form-001', {
+      version: 1,
+      formData: { f1: '热爱编程', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-abc',
+    })
+    expect(sub.ok).toBe(true)
+    expect(sub.ok && sub.data.status).toBe('submitted')
+    // 复用草稿记录升级，不新增记录；提交数据与草稿一致
+    expect(formSubmissions.filter((s) => s.formId === 'form-001')).toHaveLength(1)
+    expect(formSubmissions[0].id).toBe(draft.ok ? draft.data.id : '')
+    expect(formSubmissions[0].status).toBe('submitted')
+    expect(formSubmissions[0].data).toEqual({ f1: '热爱编程', f2: '技术部' })
+
+    // 提交完成后，相同 idempotencyKey 再提交：命中已提交记录幂等返回 submitted
+    const again = submitFormSubmission('form-001', {
+      version: 1,
+      formData: { f1: '热爱编程', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-abc',
+    })
+    expect(again.ok).toBe(true)
+    expect(again.ok && again.data.status).toBe('submitted')
+    expect(formSubmissions.filter((s) => s.formId === 'form-001')).toHaveLength(1)
+  })
+
+  it('SM-FORM-002 回归（P1）：既有草稿因表单版本变化被改数据后提交，仍可就地升级', () => {
+    // 先保存草稿，随后修改表单内容再提交（同一 idempotencyKey 语义下草稿被 update 过）
+    saveFormSubmissionDraft('form-001', {
+      version: 1,
+      formData: { f1: '初稿', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-xyz',
+    })
+    const sub = submitFormSubmission('form-001', {
+      version: 1,
+      formData: { f1: '终稿', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-xyz',
+    })
+    expect(sub.ok).toBe(true)
+    expect(sub.ok && sub.data.status).toBe('submitted')
+    expect(formSubmissions.filter((s) => s.formId === 'form-001')).toHaveLength(1)
+    expect(formSubmissions[0].data).toEqual({ f1: '终稿', f2: '技术部' })
+  })
+
   it('SM-FORM-002 前置：未发布版本不可提交', () => {
     const draft = submitFormSubmission('form-003', { version: 1, formData: {}, idempotencyKey: 'form-003-v1' })
     expect(draft.ok).toBe(false)
