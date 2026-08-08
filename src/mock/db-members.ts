@@ -45,7 +45,7 @@ export interface MockMember {
   name: string
   email: string
   phone: string
-  status: 'non_member' | 'pending_effective' | 'active' | 'exiting' | 'exited' | 'removed'
+  status: 'non_member' | 'pending_effective' | 'active' | 'exiting' | 'exited' | 'sync_anomaly'
   positions: MockPosition[]
   tenures: MockTenure[]
   departmentHistory: MockDeptHistoryEntry[]
@@ -192,5 +192,5 @@ export function listMembers(clubId: string): MockMember[] {
 
 export function getMemberStats(clubId: string): { total: number; active: number; exited: number } {
   const list = listMembers(clubId)
-  return { total: list.length, active: list.filter((m) => m.status === 'active').length, exited: list.filter((m) => m.status === 'exited' || m.status === 'removed').length }
+  return { total: list.length, active: list.filter((m) => m.status === 'active').length, exited: list.filter((m) => m.status === 'exited').length }
 }

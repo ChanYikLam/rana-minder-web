@@ -18,7 +18,7 @@ describe('db-members 种子数据完整性', () => {
   })
 
   it('每个成员满足结构契约：必填字段非空、状态合法、职位/任期/履历/异常均为数组', () => {
-    const validStatus = ['non_member', 'pending_effective', 'active', 'exiting', 'exited', 'removed']
+    const validStatus = ['non_member', 'pending_effective', 'active', 'exiting', 'exited', 'sync_anomaly']
     const validPosStatus = ['active', 'pending_confirmation', 'transferring', 'suspended', 'ended']
     const validAction = ['join', 'leave', 'transfer']
     const validAnomalyKind = ['casdoor_mismatch', 'external_change']
@@ -73,7 +73,7 @@ describe('db-members 种子数据完整性', () => {
 
   it('任期/职位状态一致性：exited 成员的 active 职位均已 ended，active 成员至少保留 1 个 active 职位', () => {
     for (const m of members) {
-      if (m.status === 'exited' || m.status === 'removed') {
+      if (m.status === 'exited' || m.status === 'sync_anomaly') {
         expect(m.positions.every((p) => p.status === 'ended')).toBe(true)
       } else if (m.positions.length > 0) {
         // 无职位成员（P3-1 新身份）不强制；有职位的在职成员须有 active 职位
@@ -93,7 +93,7 @@ describe('db-members 基础查询', () => {
     expect(members.includes(first)).toBe(true)
   })
 
-  it('getMemberStats：按社团统计 total/active/exited（removed 计入 exited）', () => {
+  it('getMemberStats：按社团统计 total/active/exited（sync_anomaly 暂不纳入 exited 口径）', () => {
     expect(getMemberStats('club-001')).toEqual({ total: 8, active: 7, exited: 1 })
     expect(getMemberStats('club-002')).toEqual({ total: 1, active: 1, exited: 0 })
     expect(getMemberStats('club-003')).toEqual({ total: 0, active: 0, exited: 0 })

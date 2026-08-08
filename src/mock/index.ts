@@ -1460,7 +1460,7 @@ const memberHandlers: MockMethod[] = [
         ? list.filter((m) => m.name.includes(search) || m.studentId === search)
         : list
       const activeMembers = list.filter((m) => m.status === 'active')
-      const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
+      const exitedMembers = list.filter((m) => m.status === 'exited')
       const deptSource = scope ? db.departments.filter((d) => d.name === scope) : db.departments
       // MEM-004：任期提醒派生（memberId → 最近到期日 + 剩余天数），供列表红点/剩余天数透出
       const termEndByMember = new Map<string, { termEndAt: string; daysLeft: number }>()
@@ -1984,8 +1984,9 @@ if (!r.ok) return businessError(r.error || '操作失败')
       // 普通成员自视角：仅返回本人信息、本人退出申请、本人辞职申请（可撤回/可二次确认）
       const selfOnly = !isManager
       const base = db.listMembers(query.clubId)
+      // MRM-006：已退出（含被移除）成员不再出现在任何列表
       const list = (selfOnly ? base.filter((m) => m.id === actor) : base).filter(
-        (m) => !scope || m.positions.some((p) => p.departmentName === scope),
+        (m) => m.status !== 'exited' && (!scope || m.positions.some((p) => p.departmentName === scope)),
       )
       const exitList = isManager
         ? (scope ? [] : db.listExitRequests(query.clubId))
@@ -2041,6 +2042,7 @@ if (!r.ok) return businessError(r.error || '操作失败')
       if (!body.input?.reason?.trim()) return businessError(action === 'mark_exit' ? '标记退出必须填写原因' : '移除成员必须填写原因')
       const member = db.findMember(query.clubId, memberId)
       if (!member) return businessError('成员不存在')
+      if (member.status === 'exited') return businessError('该成员已退出，无需重复操作')
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden(url)
       if (action === 'mark_exit') {
@@ -2735,40 +2737,14 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 文件详情（FORM/REC：FilePreviewPage 打开前先取元数据）
-  {
-    url: '/api/files/:fileId',
-    method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
-      const fileId = query.fileId
-      if (!fileId.startsWith('file-')) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
-      }
-      return {
-        code: 0,
-        data: {
-          id: fileId,
-          name: '报名附件.pdf',
-          size: 1024 * (8 + Math.floor(Math.random() * 32)),
-          mimeType: 'application/octet-stream',
-          // 与 FilePreviewPage 下载条件一致（status === 'approved' 才显示下载按钮）；
-          // 与 recruitment-api 注册的 /api/files/:fileId 返回 approved 统一口径
-          status: 'approved',
-          uploadedAt: new Date().toISOString(),
-          checkedAt: new Date().toISOString(),
-          downloadUrl: null,
-        },
-      }
-    },
-  },
   // 文件下载
   {
     url: '/api/files/:fileId/download',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
       const fileId = query.fileId || query.id || ''
-      if (!fileId.startsWith('file-')) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+      if (!/^file-\d+-[a-z0-9]+$/.test(fileId)) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '文件不存在或已过期', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
       }
       return {
         code: 0,
@@ -4290,7 +4266,7 @@ const mockFileHandlers: MockMethod[] = [
     response: ({ query }: { query: Record<string, string> }) => {
       const fileId = query.fileId || ''
       if (!/^(file-|exp-)[\w.-]+\.csv$/.test(fileId)) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '文件不存在或已过期', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
       }
       return {
         statusCode: 200,

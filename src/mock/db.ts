@@ -567,10 +567,11 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
  */
 export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string; email?: string; phone?: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
   if (!input.studentId) return { ok: false, created: false, error: '学号为空，无法创建成员' }
-  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
-  // exiting（离职中）/pending_effective（待生效）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
-  if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective')) {
-    return { ok: false, created: false, error: `该学号在本社团存在${existing.status === 'exiting' ? '离职中' : '待生效'}的成员记录，请先完成原有流程` }
+  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited')
+  // exiting（离职中）/pending_effective（待生效）/sync_anomaly（同步异常）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
+  if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective' || existing.status === 'sync_anomaly')) {
+    const reason = existing.status === 'exiting' ? '离职中' : existing.status === 'pending_effective' ? '待生效' : '同步异常'
+    return { ok: false, created: false, error: `该学号在本社团存在${reason}的成员记录，请先完成原有流程` }
   }
   if (existing) return { ok: true, created: false, member: existing }
   const candidate = candidates.find((c) => c.studentId === input.studentId)
@@ -896,6 +897,7 @@ export function getMemberProfile(clubId: string, memberId: string): MockMember |
   return findMember(clubId, memberId)
 }
 
+
 /** 成员管理级别（MEM-006 角色白名单用）：由职位标题与 mock 用户角色综合判定 */
 export type MemberManagerLevel = 'club_leader' | 'hr' | 'department_leader' | 'member'
 
@@ -951,7 +953,7 @@ export function upcomingTermEnd(clubId: string, advanceDays: number): { memberId
 /** 历史成员分段（MEM-007）：同学生账号的过往经历，用于重新加入时间线还原 */
 export function historyMembershipsOf(clubId: string, studentId: string, currentMemberId?: string): { id: string; name: string; joinedAt: string; exitedAt: string | null; status: string }[] {
   return listMembers(clubId)
-    .filter((m) => m.studentId === studentId && m.id !== currentMemberId && (m.status === 'exited' || m.status === 'removed'))
+    .filter((m) => m.studentId === studentId && m.id !== currentMemberId && m.status === 'exited')
     .map((m) => ({ id: m.id, name: m.name, joinedAt: m.joinedAt, exitedAt: m.exitedAt, status: m.status }))
 }
 
@@ -976,12 +978,16 @@ export function directRemoveMember(clubId: string, byMemberId: string, memberId:
   if (!gate.ok) return { ok: false, error: gate.reason || '无权移除该成员' }
   const t1 = assertTransition('SM-MEM-001', target.status, 'exiting', 'removed')
   if (!t1.ok) return { ok: false, error: t1.reason || '当前成员状态不可移除' }
+  const prevStatus = target.status
   target.status = 'exiting'
   const t2 = assertTransition('SM-MEM-001', target.status, 'exited', 'confirmed')
-  if (t2.ok) {
-    target.status = 'exited'
-    target.exitedAt = new Date().toISOString()
+  if (!t2.ok) {
+    // 防御：若状态机不允许 exiting→exited 二次确认，回滚到原状态，避免产生「假成功」（已改为 exiting 却返回 ok）的中间态
+    target.status = prevStatus
+    return { ok: false, error: t2.reason || '移除流程中断，请重试' }
   }
+  target.status = 'exited'
+  target.exitedAt = new Date().toISOString()
   const now = new Date().toISOString()
   const endedAt = now.slice(0, 10)
   for (const p of target.positions.filter((p) => p.status === 'active')) {
