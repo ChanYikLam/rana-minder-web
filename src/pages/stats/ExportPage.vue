@@ -79,6 +79,8 @@ function startPolling(taskId: string, prefix: string) {
     // 业务错误码 404（任务已被 GC）/ 401（会话失效）也属于此分支
     stopPolling(taskId)
   }
+  // MRM-009：幂等防重——同 taskId 已有轮询定时器则直接复用，避免重复 setInterval 造成无主定时器
+  if (pollingTimers.has(taskId)) return
   const handle = setInterval(poll, 2000)
   pollingTimers.set(taskId, handle)
 }
@@ -107,9 +109,11 @@ async function handleCreate() {
   if (result.kind === 'completed') {
     const task = (result.data as ExportTask) || null
     if (task) {
-      // 立即把任务插入列表并启动轮询；不在此处立即"完成"
-      items.value = [task, ...items.value]
+      // MRM-009：POST 可能复用已存在进行中任务（同 scope+type），此时不应重复插入列表，避免同一任务渲染多份
+      const exists = items.value.some((t) => t.id === task.id)
+      if (!exists) items.value = [task, ...items.value]
       if (task.status === 'generating' || task.status === 'processing') {
+        // startPolling 内部幂等（同 taskId 已有定时器则不重复创建），杜绝重复 setInterval
         startPolling(task.id, apiScope.prefix)
       } else if (task.status === 'completed') {
         toast.success('导出已生成完成，可点击下载')
@@ -129,6 +133,12 @@ function openCreateConfirm() {
 function openDownloadConfirm(task: ExportTask) {
   if (task.status !== 'completed' || !task.downloadUrl) {
     toast.info('导出尚未完成，请稍候')
+    return
+  }
+  // MRM-009：expiredAt（24h 链接失效）即不可下载；后端 expired 态在 expiredAt+365d 才惰性转换，
+  // 前端须在此处单独判定，避免 24h 后仍可点下载却在后端被拒。
+  if (task.expiredAt && Date.now() >= new Date(task.expiredAt).getTime()) {
+    toast.info('导出链接已过期，请重新导出')
     return
   }
   downloadTarget.value = task

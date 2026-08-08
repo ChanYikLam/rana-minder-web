@@ -411,6 +411,8 @@ interface ExportTask {
   status: 'generating' | 'processing' | 'completed' | 'failed' | 'expired'
   createdAt: string
   completedAt: string | null
+  /** MRM-009：failed 发生时间（GC 判定超 7 天清理的基准，避免复用 completedAt 语义不清） */
+  failedAt: string | null
   expiredAt: string | null
   downloadUrl: string | null
   fileSize: number
@@ -419,14 +421,14 @@ interface ExportTask {
   includeFiles: boolean
 }
 const exportTasks: ExportTask[] = [
-  { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576, scope: '全社团', includeContact: true, includeFiles: false },
+  { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', failedAt: null, expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576, scope: '全社团', includeContact: true, includeFiles: false },
   // 种子任务：远早于生成窗口的 generating 任务，首次读取即按状态机判为超时失败（EXP 失败态可观测）
-  { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0, scope: '全社团', includeContact: false, includeFiles: false },
+  { id: 'exp-002', clubId: 'club-001', type: '招新统计', status: 'generating', createdAt: '2025-08-01T12:00:00+08:00', completedAt: null, failedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0, scope: '全社团', includeContact: false, includeFiles: false },
 ]
 
 /** 平台级导出任务（/api/admin/exports，与社团级同状态机） */
 const adminExportTasks: ExportTask[] = [
-  { id: 'exp-003', clubId: '', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', expiredAt: '2025-08-02T10:00:00+08:00', downloadUrl: '#', fileSize: 32768, scope: '全社团', includeContact: true, includeFiles: false },
+  { id: 'exp-003', clubId: '', type: '全平台成员名单', status: 'completed', createdAt: '2025-08-01T10:00:00+08:00', completedAt: '2025-08-01T10:05:00+08:00', failedAt: null, expiredAt: '2025-08-02T10:00:00+08:00', downloadUrl: '#', fileSize: 32768, scope: '全社团', includeContact: true, includeFiles: false },
 ]
 
 /** 共享状态种子快照（reset.ts 复用，保证用例间确定性） */
@@ -511,7 +513,9 @@ function settleExportTask(task: ExportTask): void {
   if (task.status !== 'generating' && task.status !== 'processing') return
   const elapsed = Date.now() - new Date(task.createdAt).getTime()
   if (elapsed >= EXPORT_STALE_FAIL_MS) {
+    // MRM-009：失败时记录 failedAt（completedAt 仅 completed 语义），供 gcExportTasks 判定超 7 天清理
     task.status = 'failed'
+    task.failedAt = new Date().toISOString()
     return
   }
   if (task.status === 'processing') {
@@ -541,8 +545,10 @@ function gcExportTasks(tasks: ExportTask[]): number {
       removed++
       continue
     }
-    // failed 任务：超 7 天自动清理（仅占位审计即可，无下载价值）
-    if (t.status === 'failed' && t.completedAt && now - new Date(t.completedAt).getTime() > 7 * DAY_MS) {
+    // failed 任务：超 7 天自动清理（仅占位审计即可，无下载价值）。
+    // 基准用 failedAt（settleExportTask 转 failed 时记录）；对兼容旧数据无 failedAt 时回退 completedAt。
+    const failedAtMs = t.failedAt ? new Date(t.failedAt).getTime() : (t.completedAt ? new Date(t.completedAt).getTime() : 0)
+    if (t.status === 'failed' && failedAtMs && now - failedAtMs > 7 * DAY_MS) {
       tasks.splice(i, 1)
       removed++
     }
@@ -3248,7 +3254,7 @@ response: ({ url }: { url: string }) => {
       const task: ExportTask = {
         id: 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), clubId, type,
         status: 'generating', createdAt: new Date().toISOString(),
-        completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
+        completedAt: null, failedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
         scope, includeContact: !!body.input?.includeContact, includeFiles: !!body.input?.includeFiles,
       }
       exportTasks.push(task)
@@ -3665,7 +3671,7 @@ response: ({ url }: { url: string }) => {
       const task: ExportTask = {
         id: 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), clubId: '', type: '全平台导出',
         status: 'generating', createdAt: new Date().toISOString(),
-        completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
+        completedAt: null, failedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
         scope: '全社团', includeContact: false, includeFiles: false,
       }
       adminExportTasks.push(task)
@@ -3677,6 +3683,17 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reason?: string; reauthProof?: string } } }) => {
       if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden(url)
+      const task = adminExportTasks.find((t) => t.id === query.id)
+      if (!task) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '导出任务不存在', supportId: 'MOCK' } }
+      }
+      // MRM-009：下载前先结算状态机——过期/未完成的任务不得下载（与 org 域口径一致）；
+      // expiredAt（24h 链接失效）到 expired 态（+365d）之间有窗口，需单独判定链接失效。
+      settleExportTask(task)
+      const linkExpired = task.expiredAt !== null && Date.now() >= new Date(task.expiredAt).getTime()
+      if (task.status !== 'completed' || !task.downloadUrl || linkExpired) {
+        return businessError(linkExpired ? '导出链接已过期，请重新导出' : (task.status === 'expired' ? '导出任务已过期，请重新导出' : '导出任务尚未完成，请稍后重试'))
+      }
       const gate = assertHighRisk('export_download', body.input, resolveMockUser(url)?.id)
       if (gate) return gate
       writeAuditLog({
@@ -4017,6 +4034,14 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '导出任务不存在', supportId: 'MOCK' } }
       }
       if (task.scope !== '全社团' && exportScopeFor(user, query.clubId) !== task.scope) return forbidden(url)
+      // MRM-009：下载前先结算状态机；并在 expiredAt（24h 链接失效）处禁止下载——
+      // 注意 expired 状态在 expiredAt+365d 才由 settle 惰性转换，此窗口内 status 仍为 completed，
+      // 因此必须单独用 expiredAt 判定链接是否已失效，否则 24h 失效语义形同虚设。
+      settleExportTask(task)
+      const linkExpired = task.expiredAt !== null && Date.now() >= new Date(task.expiredAt).getTime()
+      if (task.status !== 'completed' || !task.downloadUrl || linkExpired) {
+        return businessError(linkExpired ? '导出链接已过期，请重新导出' : (task.status === 'expired' ? '导出任务已过期，请重新导出' : '导出任务尚未完成，请稍后重试'))
+      }
       const gate = assertHighRisk('export_download', body.input, user?.id)
       if (gate) return gate
       writeAuditLog({
