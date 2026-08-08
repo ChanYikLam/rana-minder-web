@@ -2589,6 +2589,19 @@ export const interviewerTasks: InterviewerTask[] = []
 
 let interviewerTaskSeq = 1
 
+/**
+ * 测试隔离（MRM-013）：清空运行时累加的面试官任务并还原序号。
+ * interviewerTasks / interviewerTaskSeq / autoProfileSeq 均为模块级可变状态，
+ * 此前 resetRecruitmentDB 只按种子还原业务数组，任务列表与自增序列跨用例残留，
+ * 中断写入用例后重跑会导致断言残留（任务数、id 膨胀）。
+ * 数据数组（recruitmentActivities 等）由 reset.ts 按种子统一还原，此处只负责无种子的运行时状态。
+ */
+export function resetRecruitmentState(): void {
+  interviewerTasks.splice(0, interviewerTasks.length)
+  interviewerTaskSeq = 1
+  autoProfileSeq = 0
+}
+
 /** 指派临时面试官（ORG-037：仅本社团当前成员；活动级覆盖全部轮次，轮次级只覆盖指定轮次） */
 export function assignInterviewerTask(input: {
   clubId: string
