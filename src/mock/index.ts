@@ -1352,12 +1352,12 @@ const memberHandlers: MockMethod[] = [
       const activeMembers = list.filter((m) => m.status === 'active')
       const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
       const deptSource = scope ? db.departments.filter((d) => d.name === scope) : db.departments
-      // MEM-004：任期提醒派生（memberId → 最近到期日），供列表红点提示
-      const termEndByMember = new Map<string, string>()
+      // MEM-004：任期提醒派生（memberId → 最近到期日 + 剩余天数），供列表红点/剩余天数透出
+      const termEndByMember = new Map<string, { termEndAt: string; daysLeft: number }>()
       for (const u of db.upcomingTermEnd(query.clubId, platformConfig.termRemindDays)) {
         const end = u.position.plannedEndDate as string
         const cur = termEndByMember.get(u.memberId)
-        if (!cur || end < cur) termEndByMember.set(u.memberId, end)
+        if (!cur || end < cur.termEndAt) termEndByMember.set(u.memberId, { termEndAt: end, daysLeft: u.daysLeft })
       }
       const byDepartment = deptSource.map((d) => ({
         id: d.id,
@@ -1388,7 +1388,8 @@ const memberHandlers: MockMethod[] = [
               title: activePositions[0]?.title || '成员',
               status: m.status, joinedAt: m.joinedAt.slice(0, 10),
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
-              termEndAt: termEndByMember.get(m.id) ?? null,
+              termEndAt: termEndByMember.get(m.id)?.termEndAt ?? null,
+              termDaysLeft: termEndByMember.get(m.id)?.daysLeft ?? null,
             }
           }),
           stats: {
@@ -1704,7 +1705,7 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/appointments',
     method: 'post',
-response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null; candidateStudentId?: string | null } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null; candidateStudentId?: string | null } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
