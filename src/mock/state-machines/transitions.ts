@@ -2,13 +2,16 @@
  * 29 个状态机的精确转换表（依据 docs/specification/SRS-状态机转换明细-v1.0.md）
  * 每个状态机：from → { event: to }。未列出的跳转一律拒绝并保持原状态。
  * 业务前置条件校验由 db 业务函数完成；这里负责状态转换合法性的第一道闸。
+ *
+ * MRM-014：本表是状态词表（状态枚举）的唯一数据源。db 层类型词表通过 StatesOf<M>
+ * 由本表派生，禁止在 db 层手工再写一份字面量联合，避免状态机枚举与 db 类型词表双轨漂移。
  */
 
 export interface TransitionTable {
   [from: string]: Record<string, string | readonly string[]>
 }
 
-export const TRANSITIONS: Record<string, TransitionTable> = {
+const TRANSITIONS_CONST = {
   /** SM-IDN-001 账号访问 */
   'SM-IDN-001': {
     anonymous: { login_success: 'authenticated' },
@@ -615,6 +618,43 @@ export const TRANSITIONS: Record<string, TransitionTable> = {
       formal_delete_hit: 'deleted',
     },
   },
+} as const satisfies Record<string, TransitionTable>
+
+/** 状态机转换表（运行期以字符串索引访问；类型层面由 TRANSITIONS_CONST 派生 StatesOf） */
+export const TRANSITIONS: Record<string, TransitionTable> = TRANSITIONS_CONST
+
+/** 状态机 id 字面量联合（由转换表键推导） */
+export type MachineId = keyof typeof TRANSITIONS_CONST
+
+/** 目标状态扁平化：readonly 数组 → 元素联合（裸类型参数分发） */
+type _Flatten<T> = T extends readonly (infer U)[] ? U : T
+
+/** 事件表的值联合（事件 → to 状态/数组），对空事件表（{}）安全 */
+type _ValuesOf<T> = T extends any ? T[keyof T] : never
+
+/** 某状态机全部目标状态（to 值，含数组展开；空事件表不产生状态） */
+type _TargetsOf<M extends MachineId> = _Flatten<_ValuesOf<(typeof TRANSITIONS_CONST)[M][keyof (typeof TRANSITIONS_CONST)[M]]>>
+
+/**
+ * 状态机 M 的状态词表（from 键 ∪ to 值），MRM-014 单一数据源：
+ * db 层类型词表必须从此派生，禁止手工抄写字面量，避免双轨漂移。
+ */
+export type StatesOf<M extends MachineId> =
+  | keyof (typeof TRANSITIONS_CONST)[M]
+  | _TargetsOf<M>
+
+/** 运行期获取某状态机的全部状态（测试/断言用，与 StatesOf 同源） */
+export function statesOf(machineId: MachineId): string[] {
+  const table = TRANSITIONS_CONST[machineId]
+  const out = new Set<string>()
+  for (const [from, events] of Object.entries(table)) {
+    out.add(from)
+    for (const to of Object.values(events)) {
+      if (Array.isArray(to)) to.forEach((s) => out.add(s))
+      else out.add(to)
+    }
+  }
+  return [...out]
 }
 
 /** 校验状态转换是否合法（精确转换表） */

@@ -3,7 +3,7 @@
  * 单一数据源，页面刷新即重置；状态流转经 state-machines 校验
  */
 
-import { assertTransition } from './state-machines/transitions'
+import { assertTransition, type StatesOf } from './state-machines/transitions'
 import { syncPositionMembership } from './db-organization'
 import { members, listMembers, getMemberStats } from './db-members'
 import type { MockMember, MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly } from './db-members'
@@ -95,7 +95,8 @@ export interface MockDeptApplication {
   targetDeptId: string | null
   targetDeptName: string | null
   reason: string
-  status: 'under_review' | 'approved_pending_exec' | 'executing' | 'effective' | 'exec_failed' | 'rejected' | 'withdrawn'
+  /** MRM-014：词表由 SM-MEM-003 转换表派生 */
+  status: StatesOf<'SM-MEM-003'>
   submittedAt: string
   decidedAt: string | null
   decidedBy: string | null
@@ -115,7 +116,8 @@ export interface MockMembershipInvitation {
   candidateStudentId: string
   departmentId: string | null
   departmentName: string | null
-  status: 'sent' | 'pending_acceptance' | 'accepted_pending_sync' | 'effective' | 'sync_failed' | 'sync_anomaly' | 'withdrawn' | 'rejected' | 'expired' | 'target_already_member'
+  /** MRM-014：词表由 SM-MEM-004 转换表派生 */
+  status: StatesOf<'SM-MEM-004'>
   sentAt: string
   expiredAt: string
   acceptedAt: string | null
@@ -138,7 +140,8 @@ export interface MockAppointmentCommand {
   title: string | null
   /** 预约执行时间；null = 立即执行 */
   scheduledAt: string | null
-  status: 'pending_exec' | 'initiator_lost_rights' | 'precondition_failed' | 'reconfirmed' | 'cancelled' | 'executing' | 'executed' | 'exec_failed'
+  /** MRM-014：词表由 SM-ORG-003 转换表派生 */
+  status: StatesOf<'SM-ORG-003'>
   createdAt: string
   createdBy: string
   executedAt: string | null

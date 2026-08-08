@@ -4,7 +4,7 @@
  * 表单提交状态流转经 SM-FORM-002（draft:submit_request→checking→all_pass→submitted）。
  * 已发布版本不可覆盖：保存草稿必然产生新版本号；提交按提交时版本字段快照还原。
  */
-import { assertTransition } from './state-machines/transitions'
+import { assertTransition, type StatesOf } from './state-machines/transitions'
 import type { FormDefinition, FormField, FormFieldType, FormVersion } from '../types/domain/form'
 
 /** 设计器字段类型清单：与 domain/form.ts 的 FormFieldType 全量对齐（12 种） */
@@ -25,7 +25,8 @@ export const FORM_FIELD_TYPES: Array<{ type: FormFieldType; label: string }> = [
 
 export const FORM_FIELD_TYPE_LIST: FormFieldType[] = FORM_FIELD_TYPES.map((t) => t.type)
 
-export type FormSubmissionStatus = 'draft' | 'checking' | 'submitted' | 'deleted' | 'revision' | 'locked'
+/** MRM-014：词表由 SM-FORM-002 转换表派生 */
+export type FormSubmissionStatus = StatesOf<'SM-FORM-002'>
 
 export interface FormSubmission {
   id: string
