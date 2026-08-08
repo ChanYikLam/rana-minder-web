@@ -17,6 +17,12 @@ class MockServerResponse {
   }
 }
 
+async function reauthAs(user: string): Promise<string> {
+  const out = await invokeHandler('/api/auth/reauth', 'post', `/api/auth/reauth?_mock_user=${user}`)
+  expect(out.statusCode).toBe(200)
+  return (out.body.data as { proof: string }).proof
+}
+
 function invokeHandler(urlPattern: string, method: string, reqUrl: string, body?: unknown): Promise<{ statusCode: number; body: Record<string, unknown> }> {
   const handler = handlers.find((h) => h.url === urlPattern && h.method === method)
   if (!handler?.rawResponse) throw new Error(`handler 未找到: ${method} ${urlPattern}`)
@@ -407,9 +413,9 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
 
     // 走完状态机：generating → processing → completed（每次 GET 推进一个阶段，elapsed 已越过 3000ms）
     vi.advanceTimersByTime(4000)
+    // 首次结算 generating → processing（返回值不需要，结算副作用才是目的）
+    await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
     let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
-    // 首次结算 generating → processing
-    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
     let items = (list.body.data as { items: { id: string; status: string }[] }).items
     expect(items.find((t) => t.id === taskId)?.status).toBe('completed')
 
@@ -418,8 +424,111 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
     items = (list.body.data as { items: { id: string; status: string }[] }).items
     expect(items.some((t) => t.id === taskId)).toBe(false)
-    // 种子任务仍在（reset 后 expiredAt 被重设为未来，不会被误清）
-    expect(items.map((t) => t.id).sort()).toEqual(['exp-001', 'exp-002'])
+    // 种子 exp-001 仍在（reset 后 expiredAt 被重设为未来，不会转 expired 也不会被 GC）；
+    // exp-002 种子为 generating，首次读取即转 failed，修复 failed GC 后超 7 天被正常清出
+    expect(items.map((t) => t.id).sort()).toEqual(['exp-001'])
+  })
+
+  it('MRM-009：failed 任务超 7 天被 GC 清出（修复 completedAt 死条件，改用 failedAt 判定）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+
+    // 创建任务后直接跳过 24h 失败窗口：generating → failed（failedAt 被记录）
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    const taskId = (created.body.data as { id: string }).id
+    vi.advanceTimersByTime(25 * 3600 * 1000)
+    let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    let items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.find((t) => t.id === taskId)?.status).toBe('failed')
+
+    // 未满 7 天：failed 仍保留（供审计）
+    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.some((t) => t.id === taskId)).toBe(true)
+
+    // 超 7 天：GET 时 GC 清出（此前依赖 completedAt 恒 null 的死条件，永不清理）
+    vi.advanceTimersByTime(8 * 24 * 3600 * 1000)
+    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.some((t) => t.id === taskId)).toBe(false)
+  })
+
+  it('MRM-009：下载端点对过期/未完成任务拒绝——completed 超 24h 失效不可下载', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+
+    // 创建任务并推进到 completed（expiredAt = 创建时 + 24h）
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    const taskId = (created.body.data as { id: string }).id
+    vi.advanceTimersByTime(4000)
+    await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+
+    // 未满 24h：可下载（需 reauthProof）
+    const proof = await invokeHandler('/api/auth/reauth', 'post', '/api/auth/reauth?_mock_user=leader')
+    const proofToken = (proof.body.data as { proof: string }).proof
+    const ok = await invokeHandler('/api/org/:clubId/exports/:id/download', 'post', `/api/org/club-001/exports/${taskId}/download`, {
+      input: { reason: '季度归档审计需要', reauthProof: proofToken },
+    })
+    expect(ok.statusCode, JSON.stringify(ok.body)).toBe(200)
+
+    // 越过 24h 失效窗口（但未到 365d expired 转换）：仍为 completed，但链接已失效 → 拒绝下载
+    vi.advanceTimersByTime(25 * 3600 * 1000)
+    const expired = await invokeHandler('/api/org/:clubId/exports/:id/download', 'post', `/api/org/club-001/exports/${taskId}/download`, {
+      input: { reason: '季度归档审计需要', reauthProof: proofToken },
+    })
+    expect(expired.statusCode).toBe(422)
+    expect((expired.body as { message: string }).message).toContain('已过期')
+  })
+
+  it('MRM-009：org 下载端点对不存在/未完成任务同样拒绝', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const proof = await reauthAs('leader')
+
+    // 不存在的任务：404（此前同样能拿到下载地址）
+    const notFound = await invokeHandler('/api/org/:clubId/exports/:id/download', 'post', '/api/org/club-001/exports/exp-999/download', {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(notFound.statusCode).toBe(404)
+
+    // 刚创建（generating，进行中）：拒绝下载
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    const taskId = (created.body.data as { id: string }).id
+    const inflight = await invokeHandler('/api/org/:clubId/exports/:id/download', 'post', `/api/org/club-001/exports/${taskId}/download`, {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(inflight.statusCode).toBe(422)
+  })
+
+  it('MRM-009：admin 下载端点对不存在/未完成任务同样拒绝，completed 可下载', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const proof = await reauthAs('admin')
+
+    // 不存在的平台任务：404（此前任意 id 都返回下载地址）
+    const notFound = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-999/download', {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(notFound.statusCode).toBe(404)
+
+    // 新建平台任务（进行中）：拒绝下载
+    const created = await invokeHandler('/api/admin/exports', 'post', '/api/admin/exports')
+    const taskId = (created.body.data as { id: string }).id
+    const inflight = await invokeHandler('/api/admin/exports/:id/download', 'post', `/api/admin/exports/${taskId}/download`, {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(inflight.statusCode).toBe(422)
+
+    // 种子 completed 平台任务（exp-003，reset 后 expiredAt 为未来）：可下载
+    const ok = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-003/download', {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(ok.statusCode).toBe(200)
   })
 
   it('MRM-009：reset 后种子 completed 任务 expiredAt 重设为未来——不被 settle 误转 expired、不被 GC 清出', async () => {
@@ -428,8 +537,8 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     resolveMockUser('/api/auth/session?_mock_user=leader')
 
     // reset 前：种子 exp-001 expiredAt 是 2025 年的静态值
-    let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
-    let items = (list.body.data as { items: { id: string; expiredAt: string | null; status: string }[] }).items
+    const list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const items = (list.body.data as { items: { id: string; expiredAt: string | null; status: string }[] }).items
     const before = items.find((t) => t.id === 'exp-001')
     expect(before?.status).toBe('completed')
     // 若未 reset（2025 年 expiredAt 已超保留窗口），settle 应将其转 expired——这里直接证明 GET 结算语义
@@ -438,8 +547,8 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
 
     // 推进超过 365 天：若 expiredAt 是未来 7 天，365 天窗口不会越过 → 仍保留
     vi.advanceTimersByTime(360 * 24 * 3600 * 1000)
-    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
-    const after = (list.body.data as { items: { id: string }[] }).items
+    const afterList = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const after = (afterList.body.data as { items: { id: string }[] }).items
     expect(after.some((t) => t.id === 'exp-001')).toBe(true)
   })
 })

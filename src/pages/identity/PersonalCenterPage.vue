@@ -34,7 +34,6 @@ const history = ref<HistoryItem[]>([])
 const schedule = ref<ScheduleItem[]>([])
 const confirmingId = ref<string | null>(null)
 const withdrawing = ref(false)
-const withdrawError = ref('')
 
 async function loadData() {
   state.value = 'loading'
@@ -64,7 +63,6 @@ async function handleWithdraw(item: OngoingItem) {
     return
   }
   withdrawing.value = true
-  withdrawError.value = ''
   const result = await post(`/activity/recruitment/${item.activityId}/withdraw`, { confirm: true })
   withdrawing.value = false
   confirmingId.value = null
@@ -72,7 +70,7 @@ async function handleWithdraw(item: OngoingItem) {
     toast.success('已退出招新')
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    withdrawError.value = (result.error as { message?: string }).message || '退出失败'
+    toast.error((result.error as { message?: string }).message || '退出失败')
   }
 }
 
@@ -189,7 +187,6 @@ onMounted(loadData)
             </div>
           </Card>
         </div>
-        <p v-if="withdrawError" class="mt-3 text-xs text-danger">{{ withdrawError }}</p>
       </div>
 
       <!-- 历史记录 -->

@@ -12,7 +12,11 @@ vi.mock('@/services/client', () => ({
   post: (...args: unknown[]) => mockPost(...args),
   put: (...args: unknown[]) => mockPut(...args),
 }))
+vi.mock('vue-sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
+import { toast } from 'vue-sonner'
 import ActivityManagePage from './ActivityManagePage.vue'
 
 function detail(status: string, channelStatus: string) {
@@ -150,7 +154,8 @@ describe('ActivityManagePage 招新活动管理', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('保存修改'))!.trigger('click')
     await flushPromises()
     expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '面向全校招新' })
-    expect(wrapper.text()).toContain('数据版本已过期')
+    expect(toast.error).toHaveBeenCalledWith('数据版本已过期')
+    expect(wrapper.text()).not.toContain('数据版本已过期')
     expect(wrapper.text()).toContain('保存修改')
     wrapper.unmount()
   })

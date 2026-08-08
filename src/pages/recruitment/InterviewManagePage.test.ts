@@ -11,7 +11,11 @@ vi.mock('@/services/client', () => ({
   post: (...args: unknown[]) => mockPost(...args),
   put: (...args: unknown[]) => mockPut(...args),
 }))
+vi.mock('vue-sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
 
+import { toast } from 'vue-sonner'
 import InterviewManagePage from './InterviewManagePage.vue'
 
 const interviewRow = { id: 'iv-1', activityId: 'act-1', roundId: 'r1', roundName: '一轮', applicantId: 'a1', applicantName: '张三', studentId: '2023001', status: 'scheduled', slotId: 's1', scheduledTime: '2026-08-10T10:00:00Z', endTime: '', attendance: 'none', invalidReason: null }
@@ -97,13 +101,12 @@ describe('InterviewManagePage 面试管理', () => {
     wrapper.unmount()
   })
 
-  it('代预约失败：展示后端错误信息', async () => {
+  it('代预约失败：展示后端错误信息（toast）', async () => {
     mockPageGet([interviewRow], [openRound], [{ applicantId: 'a1', applicantName: '张三', status: 'submitted' }])
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'BOOK-001', message: '时段已被约满' } })
     const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
-    // 先选中一行（actionError 在右侧选中面板显示）
     await wrapper.find('tbody tr[role="row"]').trigger('click')
     const bookBtn = wrapper.findAll('button').find((b) => b.text().includes('代预约面试'))
     await bookBtn!.trigger('click')
@@ -115,7 +118,8 @@ describe('InterviewManagePage 面试管理', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('确认预约'))!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('时段已被约满')
+    expect(toast.error).toHaveBeenCalledWith('时段已被约满')
+    expect(wrapper.text()).not.toContain('时段已被约满')
     // 失败后面板保持打开
     expect(wrapper.text()).toContain('代申请人预约面试')
     wrapper.unmount()
@@ -142,7 +146,7 @@ describe('InterviewManagePage 面试管理', () => {
     wrapper.unmount()
   })
 
-  it('行操作失败：展示后端错误信息', async () => {
+  it('行操作失败：展示后端错误信息（toast）', async () => {
     mockPageGet([interviewRow], [openRound])
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'OP-001', message: '该面试已作废' } })
     const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
@@ -152,7 +156,8 @@ describe('InterviewManagePage 面试管理', () => {
     const startBtn = wrapper.findAll('button').find((b) => b.text().includes('开始面试'))
     await startBtn!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('该面试已作废')
+    expect(toast.error).toHaveBeenCalledWith('该面试已作废')
+    expect(wrapper.text()).not.toContain('该面试已作废')
     wrapper.unmount()
   })
 
@@ -228,7 +233,8 @@ describe('InterviewManagePage 面试管理', () => {
       '/org/club-001/recruitment/act-1/rounds',
       expect.objectContaining({ name: '二面', selectDeadline: '2026-08-15T00:00:00Z', slots: expect.any(Array) })
     )
-    expect(wrapper.text()).toContain('截止时间已过，无法创建')
+    expect(toast.error).toHaveBeenCalledWith('截止时间已过，无法创建')
+    expect(wrapper.text()).not.toContain('截止时间已过，无法创建')
     wrapper.unmount()
   })
 

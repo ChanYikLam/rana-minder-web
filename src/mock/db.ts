@@ -81,7 +81,7 @@ export interface MockDepartment {
   name: string
 }
 
-// MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly, MockMember 已移至 db-members.ts（消除循环依赖）
+
 
 export type DeptApplyType = 'join' | 'leave' | 'transfer'
 
@@ -241,7 +241,6 @@ export function searchCandidates(_clubId: string, keyword: string): MockCandidat
   })
 }
 
-// members 数组已移至 db-members.ts（消除循环依赖），通过 import { members } from './db-members' 引用
 
 export const departmentApplications: MockDeptApplication[] = [
   {
@@ -333,6 +332,21 @@ export const exitRequests: MockExitRequest[] = [
     dueAt: daysFromNow(-1),
   },
 ]
+
+/** 种子相对时间偏移（#78 遗留）：resetDb 恢复快照时按当前时钟重算 dueAt/expiredAt/scheduledAt，
+ * 避免模块加载固化绝对时间导致跨天/跨周运行时 overdue 派生漂移、用例脆弱。
+ * 仅登记成员生命周期相关种子的相对时间字段；运行期新建记录走各自 daysFromNow 逻辑。 */
+export const SEED_RELATIVE_OFFSETS: Record<string, { field: 'dueAt' | 'expiredAt' | 'scheduledAt'; days: number }> = {
+  'dap-001': { field: 'dueAt', days: 1 },
+  'dap-002': { field: 'dueAt', days: -1 },
+  'minv-001': { field: 'expiredAt', days: 5 },
+  'minv-002': { field: 'expiredAt', days: -2 },
+  'apc-002': { field: 'scheduledAt', days: 2 },
+  'res-001': { field: 'dueAt', days: 2 },
+  'res-002': { field: 'dueAt', days: -1 },
+  'exit-req-001': { field: 'dueAt', days: 1 },
+  'exit-req-002': { field: 'dueAt', days: -1 },
+}
 
 export interface TransitionCandidate {
   memberId: string
@@ -556,10 +570,11 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
  */
 export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string; email?: string; phone?: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
   if (!input.studentId) return { ok: false, created: false, error: '学号为空，无法创建成员' }
-  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
-  // exiting（离职中）/pending_effective（待生效）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
-  if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective')) {
-    return { ok: false, created: false, error: `该学号在本社团存在${existing.status === 'exiting' ? '离职中' : '待生效'}的成员记录，请先完成原有流程` }
+  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited')
+  // exiting（离职中）/pending_effective（待生效）/sync_anomaly（同步异常）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
+  if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective' || existing.status === 'sync_anomaly')) {
+    const reason = existing.status === 'exiting' ? '离职中' : existing.status === 'pending_effective' ? '待生效' : '同步异常'
+    return { ok: false, created: false, error: `该学号在本社团存在${reason}的成员记录，请先完成原有流程` }
   }
   if (existing) return { ok: true, created: false, member: existing }
   const candidate = candidates.find((c) => c.studentId === input.studentId)
@@ -880,11 +895,11 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
   return { ok: true }
 }
 
-// listMembers, getMemberStats 已移至 db-members.ts（消除循环依赖），通过 import 引用
 
 export function getMemberProfile(clubId: string, memberId: string): MockMember | undefined {
   return findMember(clubId, memberId)
 }
+
 
 /** 成员管理级别（MEM-006 角色白名单用）：由职位标题与 mock 用户角色综合判定 */
 export type MemberManagerLevel = 'club_leader' | 'hr' | 'department_leader' | 'member'
@@ -941,7 +956,7 @@ export function upcomingTermEnd(clubId: string, advanceDays: number): { memberId
 /** 历史成员分段（MEM-007）：同学生账号的过往经历，用于重新加入时间线还原 */
 export function historyMembershipsOf(clubId: string, studentId: string, currentMemberId?: string): { id: string; name: string; joinedAt: string; exitedAt: string | null; status: string }[] {
   return listMembers(clubId)
-    .filter((m) => m.studentId === studentId && m.id !== currentMemberId && (m.status === 'exited' || m.status === 'removed'))
+    .filter((m) => m.studentId === studentId && m.id !== currentMemberId && m.status === 'exited')
     .map((m) => ({ id: m.id, name: m.name, joinedAt: m.joinedAt, exitedAt: m.exitedAt, status: m.status }))
 }
 
@@ -966,12 +981,16 @@ export function directRemoveMember(clubId: string, byMemberId: string, memberId:
   if (!gate.ok) return { ok: false, error: gate.reason || '无权移除该成员' }
   const t1 = assertTransition('SM-MEM-001', target.status, 'exiting', 'removed')
   if (!t1.ok) return { ok: false, error: t1.reason || '当前成员状态不可移除' }
+  const prevStatus = target.status
   target.status = 'exiting'
   const t2 = assertTransition('SM-MEM-001', target.status, 'exited', 'confirmed')
-  if (t2.ok) {
-    target.status = 'exited'
-    target.exitedAt = new Date().toISOString()
+  if (!t2.ok) {
+    // 防御：若状态机不允许 exiting→exited 二次确认，回滚到原状态，避免产生「假成功」（已改为 exiting 却返回 ok）的中间态
+    target.status = prevStatus
+    return { ok: false, error: t2.reason || '移除流程中断，请重试' }
   }
+  target.status = 'exited'
+  target.exitedAt = new Date().toISOString()
   const now = new Date().toISOString()
   const endedAt = now.slice(0, 10)
   for (const p of target.positions.filter((p) => p.status === 'active')) {
@@ -1016,6 +1035,7 @@ export function markMemberExit(clubId: string, byMemberId: string, memberId: str
   return { ok: true, member: target }
 }
 
-// 向后兼容：重新导出共享模块中的成员数据与查询函数
+// 共享成员数据与基础查询已下沉至 db-members.ts（消除 db.ts ↔ db-organization.ts 循环依赖，MRM-008）。
+// 此处保留向后兼容重导出，避免破坏既有 import 链；新增成员相关查询请直接写入 db-members.ts。
 export { members, listMembers, getMemberStats }
 export type { MockMember, MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly }

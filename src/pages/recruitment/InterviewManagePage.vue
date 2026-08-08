@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post, put } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw, Users } from '@lucide/vue'
 
@@ -28,7 +29,6 @@ const state = ref<PageState>('loading')
 const items = ref<InterviewRow[]>([])
 const selected = ref<InterviewRow | null>(null)
 const actionLoading = ref(false)
-const actionError = ref('')
 const invalidReason = ref('')
 const bookOpen = ref(false)
 const rounds = ref<RoundItem[]>([])
@@ -107,7 +107,6 @@ async function loadBookOptions() {
 function handleRowClick(row: unknown) {
   const it = row as InterviewRow
   selected.value = it
-  actionError.value = ''
   invalidReason.value = ''
 }
 
@@ -121,7 +120,6 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   if (!selected.value || actionLoading.value) return
   if (!validateParams()) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(
     `/org/${clubId.value}/recruitment/${actId.value}/interviews/${selected.value.id}/${action}`,
     { ...(input || {}) }
@@ -130,7 +128,7 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   if (result.kind === 'completed') {
     await loadInterviews()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -138,7 +136,6 @@ async function handleBook() {
   if (!validateParams()) return
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviews/book`, {
     applicantId: bookForm.value.applicantId,
     slotId: bookForm.value.slotId,
@@ -149,7 +146,7 @@ async function handleBook() {
     bookForm.value = { applicantId: '', roundId: '', slotId: '' }
     await loadInterviews()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '预约失败'
+    toast.error((result.error as { message?: string }).message || '预约失败')
   }
 }
 
@@ -184,7 +181,7 @@ async function handleCreateRound() {
     roundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    roundError.value = (result.error as { message?: string }).message || '创建轮次失败'
+    toast.error((result.error as { message?: string }).message || '创建轮次失败')
   }
 }
 
@@ -193,7 +190,6 @@ async function handleUpdateRound(roundId: string) {
   if (!newRoundDeadline.value) return
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await put(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}`, {
     selectDeadline: newRoundDeadline.value,
   })
@@ -203,7 +199,7 @@ async function handleUpdateRound(roundId: string) {
   if (result.kind === 'completed') {
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '更新失败'
+    toast.error((result.error as { message?: string }).message || '更新失败')
   }
 }
 
@@ -226,7 +222,7 @@ async function handleCancelRound(roundId: string) {
     cancelRoundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    cancelRoundError.value = (result.error as { message?: string }).message || '取消失败'
+    toast.error((result.error as { message?: string }).message || '取消失败')
   }
 }
 
@@ -234,7 +230,6 @@ function openCancelRound(roundId: string) {
   cancelRoundId.value = roundId
   cancelRoundReason.value = ''
   cancelRoundError.value = ''
-  actionError.value = ''
 }
 
 async function loadInterviewers() {
@@ -277,7 +272,7 @@ async function handleAssignTask() {
     taskError.value = ''
     await loadInterviewers()
   } else if (result.kind === 'rejected' && result.error) {
-    taskError.value = (result.error as { message?: string }).message || '指派失败'
+    toast.error((result.error as { message?: string }).message || '指派失败')
   }
 }
 
@@ -285,14 +280,13 @@ async function handleRevokeTask(taskId: string) {
   if (!validateParams()) return
   if (actionLoading.value) return
   actionLoading.value = true
-  taskError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/${taskId}/revoke`, {})
   actionLoading.value = false
   revokingTaskId.value = null
   if (result.kind === 'completed') {
     await loadInterviewers()
   } else if (result.kind === 'rejected' && result.error) {
-    taskError.value = (result.error as { message?: string }).message || '撤销失败'
+    toast.error((result.error as { message?: string }).message || '撤销失败')
   }
 }
 
@@ -320,7 +314,7 @@ async function handleSkipRound() {
     roundError.value = ''
     await Promise.all([loadRounds(), loadInterviews()])
   } else if (result.kind === 'rejected' && result.error) {
-    roundError.value = (result.error as { message?: string }).message || '跳轮失败'
+    toast.error((result.error as { message?: string }).message || '跳轮失败')
   }
 }
 
@@ -725,7 +719,7 @@ watch(
                 </div>
               </div>
 
-              <p v-if="actionError" class="text-xs text-destructive">{{ actionError }}</p>
+              <!-- 操作结果反馈统一走 toast，页面内联不再承载 -->
             </div>
           </PermissionGuard>
         </Card>

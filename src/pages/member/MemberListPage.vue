@@ -36,6 +36,8 @@ interface Member {
   joinedAt: string
   exitedAt: string | null
   termEndAt: string | null
+  /** MEM-004：距 termEndAt 的剩余天数（仅进入提醒窗口的在任成员有值） */
+  termDaysLeft: number | null
 }
 interface Stats {
   total: number
@@ -131,11 +133,10 @@ watch([keyword, deptFilter, titleFilter, statusFilter], () => { page.value = 1 }
 
 const statusOptions: FilterOption[] = [
   { value: 'active', label: '活跃' },
-  { value: 'pending_casdor_sync', label: '关系同步中' },
-  { value: 'suspended', label: '已暂停' },
+  { value: 'pending_casdoor_sync', label: '关系同步中' },
   { value: 'exiting', label: '退出中' },
   { value: 'exited', label: '已退出' },
-  { value: 'removed', label: '已移除' },
+  { value: 'sync_anomaly', label: '同步异常' },
 ]
 
 const filterFields = computed<FilterField[]>(() => {
@@ -383,6 +384,7 @@ const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt
                   <SyncIndicator v-if="m.status === 'pending_casdoor_sync'" status="syncing" label="关系同步中" />
                   <span v-if="m.termEndAt" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-warning-subtle text-warning" title="任期将到期">
                     <CalendarClock :size="11" /> 任期 {{ m.termEndAt.slice(0, 10) }} 到期
+                    <template v-if="m.termDaysLeft !== null && m.termDaysLeft >= 0">· 剩 {{ m.termDaysLeft }} 天</template>
                   </span>
                 </div>
                 <div class="flex items-center gap-3 mt-0.5">

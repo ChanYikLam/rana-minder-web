@@ -3,12 +3,16 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { invitationId: 'inv-1' }, meta: {} }),
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
+}))
+vi.mock('vue-sonner', () => ({
+  toast: { success: mockToastSuccess, error: mockToastError },
 }))
 
 import InvitationPage from './InvitationPage.vue'
@@ -26,6 +30,8 @@ describe('InvitationPage 招新邀请', () => {
   beforeEach(() => {
     mockGet.mockReset()
     mockPost.mockReset()
+    mockToastSuccess.mockReset()
+    mockToastError.mockReset()
     vi.clearAllMocks()
   })
   afterEach(() => vi.restoreAllMocks())
@@ -61,7 +67,7 @@ describe('InvitationPage 招新邀请', () => {
     expect(rejectBtn, '待处理邀请应渲染拒绝按钮').toBeTruthy()
     await rejectBtn!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('操作失败，请稍后重试')
+    expect(mockToastError).toHaveBeenCalledWith('操作失败，请稍后重试')
   })
 
   it('加载失败：不渲染详情', async () => {

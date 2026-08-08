@@ -6,7 +6,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Users, Send, Save, CheckCircle2, Archive } from '@lucide/vue'
+import { ArrowLeft, Users, Send, Save, CheckCircle2, Archive, AlertTriangle } from '@lucide/vue'
 import { applicationStatusLabel, isEditableStatus } from '@/lib/recruitment-status'
 import DynamicForm from '@/components/form/DynamicForm.vue'
 import ObjectPicker from '@/components/form/ObjectPicker.vue'
@@ -75,7 +75,10 @@ let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
 /** 仅当申请状态为 submitted 才算“已提交”，草稿（draft）用户仍可继续填写/提交；archived 视为流程已结束不再可提交（可编辑性统一走共享状态机） */
 const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
 const hasArchived = computed(() => myApplication.value?.status === 'archived')
-const showApplyForm = computed(() => isEditableStatus(myApplication.value))
+/** 无报名资格（403）：阻断填写并给出提示，与普通招新 ApplicationPage 的 applyDenied 语义一致（不整页进错误态） */
+const applyDenied = ref(false)
+/** 可编辑性统一走共享状态机；无报名资格（403）时始终不可编辑 */
+const showApplyForm = computed(() => !applyDenied.value && isEditableStatus(myApplication.value))
 
 /** 部门意向仅对已选意向社团开放 */
 const volunteerClubs = computed(() => (detail.value?.clubs || []).filter((c) => volunteerClubIds.value.includes(c.id)))
@@ -109,7 +112,7 @@ async function loadData() {
   }
 }
 
-/** 返回 true 表示已正常解析申请状态（含未提交），false 表示已进入错误/无权限等终态 */
+/** 返回 true 表示已正常解析申请状态（含未提交/无报名资格），false 表示已进入错误等终态 */
 async function loadMyApplication(): Promise<boolean> {
   const jointId = route.params.jointId
   if (typeof jointId !== 'string') return true
@@ -122,6 +125,11 @@ async function loadMyApplication(): Promise<boolean> {
     }
     if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-015') {
       myApplication.value = null
+      return true
+    }
+    if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-003') {
+      // 无报名资格（403）：明确阻断填写并给出提示（与 ApplicationPage.applyDenied 一致，不整页进错误态）
+      applyDenied.value = true
       return true
     }
     state.value = errorToPageState(errorCodeOf(result))
@@ -370,7 +378,16 @@ async function handleWithdraw() {
         </div>
       </Card>
 
-      <Card v-if="hasSubmitted" class="mb-4">
+      <!-- 无报名资格（403）：阻断填写并明确提示，避免整页进错误态（与普通招新 ApplicationPage.applyDenied 一致） -->
+      <Card v-if="applyDenied" class="mb-4" role="alert">
+        <div class="flex items-center gap-2 text-danger">
+          <AlertTriangle :size="18" />
+          <p class="text-sm font-medium text-text-primary">当前账号无报名资格</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">联合报名仅面向在校学生开放，如确认符合条件请联系管理员核实账号状态。</p>
+      </Card>
+
+      <Card v-if="hasSubmitted && !applyDenied" class="mb-4">
         <div class="flex items-center gap-2 text-success">
           <CheckCircle2 :size="18" />
           <p class="text-sm font-medium text-text-primary">您已提交联合报名</p>
@@ -416,7 +433,7 @@ async function handleWithdraw() {
         <p class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后在报名通道关闭前重新提交。</p>
       </Card>
 
-      <Card v-else-if="hasArchived" class="mb-4">
+      <Card v-else-if="hasArchived && !applyDenied" class="mb-4">
         <div class="flex items-center gap-2 text-text-secondary">
           <Archive :size="18" />
           <p class="text-sm font-medium text-text-primary">您的联合报名已归档</p>
@@ -424,7 +441,7 @@ async function handleWithdraw() {
         <p class="text-xs text-text-secondary mt-1">当前状态：{{ applicationStatusLabel(myApplication?.status ?? '') }}</p>
       </Card>
 
-      <div v-else-if="myApplication" class="rounded-lg bg-warning-subtle p-3 mb-4">
+      <div v-else-if="myApplication && !applyDenied" class="rounded-lg bg-warning-subtle p-3 mb-4">
         <p class="text-sm text-warning font-medium">您有已保存的草稿（状态：{{ applicationStatusLabel(myApplication.status) }}），可继续修改后提交</p>
         <p class="text-xs text-text-secondary mt-1">暂存草稿会覆盖此前保存的内容</p>
       </div>

@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import { resolveMockUser, clearMockSession } from './auth'
-import { resetRecruitmentDB, resetNotifications, resetCorrections, resetAuditLogs, resetGovernance, resetOrgDb } from './reset'
+import { resetRecruitmentDB, resetNotifications, resetCorrections, resetAuditLogs, resetGovernance, resetOrgDb, resetSharedState } from './reset'
 import { auditLogsDb } from './db-audit'
 
 class MockServerResponse {
@@ -56,6 +56,7 @@ describe('P1-011 治理安全机制', () => {
     resetAuditLogs()
     resetGovernance()
     resetOrgDb()
+    resetSharedState()
   })
 
   describe('高风险命令目录（13/13 覆盖）', () => {
@@ -154,7 +155,7 @@ describe('P1-011 治理安全机制', () => {
 
     it('平台导出下载缺 proof 被 401 拒绝', async () => {
       resolveMockUser('/api/auth/session?_mock_user=admin')
-      const out = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-001/download?_mock_user=admin', {
+      const out = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-003/download?_mock_user=admin', {
         input: { reason: '合规备案需要下载' },
       })
       expect(out.statusCode).toBe(401)
@@ -163,11 +164,11 @@ describe('P1-011 治理安全机制', () => {
     it('平台导出下载：proof + 原因 → 成功并写审计日志', async () => {
       resolveMockUser('/api/auth/session?_mock_user=admin')
       const proof = await reauthAs('admin')
-      const out = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-001/download?_mock_user=admin', {
+      const out = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-003/download?_mock_user=admin', {
         input: { reason: '合规备案需要下载', reauthProof: proof },
       })
       expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
-      expect(auditLogsDb.some((l) => l.action === '导出文件下载' && l.targetId === 'exp-001')).toBe(true)
+      expect(auditLogsDb.some((l) => l.action === '导出文件下载' && l.targetId === 'exp-003')).toBe(true)
     })
 
     it('移除成员缺 proof 被 401；原因不足 5 字被 422', async () => {

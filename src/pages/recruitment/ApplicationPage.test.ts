@@ -63,6 +63,7 @@ const commonStubs = {
   Card: { template: '<div class="card"><slot /></div>' },
   Button: { template: '<button><slot /></button>' },
   ResponsiveActionRegion: { template: '<div class="actions"><slot /></div>' },
+  RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] },
 }
 
 describe('ApplicationPage 状态渲染', () => {
@@ -145,6 +146,26 @@ describe('ApplicationPage 状态渲染', () => {
     // 操作按钮可见
     expect(wrapper.text()).toContain('保存草稿')
     expect(wrapper.text()).toContain('提交报名')
+  })
+
+  it('无报名资格（403）：展示阻断提示，隐藏表单与操作按钮（Issue-4.0-2）', async () => {
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: mockActivity })
+    mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: { versions: [{ fields: mockFormFields }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'rejected' as const, error: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限' } })
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 阻断提示可见
+    expect(wrapper.text()).toContain('当前账号无报名资格')
+
+    // 表单区域与操作按钮不可见
+    expect(wrapper.text()).not.toContain('意向方向')
+    expect(wrapper.text()).not.toContain('报名表单')
+    expect(wrapper.text()).not.toContain('保存草稿')
+    expect(wrapper.text()).not.toContain('提交报名')
   })
 
   it('需修订态：展示修订提示，表单与操作按钮可见', async () => {
@@ -265,7 +286,7 @@ describe('ApplicationPage 状态渲染', () => {
     expect(wrapper.text()).not.toContain('报名表单')
   })
 
-  it('已提交态：image 附件字段只读回显为占位文案，而非 FileMeta 原始 JSON', async () => {
+  it('已提交态：image 附件字段只读回显为可点击的文件名链接，而非 FileMeta 原始 JSON', async () => {
     const imageField = { id: 'img', type: 'image', label: '证件照', description: null, required: false, readonly: false, permission: 'read_write', options: null }
     const imageMeta = { id: 'image-meta-001', name: 'a.jpg', size: 1024, mimeType: 'image/jpeg', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }
     setupGetMocks('submitted', { answers: { f1: '张三', img: [imageMeta] } }, [...mockFormFields, imageField])
@@ -275,10 +296,13 @@ describe('ApplicationPage 状态渲染', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('证件照')
-    expect(wrapper.text()).toContain('已上传附件')
+    // 文件字段渲染为可点击的文件名链接，可跳转 FilePreviewPage 下载（修复：不再只显示“已上传附件”占位文案）
+    expect(wrapper.text()).toContain('a.jpg')
+    expect(wrapper.find('a[href="/files/image-meta-001"]').exists()).toBe(true)
     // 不再把 FileMeta[] 序列化成原始 JSON 展示
+    expect(wrapper.text()).not.toContain('已上传附件')
     expect(wrapper.text()).not.toContain('image-meta-001')
-    expect(wrapper.text()).not.toContain('a.jpg')
+    expect(wrapper.text()).not.toContain('{"id"')
   })
 
   it('草稿态：number 草稿值回填进数字输入框（不再被静默清空）', async () => {
@@ -335,7 +359,7 @@ describe('ApplicationPage 交互流程', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('姓名为必填项')
-    expect(wrapper.text()).toContain('请至少选择一个意向方向')
+    expect(toast.error).toHaveBeenCalledWith('请至少选择一个意向方向')
     expect(mockPost).not.toHaveBeenCalled()
   })
 
@@ -374,7 +398,6 @@ describe('ApplicationPage 交互流程', () => {
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.text()).toContain('报名已截止')
     expect(toast.error).toHaveBeenCalledWith('报名已截止')
     expect(mockPush).not.toHaveBeenCalled()
   })
@@ -391,7 +414,6 @@ describe('ApplicationPage 交互流程', () => {
     await nextTick()
 
     expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/draft', { answers: {} })
-    expect(wrapper.text()).toContain('草稿已保存')
     expect(toast.success).toHaveBeenCalled()
   })
 

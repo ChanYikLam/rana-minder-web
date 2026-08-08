@@ -6,6 +6,8 @@ import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
 import { identityApi } from '@/services/modules'
 import { authMode } from '@/services/auth'
+import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { MailCheck, ShieldCheck, RefreshCw, CheckCircle2, AlertTriangle, Scale } from '@lucide/vue'
@@ -48,12 +50,10 @@ const formEmail = ref('')
 const formPhone = ref('')
 const formErrors = ref<Record<string, string>>({})
 const submitting = ref(false)
-const submitError = ref<string | null>(null)
 
 // 邮箱验证
 const showVerify = ref(false)
 const verifyCode = ref('')
-const verifyError = ref('')
 const codeSent = ref(false)
 const sendingCode = ref(false)
 const verifying = ref(false)
@@ -106,13 +106,11 @@ function startEdit() {
   formEmail.value = profile.value.email
   formPhone.value = profile.value.phone
   formErrors.value = {}
-  submitError.value = null
   editing.value = true
 }
 
 async function handleSave() {
   formErrors.value = {}
-  submitError.value = null
 
   const parsed = profileSchema.safeParse({ email: formEmail.value, phone: formPhone.value })
   if (!parsed.success) {
@@ -120,6 +118,12 @@ async function handleSave() {
       const field = String(issue.path[0])
       if (!formErrors.value[field]) formErrors.value[field] = issue.message
     }
+    return
+  }
+
+  // 无实际改动则不上送：避免「编辑后原样提交」触发无效版本递增（MRM-007 边界）
+  if (parsed.data.email === profile.value?.email && parsed.data.phone === profile.value?.phone) {
+    editing.value = false
     return
   }
 
@@ -132,20 +136,21 @@ async function handleSave() {
     editing.value = false
     // 版本号以响应为准，避免「本地自增与服务器登记不一致」再次触发 409（P2-3）
     version.value = result.data.version ?? version.value + 1
+    toast.success('资料已保存')
     // 保存后刷新会话：资料门 profileComplete 翻转即时生效（P2-3：页面保存与会话联动）
     await session.loadSession()
   } else if (result.kind === 'concurrency_conflict') {
-    submitError.value = '资料已被其他会话修改，请刷新后重试'
+    toast.error('资料已被其他会话修改，请刷新后重试')
   } else if (result.kind === 'rejected') {
     if (result.error.fieldErrors) {
       for (const [field, msgs] of Object.entries(result.error.fieldErrors)) {
         formErrors.value[field] = msgs[0]
       }
     } else {
-      submitError.value = result.error.message
+      toast.error(result.error.message)
     }
   } else {
-    submitError.value = '保存失败，请稍后重试'
+    toast.error('保存失败，请稍后重试')
   }
 }
 
@@ -162,7 +167,6 @@ async function handleSendCode() {
 
 async function handleVerify() {
   if (verifying.value) return
-  verifyError.value = ''
   verifying.value = true
   const result = await post<{ emailVerified: boolean }>('/auth/profile/verify-email', { code: verifyCode.value })
   verifying.value = false
@@ -171,10 +175,11 @@ async function handleVerify() {
     showVerify.value = false
     verifyCode.value = ''
     codeSent.value = false
+    toast.success('邮箱验证成功')
     // 验证通过后刷新会话：资料门 emailVerified 翻转即时生效（P2-3）
     await session.loadSession()
   } else if (result.kind === 'rejected') {
-    verifyError.value = result.error.fieldErrors?.code?.[0] || result.error.message
+    toast.error(result.error.fieldErrors?.code?.[0] || result.error.message)
   }
 }
 
@@ -196,8 +201,6 @@ function syncTag(field: string): { label: string; className: string } | null {
 interface ConflictField { field: string; label: string; localValue: string; remoteValue: string; chosen: 'local' | 'remote' }
 const conflictFields = ref<ConflictField[]>([])
 const conflictSubmitting = ref(false)
-const conflictError = ref('')
-const conflictDone = ref(false)
 
 function buildConflicts(p: Profile) {
   conflictFields.value = [
@@ -226,7 +229,6 @@ onMounted(() => {
 async function handleResolveConflicts() {
   if (!profile.value || conflictSubmitting.value) return
   conflictSubmitting.value = true
-  conflictError.value = ''
   const resolved: { field: string; chosenValue: string }[] = []
   for (const f of conflictFields.value) {
     const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
@@ -234,14 +236,14 @@ async function handleResolveConflicts() {
     const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
     if (r.kind === 'rejected' && r.error) {
       conflictSubmitting.value = false
-      conflictError.value = (r.error as { message?: string }).message || '冲突解决失败'
+      toastError(r, '冲突解决失败')
       return
     }
   }
   conflictSubmitting.value = false
-  conflictDone.value = true
   profile.value = { ...profile.value }
   buildConflicts(profile.value)
+  toast.success('冲突已解决')
   router.push('/me/profile')
 }
 </script>
@@ -283,12 +285,6 @@ async function handleResolveConflicts() {
               </label>
             </div>
           </div>
-        </div>
-
-        <p v-if="conflictError" class="text-sm text-danger mb-3" role="alert">{{ conflictError }}</p>
-
-        <div v-if="conflictDone" class="flex items-center gap-2 text-sm text-success mb-4">
-          <CheckCircle2 :size="16" /> 冲突已解决，即将返回个人资料
         </div>
 
         <div class="flex gap-3">
@@ -409,8 +405,6 @@ async function handleResolveConflicts() {
             </p>
           </div>
 
-          <p v-if="submitError" class="text-sm text-danger" role="alert">{{ submitError }}</p>
-
           <div class="flex gap-2 pt-2">
             <button
               class="px-4 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
@@ -466,7 +460,6 @@ async function handleResolveConflicts() {
             </button>
           </template>
         </div>
-        <p v-if="verifyError" class="mt-2 text-xs text-danger" role="alert">{{ verifyError }}</p>
       </div>
 
       <!-- 同步冲突入口 -->

@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Save, Send, FileWarning, CheckCircle2, AlertTriangle, Archive } from '@lucide/vue'
+import { ArrowLeft, Save, Send, FileWarning, CheckCircle2, AlertTriangle, Archive, FileText } from '@lucide/vue'
 import { applicationStatusLabel, isEditableStatus, terminalStatusHint } from '@/lib/recruitment-status'
 import DynamicForm from '@/components/form/DynamicForm.vue'
 import ObjectPicker from '@/components/form/ObjectPicker.vue'
 import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
 import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
 import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
-import type { FormField } from '@/types/domain/form'
+import type { FormField, FileMeta } from '@/types/domain/form'
 import { fileBlockingError, isFieldFilled, restoredFieldValue, restoredFileMeta as restoredFileMetaFromLib, draftSafeFileMeta } from '@/lib/formFile'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string; allowAdjustmentDefault?: boolean }
@@ -37,8 +37,6 @@ const formErrors = ref<Record<string, string[]>>({})
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const allowAdjustment = ref(true)
 const submitting = ref(false)
-const submitError = ref<string | null>(null)
-const savedDraft = ref(false)
 const savingDraft = ref(false)
 
 /** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[]（逻辑见 src/lib/formFile） */
@@ -64,6 +62,7 @@ async function loadData() {
 }
 
 const myApplication = ref<MyApplication | null>(null)
+const applyDenied = ref(false)
 const withdrawing = ref(false)
 const confirmWithdraw = ref(false)
 let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
@@ -73,9 +72,10 @@ const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
 const hasArchived = computed(() => myApplication.value?.status === 'archived')
 const hasReadonlyStatus = computed(() => ['submitted', 'identity_anomaly'].includes(myApplication.value?.status || ''))
 
-/** 可编辑性统一走共享状态机：draft/revision_requested 可编辑，exited 恢复窗口内可重新提交（recovery_resubmit） */
-const showApplyForm = computed(() => isEditableStatus(myApplication.value))
-const isTerminal = computed(() => !showApplyForm.value)
+/** 可编辑性统一走共享状态机：draft/revision_requested 可编辑，exited 恢复窗口内可重新提交（recovery_resubmit）；
+ * 无报名资格（403）时始终不可编辑 */
+const showApplyForm = computed(() => !applyDenied.value && isEditableStatus(myApplication.value))
+const isTerminal = computed(() => !applyDenied.value && !showApplyForm.value)
 const recoveryWindowDeadline = computed(() => myApplication.value?.recoveryWindowDeadline || null)
 
 function renderAnswerValue(v: unknown): string {
@@ -89,8 +89,19 @@ function answersOf(fieldId: string): string {
   const v = myApplication.value?.answers?.[fieldId]
   if (v == null || v === '') return ''
   const field = formFields.value.find((f) => f.id === fieldId)
-  if (field?.type === 'file' || field?.type === 'image') return '已上传附件'
+  if (field?.type === 'file' || field?.type === 'image') return ''
   return renderAnswerValue(v)
+}
+
+/** 文件字段的 FileMeta 列表（兼容 fileId 字符串 / FileMeta[] 两种历史形态） */
+function answerFiles(fieldId: string): FileMeta[] {
+  const v = myApplication.value?.answers?.[fieldId]
+  return restoredFileMetaFromLib(v)
+}
+
+/** 文件字段是否非空 */
+function hasAnswerFiles(fieldId: string): boolean {
+  return answerFiles(fieldId).length > 0
 }
 
 function formatDateTime(iso?: string | null): string {
@@ -152,7 +163,12 @@ async function loadMyApplication() {
       myApplication.value = null
       return
     }
-    // 其他拒绝/错误（如无权限）不影响表单填写
+    if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-003') {
+      // 无报名资格（403）：明确阻断表单填写并给出提示（Issue-4.0-2 不静默吞并）
+      applyDenied.value = true
+      return
+    }
+    // 其他拒绝/错误不影响表单填写
     myApplication.value = null
   } catch {
     // 忽略：草稿恢复失败不影响表单填写
@@ -210,10 +226,6 @@ function onPickDepartments(ids: string[]) {
   preferences.value = [...kept, ...added]
 }
 
-watch([formData, preferences], () => {
-  savedDraft.value = false
-}, { deep: true })
-
 async function handleSaveDraft() {
   if (!showApplyForm.value) return
   savingDraft.value = true
@@ -235,7 +247,6 @@ async function handleSaveDraft() {
   savingDraft.value = false
   if (result.kind === 'completed') {
     const savedAt = (result.data as { savedAt?: string }).savedAt
-    savedDraft.value = true
     toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
   } else {
     toast.error('草稿保存失败，请稍后重试')
@@ -252,8 +263,6 @@ function isFilled(value: unknown, field: FormField): boolean {
 async function handleSubmit() {
   if (!showApplyForm.value) return
   formErrors.value = {}
-  submitError.value = null
-
   for (const field of formFields.value) {
     const value = formData.value[field.id]
     if (field.required && !isFilled(value, field)) {
@@ -267,7 +276,7 @@ async function handleSubmit() {
     }
   }
   if (preferences.value.length === 0) {
-    submitError.value = '请至少选择一个意向方向'
+    toast.error('请至少选择一个意向方向')
     return
   }
   if (Object.keys(formErrors.value).length > 0) return
@@ -283,10 +292,8 @@ async function handleSubmit() {
   if (result.kind === 'completed') {
     router.push('/me/ongoing')
   } else if (result.kind === 'rejected') {
-    submitError.value = result.error.message
     toast.error(result.error.message)
   } else {
-    submitError.value = '提交失败，请稍后重试'
     toast.error('提交失败，请稍后重试')
   }
 }
@@ -311,6 +318,15 @@ onUnmounted(() => {
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ activity.title }}</h1>
       <p class="text-sm text-text-secondary mb-6">{{ activity.clubName }} · 报名申请</p>
 
+      <!-- 无报名资格（403）：阻断填写并明确提示，避免静默吞并成"无申请"（Issue-4.0-2） -->
+      <Card v-if="applyDenied" class="mb-4">
+        <div class="flex items-center gap-2 text-danger" role="alert">
+          <AlertTriangle :size="18" />
+          <p class="text-sm font-medium text-text-primary">当前账号无报名资格</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">报名仅面向在校学生开放，如确认符合条件请联系管理员核实账号状态。</p>
+      </Card>
+
       <!-- 非可编辑终态（已提交/身份异常、已归档、其他终态互斥展示）；仅 submitted 可撤销（与联合报名一致） -->
       <Card v-if="isTerminal" class="mb-4">
         <!-- 已提交/身份异常：只读回显本人填写内容，仅 submitted 可撤销 -->
@@ -333,7 +349,20 @@ onUnmounted(() => {
           <div class="mt-4 border-t border-border pt-3 space-y-2.5">
             <p class="text-sm font-medium text-text-primary">您的报名详情</p>
             <div v-for="field in formFields" :key="field.id">
-              <template v-if="answersOf(field.id)">
+              <template v-if="field.type === 'file' || field.type === 'image'">
+                <p v-if="hasAnswerFiles(field.id)" class="text-xs text-text-secondary">{{ field.label }}</p>
+                <div v-if="hasAnswerFiles(field.id)" class="mt-1 space-y-1">
+                  <router-link
+                    v-for="(f, idx) in answerFiles(field.id)"
+                    :key="`${field.id}-${idx}`"
+                    :to="`/files/${f.id}`"
+                    class="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                  >
+                    <FileText :size="14" /> {{ f.name || f.id }}
+                  </router-link>
+                </div>
+              </template>
+              <template v-else-if="answersOf(field.id)">
                 <p class="text-xs text-text-secondary">{{ field.label }}</p>
                 <p class="text-sm text-text-primary whitespace-pre-wrap">{{ answersOf(field.id) }}</p>
               </template>
@@ -426,9 +455,7 @@ onUnmounted(() => {
         <DynamicForm :fields="formFields" v-model="formData" :field-errors="formErrors" />
       </Card>
 
-      <!-- 错误提示 -->
-      <p v-if="submitError && showApplyForm" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
-      <p v-if="savedDraft && showApplyForm" class="text-sm text-success mb-4" role="status">草稿已保存</p>
+      <!-- 错误提示：操作结果反馈统一走 toast（字段级校验由 formErrors 承载） -->
 
       <!-- 操作区（已提交/已归档/终态后隐藏） -->
       <ResponsiveActionRegion v-if="showApplyForm" page-family="form">

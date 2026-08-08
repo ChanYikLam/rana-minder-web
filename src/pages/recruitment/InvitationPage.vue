@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { CheckCircle2, XCircle, Clock, Mail, ArrowLeft } from '@lucide/vue'
 
@@ -18,9 +19,7 @@ const route = useRoute()
 const state = ref<PageState>('loading')
 const detail = ref<InvitationDetail | null>(null)
 const responding = ref(false)
-const respondError = ref<string | null>(null)
 const syncing = ref(false)
-const syncError = ref<string | null>(null)
 
 const isManageView = computed(() => route.meta.view === 'manage')
 
@@ -39,14 +38,18 @@ async function loadDetail() {
 async function handleRespond(action: 'accept' | 'reject') {
   if (!detail.value || responding.value) return
   responding.value = true
-  respondError.value = null
   const result = await post(`/me/invitations/recruitment/${detail.value.id}/respond`, { action })
   responding.value = false
   if (result.kind === 'completed') {
     detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
-    if (action === 'accept') detail.value.casdoorSync = 'processing'
+    if (action === 'accept') {
+      detail.value.casdoorSync = 'processing'
+      toast.success('已接受邀请，等待身份同步生效')
+    } else {
+      toast.success('已拒绝邀请')
+    }
   } else {
-    respondError.value = '操作失败，请稍后重试'
+    toast.error('操作失败，请稍后重试')
   }
 }
 
@@ -54,13 +57,13 @@ async function handleRespond(action: 'accept' | 'reject') {
 async function handleSyncConfirm() {
   if (!detail.value || syncing.value) return
   syncing.value = true
-  syncError.value = null
   const result = await post(`/me/invitations/recruitment/${detail.value.id}/sync-confirm`)
   syncing.value = false
   if (result.kind === 'completed') {
     detail.value.casdoorSync = 'confirmed'
+    toast.success('成员身份已生效')
   } else if (result.kind === 'rejected' && result.error) {
-    syncError.value = (result.error as { message?: string }).message || '确认失败，请稍后重试'
+    toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
   }
 }
 
@@ -121,8 +124,6 @@ onMounted(loadDetail)
           </div>
         </Card>
 
-        <p v-if="respondError" class="text-sm text-danger mb-4" role="alert">{{ respondError }}</p>
-
         <div class="flex gap-3">
           <button
             class="flex-1 h-12 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
@@ -164,7 +165,6 @@ onMounted(loadDetail)
           >
             <CheckCircle2 :size="14" /> {{ syncing ? '确认中...' : '确认生效' }}
           </button>
-          <p v-if="syncError" class="text-xs text-danger mt-2" role="alert">{{ syncError }}</p>
         </div>
         <p v-else-if="detail.casdoorSync === 'confirmed'" class="text-xs text-success mt-2 flex items-center gap-1">
           <CheckCircle2 :size="12" /> 已生效，欢迎加入
