@@ -6,6 +6,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import type { FormField, FileMeta } from '@/types/domain/form'
@@ -21,6 +22,7 @@ interface ReviewItem {
   id: string; applicantId: string; applicantName: string
   departmentName: string; status: string; rating: number | null
   comment: string; concludedAt: string | null; concludedBy: string | null
+  reviewId: string | null; roundName: string; interviewAt: string | null
   myRating: number | null; myComment: string | null
   peerViewLocked: boolean
   reviews: PeerReview[]
@@ -63,6 +65,8 @@ const isApplicant = computed(() => {
 const columns = [
   { key: 'applicantName', label: '申请人' },
   { key: 'departmentName', label: '意向方向' },
+  { key: 'roundName', label: '轮次' },
+  { key: 'interviewAt', label: '面试时间' },
   { key: 'status', label: '状态' },
   { key: 'rating', label: '评分' },
 ]
@@ -81,6 +85,12 @@ async function loadReviews() {
   if (result.kind === 'completed') {
     reviews.value = (result as { kind: 'completed'; data: { items: ReviewItem[] } }).data.items
     state.value = 'normal'
+    // Issue-4.0-1: 支持从任务页带 ?applicantId= 锚定进入，自动选中对应申请人
+    const anchor = typeof route.query.applicantId === 'string' ? route.query.applicantId : null
+    if (anchor) {
+      const target = reviews.value.find((r) => r.applicantId === anchor)
+      if (target) handleRowClick(target)
+    }
   } else {
     state.value = 'error'
   }
@@ -124,8 +134,8 @@ function handleRowClick(row: unknown) {
   const item = row as ReviewItem
   selected.value = item
   selectedId.value = item.id
-  rating.value = 0
-  comment.value = ''
+  rating.value = item.myRating ?? 0
+  comment.value = item.myComment ?? ''
   void loadApplicationDetail(item)
 }
 
@@ -183,13 +193,19 @@ async function handleSubmitReview() {
   submitting.value = true
   const scope = routeScope()
   if (!scope) { submitting.value = false; return }
-  const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/${selected.value.id}/conclude`, {
+  // Issue-4.0-1: 优先使用真实评价主键（reviewId=rev-xxx），无评价记录时回退申请 ID（app-xxx）
+  const reviewId = selected.value.reviewId ?? selected.value.id
+  const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/${reviewId}/conclude`, {
     rating: rating.value,
     comment: comment.value,
   })
   submitting.value = false
   if (result.kind === 'completed') {
     await loadReviews()
+    toast.success('评价已提交')
+  } else {
+    const msg = (result as { error?: { message?: string } }).error?.message
+    toast.error(msg || '评价提交失败，请重试')
   }
 }
 
@@ -242,6 +258,12 @@ onMounted(() => {
         >
           <template #cell-status="{ row }">
             <StateTag :status="(row as ReviewItem).status" />
+          </template>
+          <template #cell-roundName="{ row }">
+            <span class="text-sm text-text-secondary">{{ (row as ReviewItem).roundName || '-' }}</span>
+          </template>
+          <template #cell-interviewAt="{ row }">
+            <span class="text-sm text-text-secondary">{{ formatDateTime((row as ReviewItem).interviewAt) || '-' }}</span>
           </template>
           <template #cell-rating="{ row }">
             <span v-if="(row as ReviewItem).rating" class="flex items-center gap-1">
@@ -394,7 +416,7 @@ onMounted(() => {
                   :disabled="submitting || rating === 0"
                   @click="handleSubmitReview"
                 >
-                  <CheckCircle2 :size="16" /> {{ submitting ? '提交中...' : '提交/更新评价' }}
+                  <CheckCircle2 :size="16" /> {{ submitting ? '提交中...' : '提交评价' }}
                 </button>
               </PermissionGuard>
             </div>
