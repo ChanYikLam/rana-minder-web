@@ -1,4 +1,4 @@
-import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, jointReviewExtras, APPLICANT_PROFILES } from './db-recruitment'
+import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, jointReviewExtras, APPLICANT_PROFILES, resetRecruitmentState } from './db-recruitment'
 import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, exitRequests, transitionState, SEED_RELATIVE_OFFSETS } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
@@ -52,7 +52,11 @@ export function resetRecruitmentDB(): void {
   jointInvitations.splice(0, jointInvitations.length, ...structuredClone(seed.jointInvitations))
   jointSlots.splice(0, jointSlots.length, ...structuredClone(seed.jointSlots))
   jointReviewExtras.splice(0, jointReviewExtras.length, ...structuredClone(seed.jointReviewExtras))
-  Object.keys(APPLICANT_PROFILES).forEach((k) => { if (k.startsWith('u-auto-')) delete APPLICANT_PROFILES[k] })
+  // MRM-013：整体还原申请人档案种子（清除 u-auto-* 动态注册并恢复种子内容），消除 seed.applicantProfiles 死代码
+  Object.keys(APPLICANT_PROFILES).forEach((k) => { delete APPLICANT_PROFILES[k] })
+  Object.assign(APPLICANT_PROFILES, structuredClone(seed.applicantProfiles))
+  // MRM-013：清空运行时累加的面试官任务并还原序号（interviewerTasks / interviewerTaskSeq / autoProfileSeq）
+  resetRecruitmentState()
   resetForms()
 }
 

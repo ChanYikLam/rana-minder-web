@@ -184,6 +184,8 @@ const oidcConfig: OidcSecurityConfig = {
   updatedAt: null,
 }
 
+const oidcConfigSeed: OidcSecurityConfig = { ...oidcConfig }
+
 export function getOidcConfig(): OidcSecurityConfig {
   return { ...oidcConfig }
 }
@@ -323,4 +325,6 @@ export function resetGovernanceState(): void {
   realDataSwitch.updatedBy = null
   realDataSwitch.auditRef = null
   HIGH_RISK_COMMANDS.forEach((c) => { c.enforced = true })
+  // MRM-013：OIDC 安全配置还原（updateOidcConfig 会改写 sessionTtlMinutes/MFA/state+nonce 等，跨用例残留影响安全断言）
+  Object.assign(oidcConfig, structuredClone(oidcConfigSeed))
 }

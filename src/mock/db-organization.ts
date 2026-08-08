@@ -205,18 +205,36 @@ export const clubAccesses: MockClubAccess[] = [
 const seedClubAccesses: MockClubAccess[] = structuredClone(clubAccesses)
 const seedGroups: GroupSeed[] = structuredClone(groups)
 const seedGroupTemplateMappings: GroupTemplateMapping[] = structuredClone(groupTemplateMappings)
+const seedMemberNames: Record<string, string> = { ...memberNames }
 
-/** 测试隔离：恢复接入注册表与 Group 绑定关系的种子快照 */
+/**
+ * 测试隔离：恢复接入注册表、Group 绑定关系、动态成员名、同步失败留痕与序号。
+ * MRM-013：此前仅恢复 clubAccesses / groups 绑定字段 / 模板映射，遗漏——
+ * ① syncPositionMembership 写入的动态成员名（memberNames）；
+ * ② groupSyncFail 累积的失败留痕（groupSyncTraces）与序号；
+ * ③ resolvePositionGroup 运行时新建的职位 Group（grp-pos-*，groups 数组被 push）；
+ * ④ positionGroupSeq / groupSyncTraceSeq 自增序列。
+ * 中断写入用例后重跑会因上述残留导致断言失败。
+ */
 export function resetOrgDb(): void {
   clubAccesses.splice(0, clubAccesses.length, ...structuredClone(seedClubAccesses))
-  for (const g of groups) {
-    const seed = seedGroups.find((s) => s.id === g.id)
-    if (!seed) continue
+  // 删除运行时新建的 Group（seedGroups 之后的元素），再按索引整体还原种子字段
+  groups.splice(seedGroups.length)
+  for (let i = 0; i < seedGroups.length; i++) {
+    const seed = seedGroups[i]
+    const g = groups[i]
     g.boundClubId = seed.boundClubId
     g.leaderGroupId = seed.leaderGroupId
     g.members = [...seed.members]
   }
   groupTemplateMappings.splice(0, groupTemplateMappings.length, ...structuredClone(seedGroupTemplateMappings))
+  // MRM-013：还原动态成员名快照（syncPositionMembership 会写入新条目）
+  Object.keys(memberNames).forEach((k) => { delete memberNames[k] })
+  Object.assign(memberNames, structuredClone(seedMemberNames))
+  // MRM-013：清空同步失败留痕并还原序号，避免跨用例 id 膨胀与留痕残留
+  groupSyncTraces.splice(0, groupSyncTraces.length)
+  positionGroupSeq = 0
+  groupSyncTraceSeq = 0
 }
 
 function findClub(clubId: string): MockClubAccess | undefined {
