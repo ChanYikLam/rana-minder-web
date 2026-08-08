@@ -63,6 +63,7 @@ const commonStubs = {
   Card: { template: '<div class="card"><slot /></div>' },
   Button: { template: '<button><slot /></button>' },
   ResponsiveActionRegion: { template: '<div class="actions"><slot /></div>' },
+  RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] },
 }
 
 describe('ApplicationPage 状态渲染', () => {
@@ -265,7 +266,7 @@ describe('ApplicationPage 状态渲染', () => {
     expect(wrapper.text()).not.toContain('报名表单')
   })
 
-  it('已提交态：image 附件字段只读回显为占位文案，而非 FileMeta 原始 JSON', async () => {
+  it('已提交态：image 附件字段只读回显为可点击的文件名链接，而非 FileMeta 原始 JSON', async () => {
     const imageField = { id: 'img', type: 'image', label: '证件照', description: null, required: false, readonly: false, permission: 'read_write', options: null }
     const imageMeta = { id: 'image-meta-001', name: 'a.jpg', size: 1024, mimeType: 'image/jpeg', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }
     setupGetMocks('submitted', { answers: { f1: '张三', img: [imageMeta] } }, [...mockFormFields, imageField])
@@ -275,10 +276,13 @@ describe('ApplicationPage 状态渲染', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('证件照')
-    expect(wrapper.text()).toContain('已上传附件')
+    // 文件字段渲染为可点击的文件名链接，可跳转 FilePreviewPage 下载（修复：不再只显示“已上传附件”占位文案）
+    expect(wrapper.text()).toContain('a.jpg')
+    expect(wrapper.find('a[href="/files/image-meta-001"]').exists()).toBe(true)
     // 不再把 FileMeta[] 序列化成原始 JSON 展示
+    expect(wrapper.text()).not.toContain('已上传附件')
     expect(wrapper.text()).not.toContain('image-meta-001')
-    expect(wrapper.text()).not.toContain('a.jpg')
+    expect(wrapper.text()).not.toContain('{"id"')
   })
 
   it('草稿态：number 草稿值回填进数字输入框（不再被静默清空）', async () => {

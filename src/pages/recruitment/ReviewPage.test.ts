@@ -20,6 +20,54 @@ const review = {
   myRating: null, myComment: null, peerViewLocked: false, reviews: [],
 }
 
+/** 申请详情响应：含 answers（file 字段含 FileMeta） */
+const applicationDetail = {
+  answers: {
+    f1: '我叫张三',
+    f4: [{ id: 'file-abc', name: '作品集.pdf', size: 1024, mimeType: 'application/pdf', status: 'approved', uploadedAt: '', checkedAt: null, downloadUrl: null }],
+  },
+  preferences: [{ departmentId: 'dept-1', departmentName: '技术部' }],
+  submittedAt: '2026-08-01T10:00:00Z',
+}
+
+/** 按 URL 路由 mock get（ReviewPage 并行发起多个 get） */
+function setupGetRouter(overrides: { reviews?: unknown; application?: unknown; rejectedApplication?: boolean } = {}) {
+  mockGet.mockImplementation((url: string) => {
+    if (url.endsWith('/recruitment/act-1')) {
+      return Promise.resolve({ kind: 'completed', data: { formId: 'form-001' } })
+    }
+    if (url.endsWith('/forms/form-001')) {
+      return Promise.resolve({
+        kind: 'completed',
+        data: {
+          versions: [{
+            fields: [
+              { id: 'f1', type: 'text', label: '自我介绍', required: true, permission: 'read_write', options: null, description: null },
+              { id: 'f4', type: 'file', label: '作品附件', required: false, permission: 'read_write', options: null, description: null },
+            ],
+          }],
+        },
+      })
+    }
+    if (url.endsWith('/reviews')) {
+      return Promise.resolve(overrides.reviews ?? { kind: 'completed', data: { items: [review] } })
+    }
+    if (url.includes('/applications/')) {
+      if (overrides.rejectedApplication) return Promise.resolve({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+      return Promise.resolve(overrides.application ?? { kind: 'completed', data: applicationDetail })
+    }
+    return Promise.resolve({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'unknown' } })
+  })
+}
+
+/** 触发列表行点击，选中申请人 */
+async function clickReviewRow(wrapper: ReturnType<typeof mount>) {
+  // 表头也有 role="row"，需定位 tbody 中的第一行数据
+  const rows = wrapper.findAll('tbody tr[role="row"]')
+  await rows[0].trigger('click')
+  await flushPromises()
+}
+
 describe('ReviewPage 评审页', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -30,7 +78,7 @@ describe('ReviewPage 评审页', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('加载成功：渲染评审列表', async () => {
-    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [review] } })
+    setupGetRouter()
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).toContain('张三')
@@ -38,9 +86,44 @@ describe('ReviewPage 评审页', () => {
   })
 
   it('加载失败：不渲染列表', async () => {
-    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    setupGetRouter({ reviews: { kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } } })
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('张三')
+  })
+
+  it('选中申请人：加载并展示报名表单答案，附件渲染为可点击链接', async () => {
+    setupGetRouter()
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await clickReviewRow(wrapper)
+
+    // 申请详情接口被调用（面试官视角可访问）
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/applications/app-1')
+    // 表单答案展示
+    expect(wrapper.text()).toContain('报名信息')
+    expect(wrapper.text()).toContain('自我介绍')
+    expect(wrapper.text()).toContain('我叫张三')
+    // 文件字段渲染为可点击链接跳转 FilePreviewPage
+    expect(wrapper.text()).toContain('作品附件')
+    expect(wrapper.text()).toContain('作品集.pdf')
+    const link = wrapper.find('a[href="/files/file-abc"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('作品集.pdf')
+    // 不展示 FileMeta 原始 JSON
+    expect(wrapper.text()).not.toContain('{&quot;id&quot;')
+  })
+
+  it('选中申请人但申请详情加载失败：评价流程不受影响', async () => {
+    setupGetRouter({ rejectedApplication: true })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await clickReviewRow(wrapper)
+
+    // 不展示报名信息块，但评价面板仍可渲染
+    expect(wrapper.text()).not.toContain('报名信息')
+    expect(wrapper.text()).toContain('张三')
   })
 })

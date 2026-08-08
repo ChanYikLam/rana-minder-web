@@ -2639,7 +2639,9 @@ response: ({ url }: { url: string }) => {
           name: '报名附件.pdf',
           size: 1024 * (8 + Math.floor(Math.random() * 32)),
           mimeType: 'application/octet-stream',
-          status: 'clean',
+          // 与 FilePreviewPage 下载条件一致（status === 'approved' 才显示下载按钮）；
+          // 与 recruitment-api 注册的 /api/files/:fileId 返回 approved 统一口径
+          status: 'approved',
           uploadedAt: new Date().toISOString(),
           checkedAt: new Date().toISOString(),
           downloadUrl: null,
@@ -2680,7 +2682,8 @@ response: ({ url }: { url: string }) => {
           name,
           size: 1024 * (8 + Math.floor(Math.random() * 32)),
           mimeType: 'application/octet-stream',
-          status: 'clean',
+          // 上传完成后即视为已通过 mock 安全检查，与 FilePreviewPage 下载条件（approved）一致
+          status: 'approved',
           uploadedAt: new Date().toISOString(),
         },
       }
