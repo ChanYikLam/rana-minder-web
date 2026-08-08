@@ -4,7 +4,7 @@ import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
 const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
-const routeState = vi.hoisted(() => ({ value: { path: '/me/corrections', meta: { view: 'self' } } }))
+const routeState = vi.hoisted(() => ({ value: { path: '/me/corrections', meta: { view: 'self' }, params: {} } }))
 vi.mock('vue-router', () => ({
   useRoute: () => routeState.value,
 }))
@@ -103,7 +103,7 @@ describe('CorrectionPage 事实纠错', () => {
     expect(wrapper.findAll('button').some((b) => b.text().includes('批准'))).toBe(true)
     expect(wrapper.findAll('button').some((b) => b.text().includes('拒绝'))).toBe(true)
     wrapper.unmount()
-    routeState.value = { path: '/me/corrections', meta: { view: 'self' } }
+    routeState.value = { path: '/me/corrections', meta: { view: 'self' }, params: {} }
   })
 
   it('overdue 状态：本人视角显示撤回按钮（SM-AUD-001 允许 overdue -> withdraw）', async () => {
