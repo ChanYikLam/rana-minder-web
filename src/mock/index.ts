@@ -1873,6 +1873,7 @@ if (!r.ok) return businessError(r.error || '操作失败')
       // 普通成员自视角：仅返回本人信息、本人退出申请、本人辞职申请（可撤回/可二次确认）
       const selfOnly = !isManager
       const base = db.listMembers(query.clubId)
+      // MRM-006：已退出（含被移除）成员不再出现在任何列表
       const list = (selfOnly ? base.filter((m) => m.id === actor) : base).filter(
         (m) => m.status !== 'exited' && (!scope || m.positions.some((p) => p.departmentName === scope)),
       )
