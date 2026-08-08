@@ -65,6 +65,14 @@ function invokeRawBody(urlPattern: string, method: string, reqUrl: string, rawBo
   }))
 }
 
+/** 通过 /api/auth/reauth 获取当前 mock 用户的重认证 proof（P1-011 高风险命令门禁） */
+async function reauthAs(user: string): Promise<string> {
+  resolveMockUser('/api/auth/session?_mock_user=' + user)
+  const out = await invokeHandler('/api/auth/reauth', 'post', '/api/auth/reauth?_mock_user=' + user, {})
+  expect(out.statusCode).toBe(200)
+  return (out.body.data as unknown as { proof: string }).proof
+}
+
 describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
   beforeEach(() => {
     clearMockSession()
@@ -113,8 +121,9 @@ describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
 
   it('MRM-005：移除成员写入 SM-MEM-001 可达状态 exited，而非非法值 removed', async () => {
     resolveMockUser('/api/auth/session?_mock_user=leader')
+    const proof = await reauthAs('leader')
     const out = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit', {
-      input: { memberId: 'mem-001', reason: '违反社团章程' },
+      input: { memberId: 'mem-001', reason: '违反社团章程', reauthProof: proof },
     })
     expect(out.statusCode).toBe(200)
     const data = out.body.data as { memberId: string; status: string }
@@ -134,8 +143,9 @@ describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
 
   it('审计 P2-2：已退出成员不再出现在退出列表，且重复移除被 422 拒绝', async () => {
     resolveMockUser('/api/auth/session?_mock_user=leader')
+    const proof = await reauthAs('leader')
     const first = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit', {
-      input: { memberId: 'mem-001', reason: '违反社团章程' },
+      input: { memberId: 'mem-001', reason: '违反社团章程', reauthProof: proof },
     })
     expect(first.statusCode).toBe(200)
     const list = await invokeHandler('/api/org/:clubId/members/exit', 'get', '/api/org/club-001/members/exit')
