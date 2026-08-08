@@ -195,6 +195,34 @@ describe('ExportPage 任务列表与轮询', () => {
     wrapper.unmount()
   })
 
+  it('MRM-009：复用进行中任务不重复插入列表（后端复用同 id）', async () => {
+    vi.useFakeTimers()
+    // 列表已有进行中任务 exp-005
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { items: [{ id: 'exp-005', type: '成员名单', status: 'generating', createdAt: '2026-08-07T04:00:00Z', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 }] },
+    })
+    // 创建返回复用同一任务（同 id）——不应重复插入渲染
+    mockPost.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { id: 'exp-005', type: '成员名单', status: 'generating', createdAt: '2026-08-07T04:00:00Z', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 },
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await openCreateConfirm(wrapper)
+    await wrapper.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // 复用任务只在列表渲染一次（'.card' 含安全规则提示卡片，按任务文案过滤计数）
+    const rendered = wrapper.findAll('.card').filter((c) => c.text().includes('成员名单'))
+    expect(rendered).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('创建导出失败：弹窗展示错误信息且不插入任务', async () => {
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
     mockPost.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: '导出服务异常' } })

@@ -17,6 +17,12 @@ class MockServerResponse {
   }
 }
 
+async function reauthAs(user: string): Promise<string> {
+  const out = await invokeHandler('/api/auth/reauth', 'post', `/api/auth/reauth?_mock_user=${user}`)
+  expect(out.statusCode).toBe(200)
+  return (out.body.data as { proof: string }).proof
+}
+
 function invokeHandler(urlPattern: string, method: string, reqUrl: string, body?: unknown): Promise<{ statusCode: number; body: Record<string, unknown> }> {
   const handler = handlers.find((h) => h.url === urlPattern && h.method === method)
   if (!handler?.rawResponse) throw new Error(`handler 未找到: ${method} ${urlPattern}`)
@@ -475,6 +481,54 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     })
     expect(expired.statusCode).toBe(422)
     expect((expired.body as { message: string }).message).toContain('已过期')
+  })
+
+  it('MRM-009：org 下载端点对不存在/未完成任务同样拒绝', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const proof = await reauthAs('leader')
+
+    // 不存在的任务：404（此前同样能拿到下载地址）
+    const notFound = await invokeHandler('/api/org/:clubId/exports/:id/download', 'post', '/api/org/club-001/exports/exp-999/download', {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(notFound.statusCode).toBe(404)
+
+    // 刚创建（generating，进行中）：拒绝下载
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    const taskId = (created.body.data as { id: string }).id
+    const inflight = await invokeHandler('/api/org/:clubId/exports/:id/download', 'post', `/api/org/club-001/exports/${taskId}/download`, {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(inflight.statusCode).toBe(422)
+  })
+
+  it('MRM-009：admin 下载端点对不存在/未完成任务同样拒绝，completed 可下载', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=admin')
+    const proof = await reauthAs('admin')
+
+    // 不存在的平台任务：404（此前任意 id 都返回下载地址）
+    const notFound = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-999/download', {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(notFound.statusCode).toBe(404)
+
+    // 新建平台任务（进行中）：拒绝下载
+    const created = await invokeHandler('/api/admin/exports', 'post', '/api/admin/exports')
+    const taskId = (created.body.data as { id: string }).id
+    const inflight = await invokeHandler('/api/admin/exports/:id/download', 'post', `/api/admin/exports/${taskId}/download`, {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(inflight.statusCode).toBe(422)
+
+    // 种子 completed 平台任务（exp-003，reset 后 expiredAt 为未来）：可下载
+    const ok = await invokeHandler('/api/admin/exports/:id/download', 'post', '/api/admin/exports/exp-003/download', {
+      input: { reason: '合规备案需要下载', reauthProof: proof },
+    })
+    expect(ok.statusCode).toBe(200)
   })
 
   it('MRM-009：reset 后种子 completed 任务 expiredAt 重设为未来——不被 settle 误转 expired、不被 GC 清出', async () => {
