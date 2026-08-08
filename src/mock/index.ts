@@ -3123,7 +3123,7 @@ response: ({ url }: { url: string }) => {
       if (!policy) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '策略不存在' } }
       if (policy.status !== 'draft') return businessError('仅草稿状态可预览')
       const active = retentionPolicies.find((p) => p.scope === policy.scope && p.status === 'active')
-      retentionPreviewVersion += 1
+      // MRM-011：GET 预览保持幂等——版本号仅在数据实际变化（发布成功）时递增，连续 GET 不改变 previewVersion
       return {
         code: 0,
         data: {
@@ -3357,7 +3357,7 @@ response: ({ url }: { url: string }) => {
       const published = templateSeed().find((t) => t.id === template.id)?.permissions ?? []
       const added = template.permissions.filter((p) => !published.includes(p))
       const removed = published.filter((p) => !template.permissions.includes(p))
-      templatePreviewVersion += 1
+      // MRM-011：GET diff 保持幂等——版本号仅在发布成功时递增，连续 GET 不改变 previewVersion
       return {
         code: 0,
         data: {

@@ -133,7 +133,7 @@ describe('保留策略执行器（P1-010 审计闭环）', () => {
     expect(created.statusCode, JSON.stringify(created.body)).toBe(200)
     const policy = created.body.data as { id: string }
 
-    // 预览影响（版本递增）
+    // 预览影响（MRM-011：GET 幂等，返回当前版本号，不自增）
     const proof = await reauth()
     const preview = await invokeHandler(previewPattern, 'get', `${retentionUrl}/${policy.id}/preview`)
     expect(preview.statusCode).toBe(200)
