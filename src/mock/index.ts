@@ -10,6 +10,7 @@ import {
   resetMockDegraded,
   markProfileComplete,
   markEmailVerified,
+  getSchoolProfile,
   type MockUser,
 } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
@@ -832,6 +833,29 @@ const identityHandlers: MockMethod[] = [
       return { code: 0, data: { emailVerified: true } }
     },
   },
+  // 同步冲突清单（sync-conflict 模式）：本地档案 vs 学校侧（Casdoor 权威侧），仅返回不一致字段
+  {
+    url: '/api/auth/profile/sync-conflicts',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const user = resolveMockUser(url)
+      const school = getSchoolProfile(user.id)
+      const labels: Record<string, string> = { name: '姓名', studentId: '学号', email: '邮箱', phone: '手机号' }
+      const conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> = []
+      for (const field of ['name', 'studentId', 'email', 'phone'] as const) {
+        const local = String(user[field] ?? '')
+        const remote = String(school[field] ?? '')
+        if (local !== remote) {
+          conflicts.push({ field, label: labels[field], localValue: local, remoteValue: remote })
+        }
+      }
+      return { code: 0, data: { conflicts, local: { name: user.name, studentId: user.studentId, email: user.email, phone: user.phone } } }
+    },
+  },
   {
     url: '/api/auth/profile/sync-conflict',
     method: 'post',
@@ -841,6 +865,7 @@ const identityHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const field = body.input?.field
+      const chosenValue = body.input?.chosenValue
       if (!field || !['name', 'email', 'phone', 'studentId'].includes(field)) {
         return {
           statusCode: 422,
@@ -851,7 +876,26 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      // 空值或与本地当前值相同的提交不产生实际变更，直接返回当前资料
       const user = resolveMockUser(url)
+      const typedField = field as 'name' | 'email' | 'phone' | 'studentId'
+      const currentValue = String(user[typedField] ?? '')
+      if (typeof chosenValue !== 'string' || chosenValue === '' || chosenValue === currentValue) {
+        return {
+          code: 0,
+          data: {
+            studentId: user.studentId,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
+          },
+        }
+      }
+      // 真正写回本地档案（选择学校侧值时用学校侧值覆盖本地）
+      user[typedField] = chosenValue
+      markProfileComplete(user.id)
       return {
         code: 0,
         data: {

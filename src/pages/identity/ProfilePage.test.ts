@@ -4,8 +4,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost, mockPut } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPut: vi.fn() }))
+const routeMeta = vi.hoisted(() => ({ mode: '' }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: {}, meta: {} }),
+  useRoute: () => ({ params: {}, meta: routeMeta }),
   useRouter: () => ({ push: vi.fn() }),
 }))
 vi.mock('@/services/client', () => ({
@@ -25,6 +26,7 @@ describe('ProfilePage 个人资料', () => {
     mockPost.mockReset()
     mockPut.mockReset()
     vi.clearAllMocks()
+    routeMeta.mode = ''
     // P3-1 新增：ProfilePage 保存/验证后联动刷新会话（useSessionViewStore），需安装 pinia
     setActivePinia(createPinia())
   })
@@ -81,6 +83,31 @@ describe('ProfilePage 个人资料', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('手机号')
     expect(wrapper.text()).not.toContain('身份信息')
+    wrapper.unmount()
+  })
+
+  it('P0-3 sync-conflict 模式：拉取真实资料与冲突清单，不渲染硬编码占位数据', async () => {
+    routeMeta.mode = 'sync-conflict'
+    // 首个 GET（/auth/profile）返回真实资料，第二个 GET（/auth/profile/sync-conflicts）返回真实冲突
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { version: 1, studentId: '20210002', name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002', emailVerified: true, profileComplete: true, syncStatus: { email: 'synced', phone: 'synced' } },
+    })
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { conflicts: [{ field: 'name', label: '姓名', localValue: '张明远', remoteValue: '张铭远' }], local: { name: '张明远', studentId: '20210002', email: 'leader@example.edu.cn', phone: '13800000002' } },
+    })
+    const wrapper = mount(ProfilePage, {
+      global: { stubs: pageStubs },
+    })
+    await flushPromises()
+    expect(mockGet).toHaveBeenCalledWith('/auth/profile')
+    expect(mockGet).toHaveBeenCalledWith('/auth/profile/sync-conflicts')
+    // 渲染真实冲突值而非硬编码占位（陈小明/2024110101）
+    expect(wrapper.text()).toContain('张明远')
+    expect(wrapper.text()).toContain('张铭远')
+    expect(wrapper.text()).not.toContain('陈小明')
+    expect(wrapper.text()).not.toContain('2024110101')
     wrapper.unmount()
   })
 })

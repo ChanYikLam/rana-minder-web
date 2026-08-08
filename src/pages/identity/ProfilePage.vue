@@ -201,38 +201,33 @@ function syncTag(field: string): { label: string; className: string } | null {
 interface ConflictField { field: string; label: string; localValue: string; remoteValue: string; chosen: 'local' | 'remote' }
 const conflictFields = ref<ConflictField[]>([])
 const conflictSubmitting = ref(false)
+const conflictLoading = ref(false)
 
-function buildConflicts(p: Profile) {
-  conflictFields.value = [
-    { field: 'name', label: '姓名', localValue: p.name, remoteValue: p.name + '（学校侧已更新）', chosen: 'remote' },
-    { field: 'studentId', label: '学号', localValue: p.studentId, remoteValue: p.studentId, chosen: 'remote' },
-    { field: 'email', label: '邮箱', localValue: p.email, remoteValue: p.email, chosen: 'local' },
-    { field: 'phone', label: '手机号', localValue: p.phone, remoteValue: p.phone, chosen: 'local' },
-  ]
+async function loadConflicts() {
+  conflictLoading.value = true
+  const result = await get<{ conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> }>('/auth/profile/sync-conflicts')
+  conflictLoading.value = false
+  if (result.kind === 'completed') {
+    conflictFields.value = result.data.conflicts.map((c) => ({ ...c, chosen: 'local' as const }))
+    if (conflictFields.value.length === 0) {
+      toast.success('没有待处理的同步冲突')
+      router.push('/me/profile')
+      return
+    }
+  } else if (result.kind === 'rejected' && result.error) {
+    state.value = 'error'
+    error.value = result.error
+  } else {
+    state.value = 'error'
+    error.value = { code: 'IFC-ERR-016', message: '冲突加载失败' }
+  }
 }
 
-onMounted(() => {
-  if (!isSyncConflict.value) {
-    loadProfile()
-    return
-  }
-  // sync-conflict 模式：展示冲突并引导解决
-  state.value = 'normal'
-  const placeholder: Profile = {
-    studentId: '2024110101', name: '陈小明', email: 'chenxiaoming@stu.gdmu.edu.cn',
-    phone: '13800000000', emailVerified: true, profileComplete: true,
-  }
-  profile.value = placeholder
-  buildConflicts(placeholder)
-})
-
 async function handleResolveConflicts() {
-  if (!profile.value || conflictSubmitting.value) return
+  if (conflictSubmitting.value) return
   conflictSubmitting.value = true
-  const resolved: { field: string; chosenValue: string }[] = []
   for (const f of conflictFields.value) {
     const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
-    resolved.push({ field: f.field, chosenValue })
     const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
     if (r.kind === 'rejected' && r.error) {
       conflictSubmitting.value = false
@@ -241,11 +236,30 @@ async function handleResolveConflicts() {
     }
   }
   conflictSubmitting.value = false
-  profile.value = { ...profile.value }
-  buildConflicts(profile.value)
+  if (profile.value) {
+    profile.value = { ...profile.value }
+  }
+  conflictFields.value = []
   toast.success('冲突已解决')
   router.push('/me/profile')
 }
+
+onMounted(async () => {
+  if (!isSyncConflict.value) {
+    await loadProfile()
+    return
+  }
+  // sync-conflict 模式：先拉取真实本地档案，再请求真实冲突清单
+  const result = await get<Profile>('/auth/profile')
+  if (result.kind === 'completed') {
+    profile.value = result.data
+    state.value = 'normal'
+    await loadConflicts()
+  } else {
+    state.value = 'error'
+    error.value = result.kind === 'rejected' && result.error ? result.error : { code: 'IFC-ERR-016', message: '加载失败' }
+  }
+})
 </script>
 
 <template>
@@ -265,7 +279,11 @@ async function handleResolveConflicts() {
         </div>
         <p class="text-sm text-text-secondary mb-6">本地档案与统一身份认证存在不一致，请选择保留哪一侧的值</p>
 
-        <div class="rounded-lg border border-border bg-elevated mb-4 overflow-hidden">
+        <div v-if="conflictLoading" class="rounded-lg border border-border bg-elevated p-8 text-center text-sm text-text-secondary">
+          正在加载冲突字段...
+        </div>
+
+        <div v-else-if="conflictFields.length > 0" class="rounded-lg border border-border bg-elevated mb-4 overflow-hidden">
           <div class="px-4 py-3 border-b border-border flex items-center gap-2">
             <Scale :size="16" class="text-warning" />
             <span class="text-sm font-medium text-text-primary">冲突字段</span>
@@ -296,7 +314,7 @@ async function handleResolveConflicts() {
           </button>
           <button
             class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
-            :disabled="conflictSubmitting"
+            :disabled="conflictSubmitting || conflictLoading || conflictFields.length === 0"
             @click="handleResolveConflicts"
           >
             {{ conflictSubmitting ? '提交中...' : '解决冲突' }}
