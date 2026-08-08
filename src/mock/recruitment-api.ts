@@ -236,6 +236,45 @@ function result(r: { ok: boolean; error?: string; data?: unknown }) {
   return r.ok ? ok(r.data) : businessError(r.error || '操作不符合业务规则')
 }
 
+/**
+ * 乐观锁冲突（HTTP 409 + IFC-ERR-008）：前端 client.ts 把 expectedVersion 放在
+ * ApiRequest 顶层（body.expectedVersion），unwrap 只取 input；此处从完整 body 读取。
+ * P2-8：有 version 字段的实体编辑操作必须比对 expectedVersion，杜绝并发覆盖。
+ */
+function conflict(expected?: number, actual?: number, currentData?: unknown) {
+  return {
+    statusCode: 409,
+    body: {
+      code: 'IFC-ERR-008',
+      message: expected === undefined
+        ? '数据版本已变化，请刷新后重试'
+        : `数据版本已变化（期望 v${expected}，当前 v${actual}），请刷新后重试`,
+      supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+      currentData,
+    },
+  }
+}
+
+/** 读取 ApiRequest 顶层 expectedVersion（body.input 之外）；未提供时返回 undefined */
+function expectedVersionOf(body: unknown): number | undefined {
+  const b = (body || {}) as { expectedVersion?: number | string; input?: Record<string, unknown> }
+  if (b.expectedVersion !== undefined) return Number(b.expectedVersion)
+  return undefined
+}
+
+/** 乐观锁校验：expectedVersion 存在且与 current 不一致 → 返回 409 信封；一致返回 null */
+function checkVersion(
+  body: unknown,
+  current: number | undefined,
+  currentData?: unknown,
+): ErrorEnvelope | null {
+  const expected = expectedVersionOf(body)
+  if (expected !== undefined && current !== undefined && expected !== current) {
+    return conflict(expected, current, currentData)
+  }
+  return null
+}
+
 /** 查询候选人所用 applicantId */
 function applicantIdOf(url: string, opts?: { clubId?: string; allowAnyRole?: boolean }): string | null {
   return actorApplicantId(resolveMockUser(url), opts)
@@ -465,12 +504,16 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       })
     },
   },
-  // 更新活动
+  // 更新活动（P2-8 乐观锁：expectedVersion 与活动当前 version 比对）
   {
     url: '/api/org/:clubId/recruitment/:activityId',
     method: 'put',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId)) return forbidden()
+      const act = rdb.findAnyActivity(query.activityId)
+      if (!act) return notFound('活动不存在')
+      const ver = checkVersion(body, act.version)
+      if (ver) return ver
       const input = unwrap(body) as unknown as rdb.RecActivity
       const r = rdb.updateActivity(query.activityId, input)
       return result(r)
@@ -739,7 +782,14 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       )
       if (isExistingMember) return businessError('本社团成员无需报名本社团招新')
       const input = unwrap(body) as { answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
-      const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers ?? input.formData ?? input.formAnswers })
+      const expected = expectedVersionOf(body)
+      // P2-8 乐观锁：已有草稿时版本不一致 → 409 + IFC-ERR-008
+      const existing = rdb.findApplication(query.activityId, applicantId)
+      if (existing) {
+        const ver = checkVersion(body, existing.version)
+        if (ver) return ver
+      }
+      const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers ?? input.formData ?? input.formAnswers, expectedVersion: expected })
       if (!r.ok) return businessError(r.error || '保存失败')
       return ok({ activityId: query.activityId, status: 'draft', savedAt: new Date().toISOString(), ...r.data })
     },
@@ -1301,6 +1351,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
             })),
             myRating: myReview?.rating ?? null,
             myComment: myReview?.comment ?? null,
+            myReviewVersion: myReview?.version ?? null,
           }
         })
       return ok({ items, nextCursor: null })
@@ -1342,10 +1393,19 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         .filter((i) => i.activityId === query.activityId && i.applicantId === applicantId && i.status !== 'cancelled')
         .sort((x, y) => ((x.startAt || '').localeCompare(y.startAt || '')))
       const roundId = interviews[interviews.length - 1]?.roundId || null
+      // P2-8 乐观锁：更新已有评价时比对 expectedVersion
+      const existingReview = rdb.recruitmentReviews.find(
+        (r) => r.activityId === query.activityId && r.applicantId === applicantId && r.authorId === me.memberId,
+      )
+      if (existingReview) {
+        const ver = checkVersion(body, existingReview.version)
+        if (ver) return ver
+      }
       const r = rdb.submitReview(query.activityId, app.applicantId, {
         comment: input.comment || '',
         rating: Number(input.rating) || 0,
         authorId: me.memberId || '', authorName: me.name, authorRole: me.role, roundId,
+        expectedVersion: expectedVersionOf(body),
       })
       if (!r.ok) return businessError(r.error || '提交失败')
       return ok({ id: r.data?.id || query.applicantId, status: 'concluded', rating: Number(input.rating) || 0, comment: input.comment || '', concludedAt: new Date().toISOString() })
@@ -1906,9 +1966,16 @@ const jointHandlers: MockMethod[] = [
         )
         if (blocked) return businessError('您已是该社团成员，无需再次志愿')
       }
+      // P2-8 乐观锁：已有草稿时版本不一致 → 409 + IFC-ERR-008
+      const existing = rdb.findJointApplication(query.jointId, applicantId)
+      if (existing) {
+        const ver = checkVersion(body, existing.version)
+        if (ver) return ver
+      }
       const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId, {
         answers: input.answers, volunteerClubIds: input.volunteerClubIds,
         allowJointAdjustment: input.allowJointAdjustment, consented: input.consented, preferences: input.preferences,
+        expectedVersion: expectedVersionOf(body),
       })
       return result(r)
     },
