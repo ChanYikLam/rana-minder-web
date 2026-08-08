@@ -45,4 +45,16 @@ describe('AppointmentPage 任命调岗免职', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('陈雨桐')
   })
+
+  it('precondition_failed 状态：显示取消与重新确认按钮（SM-ORG-003 允许 cancel / reconfirm_new_time）', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { ...appointData, commands: [{ id: 'apc-2', memberName: '王浩然', action: 'appoint', status: 'precondition_failed', scheduledAt: null }] },
+    })
+    const wrapper = mount(AppointmentPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('取消'))).toBe(true)
+    expect(wrapper.findAll('button').some((b) => b.text().includes('重新确认'))).toBe(true)
+    wrapper.unmount()
+  })
 })
