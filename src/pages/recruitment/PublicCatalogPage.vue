@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Search, Users, Calendar, ChevronRight, Building2, Sparkles, Tag, History } from '@lucide/vue'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
@@ -76,7 +77,9 @@ const { seq, schedule, cancel } = useDebouncedSearch({
       clubs.value = []
       activities.value = []
       historyActivities.value = []
-      state.value = 'error'
+      // P2-7：失败按错误码映射，forbidden 走权限错误页
+      const failed = clubsRes.kind === 'completed' ? actRes : clubsRes
+      state.value = errorToPageState(errorCodeOf(failed))
     }
   },
 })

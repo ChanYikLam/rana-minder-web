@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Mail, Send, RefreshCw, XCircle, CheckCircle2, Plus, Users } from '@lucide/vue'
@@ -41,9 +42,7 @@ async function loadInvitations() {
   if (result.kind === 'completed') {
     items.value = result.data.items
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function loadOptions() {

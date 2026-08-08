@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
@@ -92,9 +93,7 @@ async function loadInitial() {
     existingClubs.value = (clubs as { kind: 'completed'; data: { items: ClubAccessItem[] } }).data.items
     schedule('')
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(groups.kind === 'completed' ? clubs : groups)) }
 }
 
 function toSearchResult(g: GroupRow): SearchResult {

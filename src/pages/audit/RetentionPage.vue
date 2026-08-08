@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { PageStateBoundary, Card, HighRiskConfirm } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { identityApi } from '@/services/modules'
@@ -77,7 +78,7 @@ async function loadData() {
     publishReason.value = ''
     reauthProof.value = ''
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function handleCreate() {

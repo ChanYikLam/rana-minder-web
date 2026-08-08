@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { identityApi } from '@/services/modules'
 import { authMode } from '@/services/auth'
 import { toast } from 'vue-sonner'
@@ -96,8 +97,9 @@ async function loadProfile() {
       : 'error'
     error.value = result.error
   } else {
-    state.value = 'error'
-    error.value = { code: 'IFC-ERR-016', message: '加载失败' }
+    // P2-7：非 rejected 失败（external_uncertain/dependency_unavailable/concurrency_conflict）按错误码映射
+    state.value = errorToPageState(errorCodeOf(result))
+    error.value = 'error' in result ? result.error : { code: errorCodeOf(result), message: '加载失败' }
   }
 }
 

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { ArrowLeft, Save, Send, FileWarning, CheckCircle2, AlertTriangle, Archive, FileText } from '@lucide/vue'
@@ -57,9 +58,7 @@ async function loadData() {
     formFields.value = versions[0]?.fields || []
     await loadMyApplication()
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(actRes.kind === 'completed' ? formRes : actRes)) }
 }
 
 const myApplication = ref<MyApplication | null>(null)

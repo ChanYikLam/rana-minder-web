@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import type { FormField } from '@/types/domain/form'
 import type { DynamicFormValue } from '@/components/form/DynamicForm.vue'
@@ -34,9 +35,7 @@ async function loadForm() {
     currentVersion.value = versions.value[0] || null
     formData.value = {}
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function handleSaveDraft() {
