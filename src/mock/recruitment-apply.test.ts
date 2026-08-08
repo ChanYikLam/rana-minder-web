@@ -92,6 +92,15 @@ describe('成员提交报名权限链路（member 身份）', () => {
     expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
   })
 
+  it('member 对本社团招新保存草稿同样被拒绝（422，与 apply 语义一致）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    const out = await invokeHandler('/api/activity/recruitment/:activityId/draft', ownClubUrl, {
+      formData: { f1: '草稿内容' },
+    })
+    expect(out.statusCode).toBe(422)
+    expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
+  })
+
   it('member 报名成功推送通知到其账号（user-member-001）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(applyUrl, otherClubUrl, {
@@ -156,6 +165,16 @@ describe('成员提交报名权限链路（member 身份）', () => {
     expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
   })
 
+  it('管理角色（hr）对自己任职社团保存草稿同样被拒绝（422，与 apply 语义一致）', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    const out = await invokeHandler('/api/activity/recruitment/:activityId/draft', ownClubUrl, {
+      formData: { f1: '草稿内容' },
+    })
+    expect(out.statusCode).toBe(422)
+    expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
+  })
+
   it('面试官（interviewer）报名别的社团招新成功（200），动态注册申请人档案并落库', async () => {
     const INTERVIEWER_KEY = mockUserKeyOf('user-interviewer-001')
     resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
@@ -215,6 +234,28 @@ describe('成员提交报名权限链路（member 身份）', () => {
     const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210003')
     expect(app, 'hr 联合申请未落库').toBeTruthy()
     expect(app!.volunteerClubIds).toEqual(['club-002'])
+  })
+
+  it('管理角色（hr）联合报名不传 volunteerClubIds 时按最终生效志愿集合拦截本社团（422，防绕过）', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft')
+    // 不传 volunteerClubIds：submitJointApplication 会默认志愿全部参与社团（含 club-001）→ 按最终生效集合校验应被拦截
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      answers: {},
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(String(out.body.message)).toContain('您已是该社团成员，无需再次志愿')
+    // 显式仅志愿其他社团（club-002）仍放行（200）
+    const okOut = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-002'],
+      answers: {},
+    })
+    expect(okOut.statusCode, JSON.stringify(okOut.body)).toBe(200)
   })
 
   it('同毫秒注册多个档案 id 不冲突（递增后缀）', () => {

@@ -686,6 +686,13 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       if (!act) return notFound('活动不存在')
       const applicantId = applicantIdOf(url, { clubId: act.clubId })
       if (!applicantId) return forbidden()
+      const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
+      const isExistingMember = db.members.some(
+        (m) => m.clubId === act.clubId
+          && m.studentId === studentId
+          && (m.status === 'active' || m.status === 'pending_effective'),
+      )
+      if (isExistingMember) return businessError('本社团成员无需报名本社团招新')
       const input = unwrap(body) as { answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
       const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers ?? input.formData ?? input.formAnswers })
       if (!r.ok) return businessError(r.error || '保存失败')
@@ -1784,7 +1791,14 @@ const jointHandlers: MockMethod[] = [
       rdb.autoAdvanceJointDeadlines(query.jointId)
       const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown>; preferences?: { departmentId: string; departmentName: string }[] }
       const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
-      const blocked = (input.volunteerClubIds || []).find((vid) =>
+      // 按「最终生效的志愿社团集合」校验：显式传入时用传入值；未传时与 submitJointApplication 语义一致，默认志愿全部参与社团，
+      // 避免不传 volunteerClubIds 时绕过「已是该社团成员」校验把本社团志愿进去
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      const effectiveVolunteerClubIds = input.volunteerClubIds !== undefined
+        ? input.volunteerClubIds
+        : ja.clubs.map((c) => c.clubId)
+      const blocked = effectiveVolunteerClubIds.find((vid) =>
         db.members.some(
           (m) => m.clubId === vid && m.studentId === studentId
             && (m.status === 'active' || m.status === 'pending_effective'),
