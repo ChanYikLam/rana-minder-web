@@ -52,4 +52,17 @@ describe('InvitationManagePage 录取邀请管理', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('张三')
   })
+
+  it('sync_failed 状态：显示“重试同步”按钮（SM-INV-001 sync_failed -> retry）', async () => {
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { items: [{ id: 'inv-2', applicantId: 'app-1', applicantName: '张三', departmentId: 'dept-1', departmentName: '技术部', status: 'sync_failed', sentAt: '2026-08-01T04:00:00Z', acceptedAt: '2026-08-02T04:00:00Z', expiredAt: '2026-08-08T04:00:00Z', version: 1 }] },
+    })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { departments: [{ id: 'dept-1', name: '技术部' }] } })
+    const wrapper = mount(InvitationManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('重试同步'))).toBe(true)
+    wrapper.unmount()
+  })
 })

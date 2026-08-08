@@ -7,7 +7,7 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Mail, Send, RefreshCw, XCircle, CheckCircle2, Plus, Users } from '@lucide/vue'
+import { Mail, Send, RefreshCw, XCircle, Plus, Users } from '@lucide/vue'
 
 interface InvitationRow {
   id: string; applicantId: string; applicantName: string
@@ -33,6 +33,7 @@ const columns = [
   { key: 'departmentName', label: '录取方向' },
   { key: 'status', label: '状态' },
   { key: 'expiredAt', label: '截止' },
+  { key: 'actions', label: '操作' },
 ]
 
 async function loadInvitations() {
@@ -93,7 +94,7 @@ function formatTime(iso: string): string {
 
 const canWithdraw = (status: string) => status === 'pending_acceptance'
 const canReissue = (status: string) => ['rejected', 'withdrawn', 'expired'].includes(status)
-const canSync = (status: string) => status === 'accepted'
+const canSync = (status: string) => status === 'accepted' || status === 'sync_failed'
 
 onMounted(async () => {
   await loadInvitations()
@@ -176,39 +177,45 @@ onMounted(async () => {
         :loading="state === 'loading'"
         empty-title="暂无录取邀请"
       >
-        <template #default="{ row }">
-          <td class="px-3 py-2.5 text-sm">{{ (row as InvitationRow).applicantName }}</td>
-          <td class="px-3 py-2.5 text-sm">{{ (row as InvitationRow).departmentName }}</td>
-          <td class="px-3 py-2.5"><StateTag :status="(row as InvitationRow).status" /></td>
-          <td class="px-3 py-2.5 text-sm text-text-secondary">{{ formatTime((row as InvitationRow).expiredAt) }}</td>
-          <td class="px-3 py-2.5">
-            <div class="flex items-center gap-1.5">
-              <button
-                v-if="canWithdraw((row as InvitationRow).status)"
-                class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
-                :disabled="actionLoading"
-                @click="runAction((row as InvitationRow).id, 'withdraw')"
-              >
-                <XCircle :size="12" /> 撤回
-              </button>
-              <button
-                v-if="canReissue((row as InvitationRow).status)"
-                class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
-                :disabled="actionLoading"
-                @click="runAction((row as InvitationRow).id, 'reissue')"
-              >
-                <RefreshCw :size="12" /> 重发
-              </button>
-              <button
-                v-if="canSync((row as InvitationRow).status)"
-                class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
-                :disabled="actionLoading"
-                @click="runAction((row as InvitationRow).id, 'sync')"
-              >
-                <CheckCircle2 :size="12" /> 同步生效
-              </button>
-            </div>
-          </td>
+        <template #cell-applicantName="{ row }">
+          <span class="text-sm">{{ (row as InvitationRow).applicantName }}</span>
+        </template>
+        <template #cell-departmentName="{ row }">
+          <span class="text-sm">{{ (row as InvitationRow).departmentName }}</span>
+        </template>
+        <template #cell-status="{ row }">
+          <StateTag :status="(row as InvitationRow).status" />
+        </template>
+        <template #cell-expiredAt="{ row }">
+          <span class="text-sm text-text-secondary">{{ formatTime((row as InvitationRow).expiredAt) }}</span>
+        </template>
+        <template #cell-actions="{ row }">
+          <div class="flex items-center gap-1.5">
+            <button
+              v-if="canWithdraw((row as InvitationRow).status)"
+              class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction((row as InvitationRow).id, 'withdraw')"
+            >
+              <XCircle :size="12" /> 撤回
+            </button>
+            <button
+              v-if="canReissue((row as InvitationRow).status)"
+              class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction((row as InvitationRow).id, 'reissue')"
+            >
+              <RefreshCw :size="12" /> 重发
+            </button>
+            <button
+              v-if="canSync((row as InvitationRow).status)"
+              class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction((row as InvitationRow).id, 'sync')"
+            >
+              <RefreshCw :size="12" /> {{ (row as InvitationRow).status === 'sync_failed' ? '重试同步' : '同步生效' }}
+            </button>
+          </div>
         </template>
       </DataTable>
 

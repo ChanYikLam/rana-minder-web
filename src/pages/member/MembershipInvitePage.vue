@@ -326,10 +326,10 @@ onMounted(loadData)
           </div>
 
           <!-- 已接受待回读确认：Casdoor 同步确认 -->
-          <div v-if="!isManageView && inv.status === 'accepted_pending_sync'" class="mt-3">
+          <div v-if="!isManageView && (inv.status === 'accepted_pending_sync' || inv.status === 'sync_failed')" class="mt-3">
             <div class="rounded-lg bg-warning-subtle p-2.5 mb-3 flex items-center gap-2">
               <RefreshCw :size="14" class="text-warning" />
-              <p class="text-xs text-warning">已接受，正在等待成员身份生效确认</p>
+              <p class="text-xs text-warning">{{ inv.status === 'sync_failed' ? '成员同步失败，可点击重新确认生效' : '已接受，正在等待成员身份生效确认' }}</p>
             </div>
             <button class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="handleSyncConfirm(inv)">{{ actingId === inv.id ? '确认中...' : '确认生效' }}</button>
           </div>
