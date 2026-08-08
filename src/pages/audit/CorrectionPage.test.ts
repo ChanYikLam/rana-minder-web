@@ -54,7 +54,6 @@ describe('CorrectionPage 事实纠错', () => {
     mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
     await flushPromises()
-    console.log('mockGet results:', JSON.stringify(mockGet.mock.results.map(r => r.value?.kind ?? r.type)))
     expect(wrapper.text()).not.toContain('状态显示错误')
   })
 

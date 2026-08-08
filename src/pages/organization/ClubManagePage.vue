@@ -39,6 +39,7 @@ const wizardClub = computed<ClubItem | undefined>(() => items.value.find((c) => 
 const groupKeyword = ref('')
 const groupResults = ref<SearchResult[]>([])
 const rawResults = ref<GroupSearchResult[]>([])
+const groupSearchFailed = ref(false)
 const selectedGroup = ref<GroupSearchResult | null>(null)
 const selectedLeaderId = ref<string | null>(null)
 const selectedDeptGroups = ref<string[]>([])
@@ -92,6 +93,7 @@ const { searching: groupSearching, seq: groupSearchSeq, schedule: scheduleGroupS
     if (!kw) {
       groupResults.value = []
       rawResults.value = []
+      groupSearchFailed.value = false
       return
     }
     const mySeq = groupSearchSeq.value
@@ -100,10 +102,12 @@ const { searching: groupSearching, seq: groupSearchSeq, schedule: scheduleGroupS
     if (res.kind === 'completed') {
       rawResults.value = res.data.items
       groupResults.value = res.data.items.map(toSearchResult)
+      groupSearchFailed.value = false
     } else {
       // 搜索失败（非 completed）：清空旧结果并提示，与其余两处保持一致
       rawResults.value = []
       groupResults.value = []
+      groupSearchFailed.value = true
       toast.error('Group 搜索失败，请重试')
     }
   },
@@ -364,7 +368,7 @@ onMounted(loadData)
               @update:model-value="onGroupInput"
               @select="onGroupSelect"
             />
-            <p v-if="groupKeyword.trim() && !groupSearching && groupResults.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的 Group</p>
+            <p v-if="groupKeyword.trim() && !groupSearching && groupResults.length === 0 && !groupSearchFailed" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的 Group</p>
             <p v-if="selectedGroup" class="mt-2 flex items-center gap-1.5 text-xs" :class="wizardBindingWarning.ok ? 'text-success' : 'text-danger'">
               <CheckCircle2 v-if="wizardBindingWarning.ok" :size="14" />
               <Info v-else :size="14" />
