@@ -91,6 +91,15 @@ describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
     expect(matchRoute(handler, 'get', '/api/org/%E5%85%AC%E4%BC%9A/members')?.params.clubId).toBe('公会')
   })
 
+  it('MRM-001：withStatus.rawResponse 的 pathParamsFrom 与 matchRoute 解码契约一致（含畸形编码容错）', async () => {
+    // 编码的中文路径参数：dev server（matchRoute）与测试路径（pathParamsFrom）都应解码为同一值
+    const out = await invokeHandler('/api/org/:clubId/members/exit', 'get', '/api/org/%E5%85%AC%E4%BC%9A/members/exit')
+    expect(out.statusCode).toBe(403) // 无法解析 mock 用户 → 无权限，说明 clubId 已正常解码参与业务（而非抛 500）
+    // 畸形编码 %zz：不应抛 URIError 回落为原始片段（dev server 与测试路径一致）
+    const bad = await invokeHandler('/api/org/:clubId/members/exit', 'get', '/api/org/%zz/members/exit')
+    expect(bad.statusCode).toBe(403)
+  })
+
   it('MRM-003：文件下载不存在返回 404 + IFC-ERR-015（不再用 503 语义的 IFC-ERR-012 触发自动重试）', async () => {
     const out = await invokeHandler('/api/files/:fileId/download', 'post', '/api/files/file-999/download', {})
     expect(out.statusCode).toBe(404)

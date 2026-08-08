@@ -104,6 +104,16 @@ describe('P0-002 录取接受后成员创建桥（SM-MEM 关系模型）', () =>
     expect(members.length).toBe(before)
   })
 
+  it('幂等边界：已有 sync_anomaly（同步异常）成员时显式报错而非静默复用', () => {
+    members.push({ id: 'mem-anm-1', clubId: 'club-001', studentId: '20240055', name: '同步异常', email: 'x@example.edu.cn', phone: '13800000000', status: 'sync_anomaly', joinedAt: '2024-09-01T00:00:00+08:00', exitedAt: null, positions: [], tenures: [], departmentHistory: [], anomalies: [] })
+    const before = members.length
+    const result = createMemberFromAdmission('club-001', { studentId: '20240055', name: '同步异常', departmentId: null, departmentName: null, acceptedAt: new Date().toISOString() })
+    expect(result.ok).toBe(false)
+    expect(result.created).toBe(false)
+    expect(result.error).toContain('同步异常')
+    expect(members.length).toBe(before)
+  })
+
   it('普通招新确认：成员创建失败时 casdoorSync 保持 processing 且可重试，不产生「已确认但无成员」中间态', () => {
     const accepted = respondRecInvitation('rinv-001', 'accept', 'u-002')
     expect(accepted.ok).toBe(true)

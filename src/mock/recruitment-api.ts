@@ -59,7 +59,15 @@ function pathParamsFrom(pathname: string, pattern: string): Record<string, strin
   const pattSegs = pattern.split('/').filter(Boolean)
   const out: Record<string, string> = {}
   pattSegs.forEach((s, i) => {
-    if (s.startsWith(':')) out[s.slice(1)] = pathSegs[i] ?? ''
+    if (s.startsWith(':')) {
+      const raw = pathSegs[i] ?? ''
+      // 与 mock-plugin.matchRoute 的解码契约保持一致：畸形百分号编码（如 %zz）不抛错，回落原始片段
+      try {
+        out[s.slice(1)] = decodeURIComponent(raw)
+      } catch {
+        out[s.slice(1)] = raw
+      }
+    }
   })
   return out
 }

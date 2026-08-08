@@ -133,10 +133,10 @@ watch([keyword, deptFilter, titleFilter, statusFilter], () => { page.value = 1 }
 
 const statusOptions: FilterOption[] = [
   { value: 'active', label: '活跃' },
-  { value: 'pending_casdor_sync', label: '关系同步中' },
-  { value: 'suspended', label: '已暂停' },
+  { value: 'pending_casdoor_sync', label: '关系同步中' },
   { value: 'exiting', label: '退出中' },
   { value: 'exited', label: '已退出' },
+  { value: 'sync_anomaly', label: '同步异常' },
 ]
 
 const filterFields = computed<FilterField[]>(() => {
