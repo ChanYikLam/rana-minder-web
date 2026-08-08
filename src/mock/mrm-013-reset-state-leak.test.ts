@@ -14,6 +14,7 @@ import {
   listGroups,
   clubAccesses,
 } from './db-organization'
+import { cloneForm, listForms } from './db-forms'
 import { resetRecruitmentDB, resetOrgDb } from './reset'
 
 /**
@@ -83,5 +84,26 @@ describe('MRM-013 reset 补齐模块级可变状态重置（回归）', () => {
     expect(again.ok && again.groupId).toBe('grp-pos-1')
     // reset 前 groups 已被截断回种子（无 grp-pos-* 残留），重建后仅比种子多 1
     expect(listGroups().length).toBe(before + 1)
+  })
+
+  it('forms 域：克隆序号（formSeq）随 resetRecruitmentDB 归位，克隆 id 不膨胀', () => {
+    // —— 污染阶段 ——
+    const f1 = cloneForm('form-001', '招新报名表 2026')
+    const f2 = cloneForm('form-001', '招新报名表 2027')
+    expect(f1.ok && f2.ok).toBe(true)
+    // reset 前克隆 id 携带递增序号（formSeq=1、2）
+    expect(f1.ok && f1.data.id).toMatch(/.+1$/)
+    expect(f2.ok && f2.data.id).toMatch(/.+2$/)
+
+    // —— reset 后（模拟重跑）——
+    resetRecruitmentDB()
+
+    // 克隆出的草稿被还原（formDefinitions 回到种子）
+    const club = listForms('club-001')
+    expect(club.ok).toBe(true)
+    expect(club.ok && club.data.items.some((i) => i.id === (f1.ok ? f1.data!.id : ''))).toBe(false)
+    // 序号归位：重跑首个克隆 id 的序号回到 1，而非继续膨胀到 3+
+    const again = cloneForm('form-001', '招新报名表 2028')
+    expect(again.ok && again.data.id).toMatch(/.+1$/)
   })
 })

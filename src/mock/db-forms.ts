@@ -383,6 +383,8 @@ export function resetForms(): void {
   const seed = structuredClone(formDefinitionsSeed)
   formDefinitions.splice(0, formDefinitions.length, ...seed)
   formSubmissions.splice(0, formSubmissions.length)
+  // MRM-013：表单克隆序号归位（cloneForm 会递增 formSeq，跨用例残留导致 id 膨胀）
+  formSeq = 0
 }
 
 const formDefinitionsSeed = structuredClone(formDefinitions)
