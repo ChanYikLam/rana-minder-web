@@ -34,10 +34,13 @@ describe('ADMIN_PERMISSIONS', () => {
 })
 
 describe('workspacePermissionForRoute', () => {
-  it('maps member routes to club:member:manage', () => {
-    expect(workspacePermissionForRoute('P-MEM-list')).toBe('club:member:manage')
+  it('maps member list/detail to manage or view-self (ordinary members can browse)', () => {
+    expect(workspacePermissionForRoute('P-MEM-list')).toEqual(['club:member:manage', 'club:member:view-self'])
+    expect(workspacePermissionForRoute('P-MEM-01')).toEqual(['club:member:manage', 'club:member:view-self'])
+  })
+
+  it('maps department-apply route to club:member:manage only', () => {
     expect(workspacePermissionForRoute('P-MEM-02')).toBe('club:member:manage')
-    expect(workspacePermissionForRoute('P-MEM-01')).toBe('club:member:manage')
   })
 
   it('maps exit route to member:manage or view-self (self-exit accessible to ordinary members)', () => {

@@ -181,7 +181,7 @@ const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="成员管理" :error="pageError" @retry="loadData">
+  <PageStateBoundary :state="state" :title="canManage ? '成员管理' : '组织成员'" :error="pageError" @retry="loadData">
     <template #loading>
       <div class="max-w-5xl mx-auto space-y-4" role="status" aria-live="polite">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -197,8 +197,11 @@ const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt
       <!-- 标题 + 快捷操作 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-text-primary">成员管理</h1>
-          <p class="text-sm text-text-secondary mt-1">当前关系来自 Casdoor Group；本系统记录任期、异动与审批历史。</p>
+          <h1 class="text-2xl font-bold text-text-primary">{{ canManage ? '成员管理' : '组织成员' }}</h1>
+          <p class="text-sm text-text-secondary mt-1">
+            <template v-if="canManage">当前关系来自 Casdoor Group；本系统记录任期、异动与审批历史。</template>
+            <template v-else>本社团成员与在任职位，仅供查看。</template>
+          </p>
         </div>
         <div v-if="canManage" class="flex flex-wrap gap-2">
           <PermissionGuard permission="club:appointment:manage" scope="workspace">

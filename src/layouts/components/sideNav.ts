@@ -52,7 +52,7 @@ export function buildClubGroups(clubId: string, canAccess: (p?: string, permissi
     {
       label: '成员与组织', icon: Building2, prefix: `${base}/members`,
       items: [
-        { label: '成员列表', path: `${base}/members`, permission: 'club:member:manage' },
+        { label: '成员列表', path: `${base}/members`, permissionAny: ['club:member:manage', 'club:member:view-self'] },
         { label: '部门关系申请', path: `${base}/members/department-apply`, permission: 'club:member:manage' },
         { label: '常规入社邀请', path: `${base}/members/invite`, permission: 'club:invite:manage' },
         { label: '任命调岗免职', path: `${base}/members/appointments`, permission: 'club:appointment:manage' },
