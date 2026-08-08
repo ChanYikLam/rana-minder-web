@@ -284,6 +284,9 @@ const retentionPolicies: RetentionPolicy[] = [
 const retentionPoliciesSeed: RetentionPolicy[] = structuredClone(retentionPolicies)
 let retentionPreviewVersion = 1
 
+/** MRM-012：正式删除影响预览版本号（删除预览返回、执行时校验、成功后递增；消除硬编码魔法数 4） */
+let deletePreviewVersion = 1
+
 /**
  * 保留策略执行器（P1-010：策略不再是静态数据，具备真实执行语义 + 审计日志写入）。
  * retentionSubjects 模拟受策略约束的数据对象（按 scope 与已存续天数匹配策略）；
@@ -438,6 +441,8 @@ const sharedStateSeed = {
   platformConfig: structuredClone(platformConfig),
   platformConfigVersion,
   templatePreviewVersion,
+  // MRM-012：正式删除预览版本号（删除执行成功后递增，需随平台域重置还原）
+  deletePreviewVersion,
 } as const
 
 /** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号 /
@@ -465,6 +470,8 @@ export function resetSharedState(): void {
   Object.assign(platformConfig, structuredClone(sharedStateSeed.platformConfig))
   platformConfigVersion = sharedStateSeed.platformConfigVersion
   templatePreviewVersion = sharedStateSeed.templatePreviewVersion
+  // MRM-012：正式删除预览版本号还原（删除执行成功后会递增，避免跨用例残留）
+  deletePreviewVersion = sharedStateSeed.deletePreviewVersion
   // MRM-010：权限模板数组还原（发布/保存/diff 会改写模板状态与 previewVersion）
   permissionTemplates.splice(0, permissionTemplates.length, ...structuredClone(permissionTemplatesSeed))
   // MRM-010：保留策略数组/previewVersion/执行记录还原（新建草稿与发布会改写）
@@ -2970,6 +2977,8 @@ response: ({ url }: { url: string }) => {
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       if (!isPlatformAdmin(url)) return forbidden()
+      // MRM-012：previewVersion 改为动态返回（不再硬编码 4），版本号仅在删除执行成功后递增；
+      // GET 预览保持幂等，连续读取不改变版本号
       return {
         code: 0,
         data: {
@@ -2979,7 +2988,7 @@ response: ({ url }: { url: string }) => {
             { id: 'act-003', label: '2025 春季补录', type: '活动', recordCount: 3, memberCount: 0 },
           ],
           totalRecords: 15, totalMembers: 5, warning: '删除后不可恢复，相关数据将被永久清除',
-          previewVersion: 4,
+          previewVersion: deletePreviewVersion,
         },
       }
     },
@@ -3129,7 +3138,8 @@ response: ({ url }: { url: string }) => {
       if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
-      if (body.input?.previewVersion !== 4) {
+      // MRM-012：删除执行校验动态 previewVersion（消除硬编码魔法数 4），与删除预览返回的版本号比对
+      if (body.input?.previewVersion !== deletePreviewVersion) {
         return { statusCode: 409, body: { code: 'IFC-ERR-008', message: '删除影响预览已变化' } }
       }
       if (!body.input?.reason?.trim()) {
@@ -3138,6 +3148,8 @@ response: ({ url }: { url: string }) => {
       if ((body.input?.targetIds || []).includes('club-004')) {
         return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '目标仍存在活跃关系' } }
       }
+      // MRM-012：删除数据实际变化（执行成功）后递增预览版本号，使下一次删除必须重新获取预览
+      deletePreviewVersion += 1
       return {
         code: 0,
         data: {
