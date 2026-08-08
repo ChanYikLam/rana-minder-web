@@ -17,9 +17,9 @@ class MockServerResponse {
 }
 
 /** 复用真实分发路径（withStatus.rawResponse）：url + 最小 req/res 替身 */
-function invokeHandler(urlPattern: string, reqUrl: string): Promise<{ statusCode: number; body: Record<string, unknown> }> {
-  const handler = recruitmentApiHandlers.find((h) => h.url === urlPattern && h.method === 'post')
-  if (!handler?.rawResponse) throw new Error(`handler 未找到: ${urlPattern}`)
+function invokeHandler(urlPattern: string, reqUrl: string, method = 'post'): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+  const handler = recruitmentApiHandlers.find((h) => h.url === urlPattern && h.method === method)
+  if (!handler?.rawResponse) throw new Error(`handler 未找到: ${urlPattern} ${method}`)
   const req = {
     url: reqUrl,
     headers: {},
@@ -120,5 +120,38 @@ describe('面试官提交评价（conclude）权限链路', () => {
     expect(out.statusCode, JSON.stringify(out.body)).toBe(403)
     // 关键守卫：403 时评价不得以面试官本人 memberId 落库
     expect(rdb.recruitmentReviews.some((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === 'u-003' && r.authorId === INTERVIEWER_MEMBER_ID)).toBe(false)
+  })
+})
+
+// ================= 申请详情接口（面试官查看附件/表单答案，bug #83 修复） =================
+
+const appDetailUrl = '/api/org/:clubId/recruitment/:activityId/applications/:applicantId'
+const appDetailPlainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/applications/u-002`
+
+describe('申请详情接口（面试官视角查看表单答案与附件）', () => {
+  beforeEach(() => {
+    clearMockSession()
+  })
+
+  it('面试官可访问申请详情接口（200，不再被 403 拦截），且返回 answers', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
+    const out = await invokeHandler(appDetailUrl, appDetailPlainUrl, 'get')
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(out.body.code).toBe(0)
+    expect((out.body.data as Record<string, unknown>)?.applicantId).toBe('u-002')
+    expect((out.body.data as Record<string, unknown>)?.answers).toBeDefined()
+  })
+
+  it('管理角色（club:recruitment:manage）访问申请详情接口仍正常（200）', async () => {
+    const leaderKey = mockUserKeyOf('user-leader-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${leaderKey}`)
+    const out = await invokeHandler(appDetailUrl, appDetailPlainUrl, 'get')
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+  })
+
+  it('无面试权限的普通成员访问申请详情接口仍被 403（权限边界未放松）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    const out = await invokeHandler(appDetailUrl, appDetailPlainUrl, 'get')
+    expect(out.statusCode).toBe(403)
   })
 })
