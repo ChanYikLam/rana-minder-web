@@ -5,14 +5,14 @@ import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/compo
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
-import { ArrowLeft, Save, Send, FileWarning, CheckCircle2, AlertTriangle, Archive } from '@lucide/vue'
+import { ArrowLeft, Save, Send, FileWarning, CheckCircle2, AlertTriangle, Archive, FileText } from '@lucide/vue'
 import { applicationStatusLabel, isEditableStatus, terminalStatusHint } from '@/lib/recruitment-status'
 import DynamicForm from '@/components/form/DynamicForm.vue'
 import ObjectPicker from '@/components/form/ObjectPicker.vue'
 import type { PickerGroup } from '@/components/form/ObjectPicker.vue'
 import PreferenceSorter from '@/components/form/PreferenceSorter.vue'
 import type { PreferenceEntry } from '@/components/form/PreferenceSorter.vue'
-import type { FormField } from '@/types/domain/form'
+import type { FormField, FileMeta } from '@/types/domain/form'
 import { fileBlockingError, isFieldFilled, restoredFieldValue, restoredFileMeta as restoredFileMetaFromLib, draftSafeFileMeta } from '@/lib/formFile'
 
 interface ActivityDetail { id: string; title: string; clubName: string; deadline: string; departments: { id: string; name: string }[]; formId: string; allowAdjustmentDefault?: boolean }
@@ -89,8 +89,19 @@ function answersOf(fieldId: string): string {
   const v = myApplication.value?.answers?.[fieldId]
   if (v == null || v === '') return ''
   const field = formFields.value.find((f) => f.id === fieldId)
-  if (field?.type === 'file' || field?.type === 'image') return '已上传附件'
+  if (field?.type === 'file' || field?.type === 'image') return ''
   return renderAnswerValue(v)
+}
+
+/** 文件字段的 FileMeta 列表（兼容 fileId 字符串 / FileMeta[] 两种历史形态） */
+function answerFiles(fieldId: string): FileMeta[] {
+  const v = myApplication.value?.answers?.[fieldId]
+  return restoredFileMetaFromLib(v)
+}
+
+/** 文件字段是否非空 */
+function hasAnswerFiles(fieldId: string): boolean {
+  return answerFiles(fieldId).length > 0
 }
 
 function formatDateTime(iso?: string | null): string {
@@ -333,7 +344,20 @@ onUnmounted(() => {
           <div class="mt-4 border-t border-border pt-3 space-y-2.5">
             <p class="text-sm font-medium text-text-primary">您的报名详情</p>
             <div v-for="field in formFields" :key="field.id">
-              <template v-if="answersOf(field.id)">
+              <template v-if="field.type === 'file' || field.type === 'image'">
+                <p v-if="hasAnswerFiles(field.id)" class="text-xs text-text-secondary">{{ field.label }}</p>
+                <div v-if="hasAnswerFiles(field.id)" class="mt-1 space-y-1">
+                  <router-link
+                    v-for="(f, idx) in answerFiles(field.id)"
+                    :key="`${field.id}-${idx}`"
+                    :to="`/files/${f.id}`"
+                    class="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                  >
+                    <FileText :size="14" /> {{ f.name || f.id }}
+                  </router-link>
+                </div>
+              </template>
+              <template v-else-if="answersOf(field.id)">
                 <p class="text-xs text-text-secondary">{{ field.label }}</p>
                 <p class="text-sm text-text-primary whitespace-pre-wrap">{{ answersOf(field.id) }}</p>
               </template>

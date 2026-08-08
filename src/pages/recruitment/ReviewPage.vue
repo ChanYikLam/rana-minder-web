@@ -8,7 +8,9 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
-import { Star, Send, CheckCircle2, Lock, EyeOff } from '@lucide/vue'
+import type { FormField, FileMeta } from '@/types/domain/form'
+import { restoredFileMeta } from '@/lib/formFile'
+import { Star, Send, CheckCircle2, Lock, EyeOff, FileText } from '@lucide/vue'
 
 interface PeerReview {
   authorName: string; authorRole: string; comment: string
@@ -37,6 +39,16 @@ const publishSucceeded = ref(false)
 const publishError = ref('')
 
 const selected = ref<ReviewItem | null>(null)
+
+// 申请表单答案（面试官视角）：选中申请人后加载申请详情接口的 answers，文件字段渲染为可点击链接
+interface ApplicationDetail {
+  answers?: Record<string, unknown>
+  preferences?: { departmentId: string; departmentName: string }[]
+  submittedAt?: string | null
+}
+const application = ref<ApplicationDetail | null>(null)
+const formFields = ref<FormField[]>([])
+const applicationLoading = ref(false)
 
 // REC-014: 首评前隔离 - 首次提交本人评价前，不得查看同轮其他面试官评价（服务端强制）
 const evaluationIsolated = computed(() => {
@@ -74,12 +86,96 @@ async function loadReviews() {
   }
 }
 
+/** 加载活动报名表单定义（用于渲染 answers 的字段标签） */
+async function loadFormSchema() {
+  const scope = routeScope()
+  if (!scope) return
+  try {
+    const actRes = await get<{ formId?: string }>(`/org/${scope.clubId}/recruitment/${scope.activityId}`)
+    if (actRes.kind !== 'completed' || !actRes.data.formId) return
+    const formRes = await get<{ versions: { fields: FormField[] }[] }>(`/org/${scope.clubId}/forms/${actRes.data.formId}`)
+    if (formRes.kind === 'completed') {
+      formFields.value = formRes.data.versions?.[0]?.fields || []
+    }
+  } catch {
+    // 表单定义加载失败不影响评价流程
+  }
+}
+
+/** 选中申请人：加载申请详情（表单答案 + 附件 fileId） */
+async function loadApplicationDetail(item: ReviewItem) {
+  const scope = routeScope()
+  if (!scope) return
+  applicationLoading.value = true
+  application.value = null
+  try {
+    const result = await get<ApplicationDetail>(`/org/${scope.clubId}/recruitment/${scope.activityId}/applications/${item.applicantId}`)
+    if (result.kind === 'completed') {
+      application.value = result.data
+    }
+  } catch {
+    // 申请详情加载失败不影响评价流程
+  } finally {
+    applicationLoading.value = false
+  }
+}
+
 function handleRowClick(row: unknown) {
   const item = row as ReviewItem
   selected.value = item
   selectedId.value = item.id
   rating.value = 0
   comment.value = ''
+  void loadApplicationDetail(item)
+}
+
+/** 渲染非文件表单答案 */
+function renderAnswerValue(v: unknown): string {
+  if (v == null || v === '') return ''
+  if (Array.isArray(v)) return v.map(renderAnswerValue).filter(Boolean).join('、')
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+/** 取文件字段的 FileMeta 列表（兼容 fileId 字符串 / FileMeta[] 两种历史形态） */
+function answerFiles(value: unknown): FileMeta[] {
+  return restoredFileMeta(value)
+}
+
+/** 文件字段是否非空 */
+function hasAnswerFiles(fieldId: string): boolean {
+  const v = application.value?.answers?.[fieldId]
+  return answerFiles(v).length > 0
+}
+
+/** 非文件字段答案文案 */
+function answerText(fieldId: string): string {
+  const v = application.value?.answers?.[fieldId]
+  if (v == null || v === '') return ''
+  const field = formFields.value.find((f) => f.id === fieldId)
+  if (field?.type === 'file' || field?.type === 'image') return ''
+  return renderAnswerValue(v)
+}
+
+/** 是否存在任一可见表单答案（文件字段以附件非空为准） */
+const hasApplicationAnswers = computed(() => {
+  if (!application.value?.answers) return false
+  for (const field of formFields.value) {
+    const v = application.value.answers[field.id]
+    if (field.type === 'file' || field.type === 'image') {
+      if (answerFiles(v).length > 0) return true
+    } else if (v != null && v !== '') {
+      return true
+    }
+  }
+  return (application.value.preferences?.length ?? 0) > 0 || !!application.value.submittedAt
+})
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 async function handleSubmitReview() {
@@ -113,7 +209,10 @@ async function handlePublishAll() {
   }
 }
 
-onMounted(loadReviews)
+onMounted(() => {
+  void loadReviews()
+  void loadFormSchema()
+})
 </script>
 
 <template>
@@ -157,6 +256,41 @@ onMounted(loadReviews)
           <div class="mb-4">
             <h2 class="text-base font-medium text-text-primary">{{ selected.applicantName }}</h2>
             <p class="text-sm text-text-secondary">意向：{{ selected.departmentName }}</p>
+          </div>
+
+          <!-- 申请表单答案与附件（面试官视角；REC 附件查看修复） -->
+          <div v-if="applicationLoading" class="mb-4 rounded-lg bg-muted p-3">
+            <p class="text-sm text-text-secondary">加载报名信息中...</p>
+          </div>
+          <div v-else-if="application && hasApplicationAnswers" class="mb-4 rounded-lg border border-border bg-elevated p-3 space-y-2.5">
+            <p class="text-sm font-medium text-text-primary">报名信息</p>
+            <div v-for="field in formFields" :key="field.id">
+              <template v-if="field.type === 'file' || field.type === 'image'">
+                <p v-if="hasAnswerFiles(field.id)" class="text-xs text-text-secondary">{{ field.label }}</p>
+                <div v-if="hasAnswerFiles(field.id)" class="mt-1 space-y-1">
+                  <router-link
+                    v-for="(f, idx) in answerFiles(application.answers?.[field.id])"
+                    :key="`${field.id}-${idx}`"
+                    :to="`/files/${f.id}`"
+                    class="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                  >
+                    <FileText :size="14" /> {{ f.name || f.id }}
+                  </router-link>
+                </div>
+              </template>
+              <template v-else-if="answerText(field.id)">
+                <p class="text-xs text-text-secondary">{{ field.label }}</p>
+                <p class="text-sm text-text-primary whitespace-pre-wrap">{{ answerText(field.id) }}</p>
+              </template>
+            </div>
+            <div v-if="application.preferences?.length">
+              <p class="text-xs text-text-secondary">意向方向（按优先级）</p>
+              <p class="text-sm text-text-primary">{{ application.preferences.map((p, i) => `${i + 1}. ${p.departmentName}`).join('、') }}</p>
+            </div>
+            <div v-if="application.submittedAt">
+              <p class="text-xs text-text-secondary">提交时间</p>
+              <p class="text-sm text-text-primary">{{ formatDateTime(application.submittedAt) }}</p>
+            </div>
           </div>
 
           <!-- REC-015: 申请人不可查看内部评分、评语或讨论 -->
