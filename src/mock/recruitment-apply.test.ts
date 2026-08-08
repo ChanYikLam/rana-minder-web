@@ -154,6 +154,32 @@ describe('成员提交报名权限链路（member 身份）', () => {
     expect(app!.applicantName).toBe('李思颖')
   })
 
+  it('管理角色（hr）报名非任职且无成员身份的社团（club-003）成功（200），验证“跨社团 = 非本社团成员”边界', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    // 动态创建 club-003（羽毛球协会）的招新活动：hr 在 club-001 任职/是成员，与 club-003 无任何成员关系
+    const created = rdb.createActivity('club-003', '羽毛球协会', {
+      title: '羽毛球协会招新',
+      departments: [{ id: 'dept-201', name: '训练部' }],
+    })
+    expect(created.ok, JSON.stringify(created)).toBe(true)
+    const act = created.data!
+    expect(rdb.publishActivity(act.id).ok).toBe(true)
+    act.channelStatus = 'open'
+    const club003Url = `/api/activity/recruitment/${act.id}/apply`
+
+    const out = await invokeHandler(applyUrl, club003Url, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-201' }],
+      allowAdjustment: true,
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.recruitmentApplications.find((a) => a.activityId === act.id && a.studentId === '20210003')
+    expect(app, 'hr 报名 club-003 未落库').toBeTruthy()
+    expect(app!.clubId).toBe('club-003')
+    expect(app!.applicantId.startsWith('u-auto-')).toBe(true)
+  })
+
   it('管理角色（hr）报名自己任职社团被业务规则拒绝（422，非 403）', async () => {
     const HR_KEY = mockUserKeyOf('user-hr-001')
     resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
