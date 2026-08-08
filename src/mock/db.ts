@@ -508,6 +508,21 @@ export const exitRequests: MockExitRequest[] = [
   },
 ]
 
+/** 种子相对时间偏移（#78 遗留）：resetDb 恢复快照时按当前时钟重算 dueAt/expiredAt/scheduledAt，
+ * 避免模块加载固化绝对时间导致跨天/跨周运行时 overdue 派生漂移、用例脆弱。
+ * 仅登记成员生命周期相关种子的相对时间字段；运行期新建记录走各自 daysFromNow 逻辑。 */
+export const SEED_RELATIVE_OFFSETS: Record<string, { field: 'dueAt' | 'expiredAt' | 'scheduledAt'; days: number }> = {
+  'dap-001': { field: 'dueAt', days: 1 },
+  'dap-002': { field: 'dueAt', days: -1 },
+  'minv-001': { field: 'expiredAt', days: 5 },
+  'minv-002': { field: 'expiredAt', days: -2 },
+  'apc-002': { field: 'scheduledAt', days: 2 },
+  'res-001': { field: 'dueAt', days: 2 },
+  'res-002': { field: 'dueAt', days: -1 },
+  'exit-req-001': { field: 'dueAt', days: 1 },
+  'exit-req-002': { field: 'dueAt', days: -1 },
+}
+
 export interface TransitionCandidate {
   memberId: string
   name: string
