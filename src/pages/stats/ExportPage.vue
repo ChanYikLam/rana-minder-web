@@ -13,7 +13,7 @@ import { formatSize, formatTime } from '@/lib/exportFormat'
 import { openAuthorizedDownload } from '@/services/download'
 import { toast } from 'vue-sonner'
 
-interface ExportTask { id: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number }
+interface ExportTask { id: string; type: string; status: 'generating' | 'processing' | 'completed' | 'failed' | 'expired'; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -53,11 +53,15 @@ async function loadData() {
 
 function startPolling(taskId: string, prefix: string) {
   const poll = async () => {
-    const r = await get<{ status: string; downloadUrl: string | null; fileSize: number; completedAt: string | null; expiredAt: string | null }>(`${prefix}/exports/${taskId}/status`)
+    const r = await get<{ status: ExportTask['status']; downloadUrl: string | null; fileSize: number; completedAt: string | null; expiredAt: string | null }>(`${prefix}/exports/${taskId}/status`)
     if (r.kind === 'completed') {
       const data = r.data
       const idx = items.value.findIndex((t) => t.id === taskId)
-      if (idx === -1) return
+      if (idx === -1) {
+        // MRM-009：列表里已不存在（被 GC）→ 立刻停止轮询，避免无主定时器
+        stopPolling(taskId)
+        return
+      }
       items.value[idx] = { ...items.value[idx], ...data }
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'expired') {
         stopPolling(taskId)
@@ -65,9 +69,15 @@ function startPolling(taskId: string, prefix: string) {
           toast.success('导出已生成完成，可点击下载')
         } else if (data.status === 'failed') {
           toast.error('导出失败，请稍后重试')
+        } else if (data.status === 'expired') {
+          toast.info('导出已过期')
         }
       }
+      return
     }
+    // MRM-009：状态接口被拒绝/404/网络错误统一停止轮询，避免 setInterval 永不收敛形成"无主定时器"
+    // 业务错误码 404（任务已被 GC）/ 401（会话失效）也属于此分支
+    stopPolling(taskId)
   }
   const handle = setInterval(poll, 2000)
   pollingTimers.set(taskId, handle)

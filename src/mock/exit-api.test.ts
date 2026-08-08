@@ -8,7 +8,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import { resolveMockUser, clearMockSession } from './auth'
-import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb, resetGovernance } from './reset'
+import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb, resetGovernance, resetSharedState } from './reset'
 import * as db from './db'
 import { sysNotifications } from './notifications'
 
@@ -76,6 +76,8 @@ describe('成员退出/移除 API（action 分支 + 权限口径）', () => {
     resetDb()
     resetOrgDb()
     resetGovernance()
+    // MRM-010：平台域共享状态（platformConfig 等）随重置还原，避免用例间残留
+    resetSharedState()
   })
 
   it('mark_exit：软退出——仅记 exitedAt，保留职位档案，不产生「被移出」通知', async () => {

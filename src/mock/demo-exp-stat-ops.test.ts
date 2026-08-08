@@ -373,4 +373,73 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
     const anomalies = (detail.body.data as { anomalies: { id: string }[] }).anomalies
     expect(anomalies[0].id.endsWith('-0')).toBe(true)
   })
+
+  it('MRM-009：反复 POST 同 scope+type——进行中任务被复用，数组不膨胀', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+
+    const first = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    expect(first.statusCode).toBe(200)
+    const firstId = (first.body.data as { id: string }).id
+
+    // 同类型进行中：复用同一任务（不新建）
+    for (let i = 0; i < 5; i++) {
+      const dup = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+      expect(dup.statusCode).toBe(200)
+      expect((dup.body.data as { id: string }).id).toBe(firstId)
+    }
+
+    // 进行中复用不产生新条目
+    const list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.filter((t) => t.id === firstId)).toHaveLength(1)
+    expect(items.filter((t) => t.id === firstId)[0].status).toBe('generating')
+  })
+
+  it('MRM-009：completed 超保留窗口转 expired，GET 时 GC 清出（数组回落途径）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+
+    const created = await invokeHandler('/api/org/:clubId/exports', 'post', '/api/org/club-001/exports', { input: { type: '成员名单' } })
+    const taskId = (created.body.data as { id: string }).id
+
+    // 走完状态机：generating → processing → completed（每次 GET 推进一个阶段，elapsed 已越过 3000ms）
+    vi.advanceTimersByTime(4000)
+    // 首次结算 generating → processing（返回值不需要，结算副作用才是目的）
+    await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    let items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.find((t) => t.id === taskId)?.status).toBe('completed')
+
+    // 越过 24h 失效 + 365 天保留窗口 → expired → GET 触发 GC 清出
+    vi.advanceTimersByTime(366 * 24 * 3600 * 1000)
+    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    items = (list.body.data as { items: { id: string; status: string }[] }).items
+    expect(items.some((t) => t.id === taskId)).toBe(false)
+    // 种子任务仍在（reset 后 expiredAt 被重设为未来，不会被误清）
+    expect(items.map((t) => t.id).sort()).toEqual(['exp-001', 'exp-002'])
+  })
+
+  it('MRM-009：reset 后种子 completed 任务 expiredAt 重设为未来——不被 settle 误转 expired、不被 GC 清出', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-07T08:00:00+08:00'))
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+
+    // reset 前：种子 exp-001 expiredAt 是 2025 年的静态值
+    let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const items = (list.body.data as { items: { id: string; expiredAt: string | null; status: string }[] }).items
+    const before = items.find((t) => t.id === 'exp-001')
+    expect(before?.status).toBe('completed')
+    // 若未 reset（2025 年 expiredAt 已超保留窗口），settle 应将其转 expired——这里直接证明 GET 结算语义
+    // 但测试默认 beforeEach 已 reset，种子 expiredAt 应为未来：断言不早于当前时间
+    expect(new Date(before!.expiredAt!).getTime()).toBeGreaterThanOrEqual(Date.now())
+
+    // 推进超过 365 天：若 expiredAt 是未来 7 天，365 天窗口不会越过 → 仍保留
+    vi.advanceTimersByTime(360 * 24 * 3600 * 1000)
+    list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
+    const after = (list.body.data as { items: { id: string }[] }).items
+    expect(after.some((t) => t.id === 'exp-001')).toBe(true)
+  })
 })

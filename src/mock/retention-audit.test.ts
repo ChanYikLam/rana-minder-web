@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import handlers, { retentionSubjects, resetRetentionState } from './index'
+import handlers, { retentionSubjects } from './index'
 import { resolveMockUser, clearMockSession } from './auth'
-import { resetRecruitmentDB, resetNotifications, resetCorrections, resetAuditLogs } from './reset'
+import { resetRecruitmentDB, resetNotifications, resetCorrections, resetAuditLogs, resetSharedState } from './reset'
 
 class MockServerResponse {
   statusCode = 200
@@ -59,7 +59,8 @@ describe('保留策略执行器（P1-010 审计闭环）', () => {
     resetNotifications()
     resetCorrections()
     resetAuditLogs()
-    resetRetentionState()
+    // MRM-010：平台域完整重置（retentionPolicies/previewVersion/reauthProofs 等随 resetSharedState 还原）
+    resetSharedState()
     resolveMockUser('/api/auth/session?_mock_user=admin')
   })
 
