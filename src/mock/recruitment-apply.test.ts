@@ -574,6 +574,10 @@ describe('联合报名撤销提交', () => {
     expect(rdb.jointInterviews.some((i) => i.jointId === 'jnt-001' && i.applicantId === memberId)).toBe(true)
     expect(rdb.jointConclusions.some((c) => c.jointId === 'jnt-001' && c.applicantId === memberId)).toBe(true)
 
+    const detail = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {}, 'get')
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200)
+    expect((detail.body.data as { withdrawBlockedReason?: string | null }).withdrawBlockedReason, '未排期面试时可撤销，预判原因为空').toBeNull()
+
     const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     const app = memberJointApp()
@@ -658,6 +662,9 @@ describe('联合报名撤销提交', () => {
     })
     const interview = rdb.jointInterviews.find((i) => i.jointId === 'jnt-001' && i.applicantId === memberJointApp().applicantId)!
     interview.status = 'scheduled'
+    const detail = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {}, 'get')
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200)
+    expect((detail.body.data as { withdrawBlockedReason?: string | null }).withdrawBlockedReason, '已排期面试应返回预判阻塞原因').toBe('已安排面试，无法撤销提交')
     const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
     expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
     expect(memberJointApp().status, '已排期面试时保持已提交').toBe('submitted')
@@ -825,6 +832,9 @@ describe('普通招新撤销提交', () => {
       allowAdjustment: true,
     })
     app().paths['dept-101'].status = 'decided'
+    const detail = await invokeHandler(applyUrl, otherClubUrl, {}, 'get')
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200)
+    expect((detail.body.data as { withdrawBlockedReason?: string | null }).withdrawBlockedReason, '已有审核结论应返回预判阻塞原因').toBe('已有审核结论，无法撤销提交')
     const out = await invokeHandler(withdrawUrl, otherClubUrl, {})
     expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
     expect(app().status, '已有审核结论时保持已提交').toBe('submitted')

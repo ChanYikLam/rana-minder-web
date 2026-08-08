@@ -154,9 +154,9 @@ describe('ReviewPage 评审页', () => {
       rating: 4,
       comment: '',
     })
-    // 失败不再静默：toast + 内联错误展示
+    // 失败不再静默：操作结果走向独立 Toast 层（不内联进评价正文）
     expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
-    expect(wrapper.text()).toContain('申请人不存在')
+    expect(wrapper.text()).not.toContain('申请人不存在')
   })
 
   it('提交评价成功：toast 提示并刷新列表', async () => {

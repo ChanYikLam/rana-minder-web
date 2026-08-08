@@ -23,6 +23,7 @@ interface MyApplication {
   allowAdjustment?: boolean
   submittedAt?: string | null
   recoveryWindowDeadline?: string | null
+  withdrawBlockedReason?: string | null
 }
 
 const route = useRoute()
@@ -250,7 +251,7 @@ async function handleSaveDraft() {
     const savedAt = (result.data as { savedAt?: string }).savedAt
     toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
   } else {
-    toast.error('草稿保存失败，请稍后重试')
+    toast.error((result as { error?: { message?: string } }).error?.message || '草稿保存失败，请稍后重试')
   }
 }
 
@@ -389,11 +390,13 @@ onUnmounted(() => {
             class="mt-4 w-full"
             :class="confirmWithdraw ? '!text-danger !border-danger' : ''"
             :loading="withdrawing"
+            :disabled="!!myApplication?.withdrawBlockedReason"
             @click="requestWithdrawConfirm"
           >
             <Save :size="14" /> {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
           </Button>
-          <p v-if="hasSubmitted" class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
+          <p v-if="hasSubmitted && myApplication?.withdrawBlockedReason" class="text-xs text-danger mt-2">{{ myApplication.withdrawBlockedReason }}</p>
+          <p v-else-if="hasSubmitted" class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后重新提交。</p>
         </template>
 
         <!-- 已归档态 -->

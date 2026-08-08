@@ -429,7 +429,8 @@ describe('ApplicationPage 交互流程', () => {
     await nextTick()
 
     expect(mockPost).toHaveBeenCalledTimes(1)
-    expect(toast.error).toHaveBeenCalledWith('草稿保存失败，请稍后重试')
+    // P2：草稿保存失败透出服务端 message，而非空泛兜底文案
+    expect(toast.error).toHaveBeenCalledWith('boom')
     expect(wrapper.text()).not.toContain('草稿已保存')
   })
 
