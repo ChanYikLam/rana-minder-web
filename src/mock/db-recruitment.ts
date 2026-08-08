@@ -361,7 +361,7 @@ export const recruitmentApplications: RecApplication[] = [
   },
   {
     id: 'app-002', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐', studentId: '20240002',
+    applicantId: 'u-002', applicantName: '陈雨彤', studentId: '20240002',
     status: 'submitted',
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
@@ -420,7 +420,7 @@ export const recruitmentInterviews: RecInterview[] = [
   },
   {
     id: 'int-002', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐', roundId: 'rd-001',
+    applicantId: 'u-002', applicantName: '陈雨彤', roundId: 'rd-001',
     status: 'completed', slotId: 'slot-001', startAt: daysFromNow(35), endAt: daysFromNow(35),
     actualStartAt: daysFromNow(35), actualEndAt: daysFromNow(35), attendance: 'present',
     invalidReason: null, skipReason: null, cancelReason: null,
@@ -1305,7 +1305,7 @@ export function createJointActivity(clubId: string, clubName: string, actorName:
   if (!input.clubIds.includes(clubId)) return err('发起方社团必须包含在拟参与名单中')
   if (!input.title.trim()) return err('联合活动名称不能为空')
   if (new Date(input.confirmDeadline).getTime() <= Date.now()) return err('名单确认截止必须严格晚于当前时刻')
-  const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '羽毛球协会' }
+  const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会' }
   const ja: JointActivity = {
     id: 'jnt-' + Date.now(), title: input.title, description: input.description || '',
     status: 'draft',

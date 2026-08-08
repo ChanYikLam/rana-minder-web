@@ -229,10 +229,10 @@ export const members: MockMember[] = [
       { id: 'pos-004', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', startDate: '2024-09-01', endDate: null, status: 'active' },
     ],
     tenures: [
-      { id: 'ten-005', departmentName: '管理', title: '负责人', startDate: '2024-09-01', endDate: null, endReason: null },
+      { id: 'ten-005', departmentName: '技术部', title: '负责人', startDate: '2024-09-01', endDate: null, endReason: null },
     ],
     departmentHistory: [
-      { id: 'dhis-004', action: 'join', departmentName: '管理', at: '2022-09-01T10:00:00+08:00' },
+      { id: 'dhis-004', action: 'join', departmentName: '技术部', at: '2022-09-01T10:00:00+08:00' },
     ],
     anomalies: [],
   },
