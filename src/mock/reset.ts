@@ -3,6 +3,7 @@ import { departments, candidates, members, departmentApplications, membershipInv
 import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
 import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
+import { resetGovernanceState } from './governance'
 export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
 // P2-017：平台共享状态（导出任务含 processing / platformConfig 版本 / 异常序号）纳入统一重置；
@@ -87,4 +88,9 @@ export function resetCorrections(): void {
 export function resetAuditLogs(): void {
   auditLogsDb.splice(0, auditLogsDb.length, ...structuredClone(seed.auditLogsDb))
   setAuditLogSeq(1000)
+}
+
+/** P1-011：复位治理安全状态（异常访问事件/告警、真实数据开关、高风险命令 enforced 标志） */
+export function resetGovernance(): void {
+  resetGovernanceState()
 }

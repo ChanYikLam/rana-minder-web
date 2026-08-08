@@ -12,8 +12,8 @@ export const pageStubs = {
   StateTag: { template: '<span class="state-tag" />' },
   PermissionGuard: { template: '<div><slot /></div>' },
   HighRiskConfirm: {
-    props: ['open', 'confirmLabel', 'cancelLabel', 'executing', 'errorMessage'],
-    template: '<div class="hrc" v-if="open"><slot /><slot name="extra" />{{ errorMessage }}<button class="hrc-cancel" @click="$emit(\'cancel\')">{{ cancelLabel || \'取消\' }}</button><button class="hrc-confirm" :disabled="executing" @click="$emit(\'confirm\')">{{ confirmLabel || \'确认\' }}</button></div>',
+    props: ['open', 'confirmLabel', 'cancelLabel', 'executing', 'errorMessage', 'reauthRequired'],
+    template: '<div class="hrc" v-if="open" :data-reauth="reauthRequired === true || reauthRequired === \'true\' ? \'1\' : (reauthRequired == null ? \'1\' : \'0\')"><slot /><slot name="extra" />{{ errorMessage }}<button class="hrc-cancel" @click="$emit(\'cancel\')">{{ cancelLabel || \'取消\' }}</button><button class="hrc-confirm" :disabled="executing" @click="$emit(\'confirm\', reauthRequired === false ? undefined : \'mock-reauth-proof\')">{{ confirmLabel || \'确认\' }}</button></div>',
   },
   NotificationBadge: { template: '<span class="ntf-badge" />' },
   NotificationDetail: { template: '<div class="ntf-detail"><slot /></div>' },

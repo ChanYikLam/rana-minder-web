@@ -20,10 +20,13 @@ import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './rec
 import { correctionsDb, type CorrectionRecord, type CorrectionAuditEntry } from './db-corrections'
 import { auditLogsDb, writeAuditLog } from './db-audit'
 import * as formdb from './db-forms'
+import {
+  HIGH_RISK_COMMANDS, trackAccessEvent, listAnomalyAlerts, acknowledgeAnomaly,
+  getRealDataSwitch, setRealDataSwitch, getOidcConfig, updateOidcConfig,
+  issueReauthProof, consumeReauthProof, assertHighRisk,
+} from './governance'
 
-/** 重认证 proof 有效期（一次性凭证，高风险操作校验后即消费） */
-const REAUTH_TTL_MS = 10 * 60 * 1000
-const reauthProofs = new Map<string, { userId: string; expiresAt: number }>()
+/** 重认证 proof 机制（issueReauthProof / consumeReauthProof / assertHighRisk）统一由 governance.ts 提供 */
 
 /** 任期到期提醒投递去重（MEM-004）：按「职位 × 提醒间隔桶」去重，模拟周期触发而非每次访问重复轰炸 */
 const termRemindSent = new Set<string>()
@@ -50,21 +53,6 @@ function deliverTermEndReminders(clubId: string) {
 }
 
 /** 事实纠错共享内存库见 db-corrections.ts（社团/个人中心/管理员共用） */
-
-function issueReauthProof(userId: string): { proof: string; expiresAt: string } {
-  const proof = `reauth-${userId}-${Date.now()}`
-  const expiresAt = Date.now() + REAUTH_TTL_MS
-  reauthProofs.set(proof, { userId, expiresAt })
-  return { proof, expiresAt: new Date(expiresAt).toISOString() }
-}
-
-function consumeReauthProof(proof: unknown, operatorId: string | undefined | null): boolean {
-  if (typeof proof !== 'string') return false
-  const record = reauthProofs.get(proof)
-  if (!operatorId || !record || record.userId !== operatorId || record.expiresAt <= Date.now()) return false
-  reauthProofs.delete(proof)
-  return true
-}
 
 /** 纠错状态机守卫（SM-AUD-001）：仅 submitted（含 overdue 未处置）可被批准/拒绝/撤回， */
 function isCorrectionActable(record: CorrectionRecord): boolean {
@@ -114,8 +102,19 @@ function businessError(message: string) {
   }
 }
 
-/** 无权限（HTTP 403 + IFC-ERR-003） */
-function forbidden() {
+/** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
+function forbidden(url?: string, method: string = 'post') {
+  if (url) {
+    const user = resolveMockUser(url)
+    trackAccessEvent({
+      actorId: user.id,
+      actorName: user.name,
+      method,
+      path: (url.split('?')[0] || url),
+      outcome: 'forbidden',
+      at: Date.now(),
+    })
+  }
   return {
     statusCode: 403,
     body: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
@@ -647,10 +646,36 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      const input = body.input || {}
+      // 仅当字段「非空且与现值不同」才算实际数据变更：空 input:{} 不消耗版本号，
+      // 「编辑后原样提交」（提交值 === 现值）同样不消耗，避免无实际差异的提交使版本不断递增
+      const hasUpdate =
+        (typeof input.email === 'string' && input.email !== '' && input.email !== user.email) ||
+        (typeof input.phone === 'string' && input.phone !== '' && input.phone !== user.phone)
+
+      // 无实际数据变更时跳过版本递增，直接返回当前资料
+      if (!hasUpdate) {
+        return {
+          code: 0,
+          data: {
+            version: currentVersion,
+            studentId: user.studentId,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
+            syncStatus: {
+              email: 'synced',
+              phone: user.profileComplete ? 'pending' : 'synced',
+            },
+          },
+        }
+      }
+
       // 版本登记先于保存生效：比对一旦通过即占用新版本号，后续同版本提交必然 409，
       // 保证「保存生效与版本登记」原子一致（连续两次 expectedVersion=1 时第二次不会重复落库）
       profileLatestVersion[user.id] = currentVersion + 1
-      const input = body.input || {}
       // 保存生效：白名单字段更新 + 资料补齐（资料门联动 profileComplete）
       if (typeof input.email === 'string' && input.email) user.email = input.email
       if (typeof input.phone === 'string' && input.phone) user.phone = input.phone
@@ -1916,30 +1941,41 @@ if (!r.ok) return businessError(r.error || '操作失败')
     },
   },
   // 移除成员 / 标记退出（管理员）——按 action 区分语义：
-  //   remove：硬移除（SM-MEM-001 active→exiting→exited，结束职位 + 通知「被移出」，MEM-006）
-  //   mark_exit：软退出（仅记 exitedAt，保留职位档案，无「被移出」通知）
+  //   remove：硬移除（SM-MEM-001 active→exiting→exited，结束职位 + 通知「被移出」，MEM-006）；P1-011 高风险命令 member_remove：重认证 + 原因 + 审计
+  //   mark_exit：软退出（仅记 exitedAt，保留职位档案，无「被移出」通知，无需重认证）
   {
     url: '/api/org/:clubId/members/exit',
     method: 'post',
-    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; action?: string; reason?: string } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberId: string; action?: string; reason?: string; reauthProof?: string } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user, query.clubId)
-      if (!actor || !canManageMembers(user, query.clubId)) return forbidden()
+      if (!actor || !canManageMembers(user, query.clubId)) return forbidden(url)
       const memberId = body.input?.memberId
       const action = body.input?.action === 'mark_exit' ? 'mark_exit' : 'remove'
       if (!body.input?.reason?.trim()) return businessError(action === 'mark_exit' ? '标记退出必须填写原因' : '移除成员必须填写原因')
       const member = db.findMember(query.clubId, memberId)
       if (!member) return businessError('成员不存在')
       const scope = departmentScopeFor(user, query.clubId)
-      if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden()
+      if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden(url)
       if (action === 'mark_exit') {
         // 标记退出：软退出，保留档案；不通知「被移出」
         const res = db.markMemberExit(query.clubId, actor, memberId)
         if (!res.ok) return businessError(res.error || '标记退出失败')
         return { code: 0, data: { memberId, action, status: res.member?.status } }
       }
+      // 硬移除（remove）为 P1-011 高风险命令：重认证门禁（proof 一次性消费 + 原因 ≥ 5 字）
+      const gate = assertHighRisk('member_remove', body.input, user?.id)
+      if (gate) return gate
       const res = db.directRemoveMember(query.clubId, actor, memberId)
       if (!res.ok) return businessError(res.error || '移除失败')
+      writeAuditLog({
+        actorName: user.name,
+        action: '移除成员',
+        targetType: '成员',
+        targetId: memberId,
+        detail: `移除成员 ${member.name}（${body.input?.reason?.trim()}）`,
+        scope: 'org',
+      })
       // 通知被移除成员（member 通知族）
       const removedUserId = userIdOfMember(memberId)
       if (removedUserId) pushNotification([removedUserId], 'member', { body: `您已被移出「计算机协会」，原因：${body.input.reason}` }, { clubId: query.clubId })
@@ -2057,13 +2093,15 @@ if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { saved: true } }
     },
   },
-  // 执行换届
+  // 执行换届（P1-011 高风险命令 transition_execute：重认证 + 原因 + 审计）
   {
     url: '/api/org/:clubId/members/transition',
     method: 'post',
-    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input?: { reason?: string; reauthProof?: string } } }) => {
       const user = resolveMockUser(url)
-      if (!canManageMembersFull(user, query.clubId)) return forbidden()
+      if (!canManageMembersFull(user, query.clubId)) return forbidden(url)
+      const gate = assertHighRisk('transition_execute', body.input, user?.id)
+      if (gate) return gate
       const t = db.transitionState
       if (t.executedAt) return businessError('换届已执行，请勿重复提交')
       if (t.candidates.length + t.appointments.length === 0) return businessError('无职位变化，无需执行换届')
@@ -2097,6 +2135,14 @@ if (!r.ok) return businessError(r.error || '操作失败')
         const newSync = orgdb.syncPositionMembership({ clubId: query.clubId, memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, departmentName: null, title: '负责人', active: true })
         if (!newSync.ok && newSync.error) t.syncFailures.push({ memberId: leaderCandidate.memberId, memberName: leaderCandidate.name, title: '负责人', active: true, error: newSync.error })
       }
+      writeAuditLog({
+        actorName: user.name,
+        action: '执行换届',
+        targetType: '换届',
+        targetId: query.clubId,
+        detail: `社团 ${query.clubId} 换届执行：${results.filter((r) => r.success).length} 成功 / ${results.filter((r) => !r.success).length} 失败（${body.input?.reason?.trim()}）`,
+        scope: 'org',
+      })
       return { code: 0, data: { executedAt: t.executedAt, results, finishedAt: null, syncFailures: t.syncFailures } }
     },
   },
@@ -2259,14 +2305,24 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 紧急停用（只读 + 期限暂停，需原因）
+  // 紧急停用（P1-011 高风险命令 club_force_suspend：只读 + 期限暂停，重认证 + 原因 + 审计）
   {
     url: '/api/admin/clubs/:clubId/force-suspend',
     method: 'post',
-    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string } } }) => {
-      if (!isPlatformClubManager(url)) return forbidden()
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string; reauthProof?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden(url)
+      const gate = assertHighRisk('club_force_suspend', body.input, resolveMockUser(url)?.id)
+      if (gate) return gate
       const result = orgdb.suspendClub(query.clubId, 'force', body.input?.reason || '', { hasActiveBusiness: false })
       if (!result.ok) return businessError(result.error || '紧急停用失败')
+      writeAuditLog({
+        actorName: resolveMockUser(url).name,
+        action: '紧急停用社团',
+        targetType: '社团',
+        targetId: query.clubId,
+        detail: `紧急停用（只读 + 期限暂停）：${body.input?.reason?.trim()}`,
+        scope: 'platform',
+      })
       return { code: 0, data: result.data }
     },
   },
@@ -2281,14 +2337,24 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 解除接入（普通角色失权，进入待重新接入）
+  // 解除接入（P1-011 高风险命令 club_disconnect：普通角色失权进入待重新接入；重认证 + 原因 + 审计）
   {
     url: '/api/admin/clubs/:clubId/disconnect',
     method: 'post',
-    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!isPlatformClubManager(url)) return forbidden()
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reason?: string; reauthProof?: string } } }) => {
+      if (!isPlatformClubManager(url)) return forbidden(url)
+      const gate = assertHighRisk('club_disconnect', body.input, resolveMockUser(url)?.id)
+      if (gate) return gate
       const result = orgdb.disconnectClub(query.clubId)
       if (!result.ok) return businessError(result.error || '解除接入失败')
+      writeAuditLog({
+        actorName: resolveMockUser(url).name,
+        action: '解除接入',
+        targetType: '社团',
+        targetId: query.clubId,
+        detail: `解除接入，普通角色失权进入待重新接入：${body.input?.reason?.trim()}`,
+        scope: 'platform',
+      })
       return { code: 0, data: result.data }
     },
   },
@@ -2514,13 +2580,15 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { items } }
     },
   },
-  // 批量操作执行（鉴权 + 确定性逐项结果，替代此前 index 伪随机失败）
+  // 批量操作执行（P1-011 高风险命令 batch_execute：重认证 + 原因 + 审计；鉴权 + 确定性逐项结果）
   {
     url: '/api/org/:clubId/batch/execute',
     method: 'post',
-    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberIds: string[]; action: string; interviewerId?: string } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { memberIds: string[]; action: string; interviewerId?: string; reason?: string; reauthProof?: string } } }) => {
       const user = resolveMockUser(url)
-      if (!getPermissions(user, query.clubId).includes('club:batch:execute')) return forbidden()
+      if (!getPermissions(user, query.clubId).includes('club:batch:execute')) return forbidden(url)
+      const gate = assertHighRisk('batch_execute', body.input, user?.id)
+      if (gate) return gate
       const action = body.input?.action
       const memberIds = body.input?.memberIds || []
       let results: { memberId: string; success: boolean; message: string }[]
@@ -2543,6 +2611,14 @@ response: ({ url }: { url: string }) => {
           return { memberId: id, success: !blocked, message: blocked ? '申请人存在身份异常，请先处理' : '成功' }
         })
       }
+      writeAuditLog({
+        actorName: user.name,
+        action: '批量执行',
+        targetType: '批量操作',
+        targetId: query.clubId,
+        detail: `社团 ${query.clubId} 批量${action === 'assign_interviewer' ? '分配面试官' : action} ${memberIds.length} 人：${results.filter((r) => r.success).length} 成功 / ${results.filter((r) => !r.success).length} 失败（${body.input?.reason?.trim()}）`,
+        scope: 'org',
+      })
       return {
         code: 0,
         data: {
@@ -3241,6 +3317,141 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { id: result.data.clubId, status: result.data.status, wizardStep: result.data.wizardStep, createdAt: result.data.createdAt } }
     },
   },
+  // ================= P1-011 治理安全端点 =================
+  // 高风险命令目录（13 类全量登记，供治理面审计与前端联调）
+  {
+    url: '/api/admin/governance/high-risk-commands',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden(url, 'get')
+      return {
+        code: 0,
+        data: {
+          items: HIGH_RISK_COMMANDS.map((c) => ({
+            key: c.key, label: c.label, enforced: c.enforced, endpoints: c.endpoints,
+          })),
+          total: HIGH_RISK_COMMANDS.length,
+          enforcedCount: HIGH_RISK_COMMANDS.filter((c) => c.enforced).length,
+        },
+      }
+    },
+  },
+  // GOV-006 异常访问告警查询（超管）
+  {
+    url: '/api/admin/governance/anomaly-access',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:audit:view')) return forbidden(url, 'get')
+      const alerts = listAnomalyAlerts()
+      return {
+        code: 0,
+        data: {
+          items: alerts,
+          openCount: alerts.filter((a) => a.status === 'open').length,
+        },
+      }
+    },
+  },
+  // GOV-006 异常访问告警确认
+  {
+    url: '/api/admin/governance/anomaly-access/:alertId/ack',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:audit:view')) return forbidden(url)
+      const alert = acknowledgeAnomaly(query.alertId, user.name)
+      if (!alert) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '告警不存在' } }
+      return { code: 0, data: alert }
+    },
+  },
+  // GOV-002 真实数据开关：查询（与 OIDC GET 同口径，需 platform:config:manage）
+  {
+    url: '/api/admin/governance/real-data',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden(url, 'get')
+      return { code: 0, data: getRealDataSwitch() }
+    },
+  },
+  // GOV-002 真实数据开关：切换（开启为高风险命令 real_data_switch；关闭回演示数据仅写审计）
+  {
+    url: '/api/admin/governance/real-data',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: { useRealData?: boolean; reason?: string; reauthProof?: string } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden(url)
+      const target = !!body.input?.useRealData
+      if (target) {
+        const gate = assertHighRisk('real_data_switch', body.input, user?.id)
+        if (gate) return gate
+      } else if (!body.input?.reason?.trim()) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '切回演示数据需填写原因' } }
+      }
+      const state = setRealDataSwitch(target, user.name)
+      writeAuditLog({
+        actorName: user.name,
+        action: target ? '开启真实数据' : '关闭真实数据',
+        targetType: '治理配置',
+        targetId: 'real-data-switch',
+        detail: `${target ? '演示数据 → 真实数据' : '真实数据 → 演示数据'}：${body.input?.reason?.trim()}`,
+        scope: 'platform',
+      })
+      return { code: 0, data: state }
+    },
+  },
+  // OIDC 安全配置：查询（超管）
+  {
+    url: '/api/admin/security/oidc',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden(url, 'get')
+      return { code: 0, data: getOidcConfig() }
+    },
+  },
+  // OIDC 安全配置：更新（重认证 + 原因 + 审计）
+  {
+    url: '/api/admin/security/oidc',
+    method: 'post',
+    response: ({ url, body }: { url: string; body: { input: Record<string, unknown> & { reason?: string; reauthProof?: string } } }) => {
+      const user = resolveMockUser(url)
+      if (!getPermissions(user, '').includes('platform:config:manage')) return forbidden(url)
+      // 先校验原因与字段边界（避免无效请求白白消费一次性 proof），再消费 proof
+      if (!body.input?.reason || body.input.reason.trim().length < 5) {
+        return { statusCode: 422, body: { code: 'IFC-ERR-005', message: '修改 OIDC 安全配置必须填写原因（至少 5 字）' } }
+      }
+      const input = body.input
+      const reason = input.reason!.trim() // 上方已校验 reason 必填
+      const patch: Record<string, unknown> = {}
+      if (typeof input.sessionTtlMinutes === 'number') {
+        if (input.sessionTtlMinutes < 5 || input.sessionTtlMinutes > 1440) return businessError('会话有效期需在 5-1440 分钟之间')
+        patch.sessionTtlMinutes = input.sessionTtlMinutes
+      }
+      if (typeof input.mfaRequired === 'boolean') patch.mfaRequired = input.mfaRequired
+      if (typeof input.enforceStateNonce === 'boolean') patch.enforceStateNonce = input.enforceStateNonce
+      if (typeof input.clockSkewSeconds === 'number') {
+        if (input.clockSkewSeconds < 0 || input.clockSkewSeconds > 300) return businessError('时钟偏移需在 0-300 秒之间')
+        patch.clockSkewSeconds = input.clockSkewSeconds
+      }
+      if (typeof input.stepUpTtlMinutes === 'number') {
+        if (input.stepUpTtlMinutes < 1 || input.stepUpTtlMinutes > 60) return businessError('重认证有效期需在 1-60 分钟之间')
+        patch.stepUpTtlMinutes = input.stepUpTtlMinutes
+      }
+      if (!consumeReauthProof(body.input?.reauthProof, user?.id)) {
+        return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
+      }
+      const cfg = updateOidcConfig(patch)
+      writeAuditLog({
+        actorName: user.name,
+        action: '更新 OIDC 安全配置',
+        targetType: '安全配置',
+        targetId: 'oidc',
+        detail: `会话 TTL ${cfg.sessionTtlMinutes} 分钟 / MFA ${cfg.mfaRequired ? '强制' : '可选'} / state+nonce ${cfg.enforceStateNonce ? '强制校验' : '不校验'}（${reason}）`,
+        scope: 'platform',
+      })
+      return { code: 0, data: cfg }
+    },
+  },
   // 运维状态（统计口径取自真实内存态：社团同步健康 + 导出任务队列）
   {
     url: '/api/admin/ops-status',
@@ -3382,8 +3593,18 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/exports/:id/download',
     method: 'post',
-    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
-      if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden()
+    response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input?: { reason?: string; reauthProof?: string } } }) => {
+      if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden(url)
+      const gate = assertHighRisk('export_download', body.input, resolveMockUser(url)?.id)
+      if (gate) return gate
+      writeAuditLog({
+        actorName: resolveMockUser(url).name,
+        action: '导出文件下载',
+        targetType: '导出任务',
+        targetId: query.id,
+        detail: `下载平台导出文件 ${query.id}（${body.input?.reason?.trim()}）`,
+        scope: 'platform',
+      })
       return {
         code: 0,
         data: {
@@ -3702,18 +3923,28 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 工作空间：导出下载（EXP-003：每次下载实时校验当前权限与作用域）
+  // 工作空间：导出下载（P1-011 高风险命令 export_download：重认证 + 原因 + 审计；EXP-003 每次下载实时校验当前权限与作用域）
   {
     url: '/api/org/:clubId/exports/:id/download',
     method: 'post',
-    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input?: { reason?: string; reauthProof?: string } } }) => {
       const user = resolveMockUser(url)
-      if (!getPermissions(user, query.clubId).includes('club:export:execute')) return forbidden()
+      if (!getPermissions(user, query.clubId).includes('club:export:execute')) return forbidden(url)
       const task = exportTasks.find((t) => t.id === query.id && t.clubId === query.clubId)
       if (!task) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '导出任务不存在', supportId: 'MOCK' } }
       }
-      if (task.scope !== '全社团' && exportScopeFor(user, query.clubId) !== task.scope) return forbidden()
+      if (task.scope !== '全社团' && exportScopeFor(user, query.clubId) !== task.scope) return forbidden(url)
+      const gate = assertHighRisk('export_download', body.input, user?.id)
+      if (gate) return gate
+      writeAuditLog({
+        actorName: user.name,
+        action: '导出文件下载',
+        targetType: '导出任务',
+        targetId: query.id,
+        detail: `下载社团导出文件 ${query.id}（${body.input?.reason?.trim()}）`,
+        scope: 'org',
+      })
       return {
         code: 0,
         data: {

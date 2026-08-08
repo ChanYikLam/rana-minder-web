@@ -31,6 +31,8 @@ const executing = ref(false)
 const saving = ref(false)
 const showEditor = ref(false)
 const showExecuteConfirm = ref(false)
+const executeReason = ref('')
+const executeReasonError = ref('')
 
 // 编辑方案表单
 const editList = ref<'candidates' | 'appointments'>('candidates')
@@ -104,11 +106,22 @@ async function savePlan() {
   }
 }
 
-async function handleExecute() {
+async function handleExecute(proof?: string) {
   if (!data.value?.canExecute) return
+  if (!executeReason.value.trim()) {
+    executeReasonError.value = '换届原因不能为空'
+    return
+  }
+  if (!proof) {
+    executeReasonError.value = '身份验证失败，请重试'
+    return
+  }
   executing.value = true
   const clubId = route.params.clubId as string
-  const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition`)
+  const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition`, {
+    reason: executeReason.value.trim(),
+    reauthProof: proof,
+  })
   executing.value = false
   if (r.kind === 'completed') {
     data.value.results = r.data.results
@@ -302,9 +315,21 @@ onMounted(async () => {
         confirm-label="确认执行换届"
         reauth-required
         :executing="executing"
-        @confirm="showExecuteConfirm = false; handleExecute()"
-        @update:open="(v) => { if (!v) showExecuteConfirm = false }"
-      />
+        @confirm="showExecuteConfirm = false; handleExecute($event)"
+        @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = '' } }"
+      >
+        <template #extra>
+          <textarea
+            v-model="executeReason"
+            rows="3"
+            class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            :class="executeReasonError ? 'border-danger' : ''"
+            placeholder="请填写换届原因（必填，至少 5 字）"
+            aria-label="换届原因"
+          />
+          <p v-if="executeReasonError" class="mt-2 text-xs text-danger" role="alert">{{ executeReasonError }}</p>
+        </template>
+      </HighRiskConfirm>
     </div>
   </PageStateBoundary>
 </template>

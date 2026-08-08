@@ -12,6 +12,8 @@ type RawReq = any
 type RawRes = any
 import { resolveMockUser, getPermissions, getWorkspace, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
 import { pushNotification, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
+import { writeAuditLog } from './db-audit'
+import { assertHighRisk, trackAccessEvent } from './governance'
 import * as rdb from './db-recruitment'
 import * as db from './db'
 import * as formdb from './db-forms'
@@ -108,8 +110,19 @@ function businessError(message: string) {
   }
 }
 
-/** 无权限（HTTP 403 + IFC-ERR-003） */
-function forbidden() {
+/** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
+function forbidden(url?: string, method: string = 'post') {
+  if (url) {
+    const user = resolveMockUser(url)
+    trackAccessEvent({
+      actorId: user.id,
+      actorName: user.name,
+      method,
+      path: (url.split('?')[0] || url),
+      outcome: 'forbidden',
+      at: Date.now(),
+    })
+  }
   return {
     statusCode: 403,
     body: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
@@ -497,15 +510,27 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return result(rdb.cancelActivity(query.activityId, input.reason, !!input.confirmAcceptedSync))
     },
   },
-  // 强制结束（平台）
+  // 强制结束（平台；P1-011 高风险命令 recruitment_force_complete：重认证 + 原因 + 审计）
   {
     url: '/api/admin/recruitment/:activityId/force-complete',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const input = unwrap(body) as { reason?: string }
-      if (!input.reason?.trim()) return businessError('强制结束必须填写原因')
-      return result(rdb.forceCompleteActivity(query.activityId, input.reason))
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const input = unwrap(body) as { reason?: string; reauthProof?: string }
+      const gate = assertHighRisk('recruitment_force_complete', input, resolveMockUser(url)?.id)
+      if (gate) return gate
+      const r = rdb.forceCompleteActivity(query.activityId, input.reason!)
+      if (r.ok) {
+        writeAuditLog({
+          actorName: resolveMockUser(url).name,
+          action: '强制结束招新活动',
+          targetType: '招新活动',
+          targetId: query.activityId,
+          detail: `强制结束：${input.reason?.trim()}`,
+          scope: 'platform',
+        })
+      }
+      return result(r)
     },
   },
   // 报名通道操作（open/close/pause/resume/reopen）
@@ -1721,15 +1746,27 @@ const jointHandlers: MockMethod[] = [
       return result(rdb.submitJointEndConfirm(query.jointId, query._mock_club || query.clubId, resolveMockUser(url).name))
     },
   },
-  // 平台强制关闭
+  // 平台强制关闭（P1-011 高风险命令 joint_force_close：重认证 + 原因 + 审计）
   {
     url: '/api/admin/joint/:jointId/force-close',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const input = unwrap(body) as { reason?: string }
-      if (!input.reason?.trim()) return businessError('强制关闭必须填写原因')
-      return result(rdb.forceCloseJointActivity(query.jointId, input.reason))
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const input = unwrap(body) as { reason?: string; reauthProof?: string }
+      const gate = assertHighRisk('joint_force_close', input, resolveMockUser(url)?.id)
+      if (gate) return gate
+      const r = rdb.forceCloseJointActivity(query.jointId, input.reason!)
+      if (r.ok) {
+        writeAuditLog({
+          actorName: resolveMockUser(url).name,
+          action: '强制关闭联合活动',
+          targetType: '联合活动',
+          targetId: query.jointId,
+          detail: `强制关闭：${input.reason?.trim()}`,
+          scope: 'platform',
+        })
+      }
+      return result(r)
     },
   },
   // 平台强制停用社团

@@ -189,12 +189,16 @@ async function handleConfirmAction() {
   }
 }
 
-async function handleConfirmRemove() {
+async function handleConfirmRemove(proof?: string) {
   if (!reason.value.trim()) {
     reasonError.value = '移除原因不能为空'
     return
   }
   if (!actingId.value) return
+  if (!proof) {
+    removeError.value = '身份验证失败，请重试'
+    return
+  }
   actingSubmitting.value = true
   removeSucceeded.value = false
   removeError.value = ''
@@ -204,6 +208,7 @@ async function handleConfirmRemove() {
     memberId: targetId,
     action: 'remove',
     reason: reason.value.trim(),
+    reauthProof: proof,
   })
   actingSubmitting.value = false
   if (r.kind === 'completed') {

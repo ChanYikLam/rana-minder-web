@@ -208,8 +208,48 @@ describe('ExportPage 任务列表与轮询', () => {
     await flushPromises()
     await nextTick()
 
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/exports/exp-003/download', {})
+    // 下载走高危确认：先填原因，再点确认
+    expect(wrapper.findAll('.hrc').length).toBeGreaterThan(0)
+    const downloadHrc = wrapper.findAll('.hrc').find((h) => h.text().includes('确认下载'))!
+    expect(downloadHrc.exists(), '下载高危确认弹窗').toBe(true)
+    const reasonInput = downloadHrc.find('input[placeholder*="下载原因"]')
+    expect(reasonInput.exists(), '下载原因输入').toBe(true)
+    await reasonInput.setValue('学期末名单归档审计')
+    await downloadHrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/exports/exp-003/download', {
+      reason: '学期末名单归档审计',
+      reauthProof: 'mock-reauth-proof',
+    })
     expect(toast.success).toHaveBeenCalledWith('已开始下载')
+    wrapper.unmount()
+  })
+
+  it('下载：空原因被拦截', async () => {
+    const completedTask = {
+      id: 'exp-004', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
+      completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-08-08T04:00:00Z',
+      downloadUrl: '/files/4.xlsx', fileSize: 2048,
+    }
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [completedTask] } })
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('下载'))!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const downloadHrc = wrapper.findAll('.hrc').find((h) => h.text().includes('确认下载'))!
+    expect(downloadHrc.exists(), '下载高危确认弹窗').toBe(true)
+    await downloadHrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(downloadHrc.text()).toContain('请填写下载原因')
+    expect(mockPost).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })
