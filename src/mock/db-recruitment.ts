@@ -2,7 +2,7 @@
  * Mock 有状态库：普通招新（REC）+ 多社团联合（JNT）+ 邀请（INV）
  * 状态流转经 state-machines/transitions.ts 校验；业务前置条件在此层守卫
  */
-import { assertTransition } from './state-machines/transitions'
+import { assertTransition, type StatesOf } from './state-machines/transitions'
 import { mockUsers } from './auth'
 import { createMemberFromAdmission, candidates } from './db'
 
@@ -65,12 +65,20 @@ function ok<T>(data?: T): { ok: true; data?: T } {
   return data === undefined ? { ok: true } : { ok: true, data }
 }
 
-export type RecActivityStatus = 'draft' | 'in_progress' | 'paused' | 'completed' | 'cancelled' | 'force_completed' | 'archived'
-export type ChannelStatus = 'not_open' | 'open' | 'paused' | 'closed'
-export type ApplicationStatus = 'draft' | 'submitted' | 'revision_requested' | 'exited' | 'adjustment_overdue' | 'identity_anomaly' | 'not_qualified' | 'accepted'
-export type DeptPathStatus = 'pending' | 'evaluating' | 'hold' | 'decided' | 'waitlist' | 'published'
-export type InterviewStatus = 'pending_selection' | 'scheduled' | 'leave' | 'late' | 'absent' | 'in_progress' | 'completed' | 'cancelled' | 'invalidated'
-export type RecInvitationStatus = 'pending_acceptance' | 'accepted' | 'rejected' | 'withdrawn' | 'expired'
+/**
+ * MRM-014：以下类型词表一律由 state-machines/transitions.ts 的转换表（StatesOf<M>）派生，
+ * 不再手工抄写字面量，避免状态机枚举与 db 类型词表双轨漂移。
+ */
+export type RecActivityStatus = StatesOf<'SM-REC-001'>
+export type ChannelStatus = StatesOf<'SM-REC-002'>
+/**
+ * 申请状态：SM-REC-003 机器状态 + 'accepted'（业务终态：录取邀请被接受后置位，
+ * 不在 SM-REC-003 转换表内，由 SM-INV-001 接受链路派生）
+ */
+export type ApplicationStatus = StatesOf<'SM-REC-003'> | 'accepted'
+export type DeptPathStatus = StatesOf<'SM-REC-004'>
+export type InterviewStatus = StatesOf<'SM-REC-005'>
+export type RecInvitationStatus = StatesOf<'SM-INV-001'>
 
 /** 标签变更历史记录（REC-039：谁、何时、何种操作） */
 export interface LabelHistoryEntry {
@@ -232,12 +240,13 @@ export interface RecActivity {
 
 // ================= 联合 =================
 
-export type JointStatus = 'draft' | 'confirmed' | 'published' | 'invite_phase' | 'closing_confirm' | 'closed' | 'cancelled' | 'force_closed'
-export type JointClubStatus = 'invited' | 'accepted' | 'confirm_pending' | 'locked' | 'force_suspended'
-export type JointApplicationStatus = 'draft' | 'submitted' | 'archived'
-export type JointInterviewStatus = 'pending_selection' | 'scheduled' | 'leave' | 'late' | 'absent' | 'in_progress' | 'completed' | 'invalidated' | 'cancelled_archived' | 'completed_archived'
-export type JointConclusionStatus = 'pending' | 'evaluating' | 'invite_pending' | 'accepted_locked' | 'archived'
-export type JointInvitationStatus = 'pending_acceptance' | 'accepted' | 'rejected' | 'withdrawn' | 'expired'
+/** MRM-014：联合域类型词表同样由状态机转换表派生（StatesOf<M>），与普通招新域共用同一数据源 */
+export type JointStatus = StatesOf<'SM-JNT-001'>
+export type JointClubStatus = StatesOf<'SM-JNT-002'>
+export type JointApplicationStatus = StatesOf<'SM-JNT-003'>
+export type JointInterviewStatus = StatesOf<'SM-JNT-004'>
+export type JointConclusionStatus = StatesOf<'SM-JNT-005'>
+export type JointInvitationStatus = StatesOf<'SM-INV-001'>
 
 export interface JointClub {
   clubId: string
