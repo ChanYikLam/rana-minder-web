@@ -52,4 +52,26 @@ describe('InvitationManagePage 录取邀请管理', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('张三')
   })
+
+  it('P0-2 操作按钮经 #cell-actions 具名插槽渲染（撤回/重发/同步生效可见）', async () => {
+    // 三种状态邀请各一条，验证各操作按钮均被渲染
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { items: [
+        { id: 'inv-1', applicantId: 'app-1', applicantName: '张三', departmentId: 'dept-1', departmentName: '技术部', status: 'pending_acceptance', sentAt: '2026-08-01T04:00:00Z', acceptedAt: null, expiredAt: '2026-08-08T04:00:00Z', version: 1 },
+        { id: 'inv-2', applicantId: 'app-2', applicantName: '李四', departmentId: 'dept-2', departmentName: '运营部', status: 'rejected', sentAt: '2026-08-01T04:00:00Z', acceptedAt: null, expiredAt: '2026-08-08T04:00:00Z', version: 1 },
+        { id: 'inv-3', applicantId: 'app-3', applicantName: '王五', departmentId: 'dept-3', departmentName: '设计部', status: 'accepted', sentAt: '2026-08-01T04:00:00Z', acceptedAt: '2026-08-02T04:00:00Z', expiredAt: '2026-08-08T04:00:00Z', version: 1 },
+      ] },
+    })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { departments: [] } })
+    const wrapper = mount(InvitationManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 操作按钮通过 cell-actions 具名插槽渲染（而非被丢弃的 #default）
+    expect(wrapper.text()).toContain('撤回')
+    expect(wrapper.text()).toContain('重发')
+    expect(wrapper.text()).toContain('同步生效')
+    wrapper.unmount()
+  })
 })
