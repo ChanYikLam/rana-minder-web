@@ -10,7 +10,7 @@ import {
   totalTransitionRuleCount,
   transitionRuleCount,
 } from './index'
-import { TRANSITIONS, assertTransition as assertExact } from './transitions'
+import { TRANSITIONS, assertTransition as assertExact, statesOf } from './transitions'
 import type { StateMachineId } from '@/types/machine'
 
 /** SRS 状态机转换明细 v1.0：29 个状态机、306 条转换规则 */
@@ -78,6 +78,19 @@ describe('状态机 spec-306 精确转换表', () => {
     expect(isValidTransition('SM-REC-001', 'draft', 'in_progress')).toBe(true)
     expect(isValidTransition('SM-EXP-001', 'completed', 'pending')).toBe(false)
     expect(isValidTransition('SM-EXP-001', 'pending', 'generating')).toBe(true)
+  })
+
+  it('SM-EXP-001 包含 processing 中间态且真实可达（P2-5 词表对齐）', () => {
+    // 实现层 settleExportTask/ExportPage 使用 processing 生成中间态，转换表必须包含
+    expect(statesOf('SM-EXP-001')).toContain('processing')
+    // 真实可达路径：pending --start--> generating --start_processing--> processing --success--> completed
+    expect(isValidTransition('SM-EXP-001', 'pending', 'generating')).toBe(true)
+    expect(isValidTransition('SM-EXP-001', 'generating', 'processing')).toBe(true)
+    expect(assertTransition('SM-EXP-001', 'generating', 'processing', 'start_processing').ok).toBe(true)
+    expect(assertTransition('SM-EXP-001', 'processing', 'completed', 'success').ok).toBe(true)
+    // processing 为真实状态：不是死状态（有出边），也不是孤立状态（有入边）
+    expect(assertTransition('SM-EXP-001', 'processing', 'failed', 'fail').ok).toBe(true)
+    expect(assertTransition('SM-EXP-001', 'processing', 'expired', 'expire').ok).toBe(true)
   })
 
   it('STATE_MACHINES 兼容导出与元数据一致', () => {

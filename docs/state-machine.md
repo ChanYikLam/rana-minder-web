@@ -89,7 +89,7 @@
 | `SM-FILE-001` | 文件 | uploading / checking / approved / quarantined / bound / pending_cleanup / deleted | complete、pass、danger、service_unavailable、bind_submit、no_refs、cleaned、formal_delete |
 | `SM-NTF-001` | 通知事实/渠道 | pending / delivered / read / paused / failed | deliver、pause、resume、email_success、email_failed_24h、read |
 | `SM-AUD-001` | 纠错 | draft / submitted / overdue / approved / rejected / withdrawn / executed | submit、approve、reject、withdraw、deadline、execute |
-| `SM-EXP-001` | 导出任务 | pending / generating / completed / failed / denied / expired / deleted | start、success、fail、lose_rights、expire、download、delete、formal_delete_hit、retry |
+| `SM-EXP-001` | 导出任务 | pending / generating / processing / completed / failed / denied / expired / deleted | start、start_processing、success、fail、lose_rights、expire、download、delete、formal_delete_hit、retry |
 
 ## 3. 跨状态机联动要点
 
