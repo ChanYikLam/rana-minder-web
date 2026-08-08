@@ -646,10 +646,33 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      const input = body.input || {}
+      const hasUpdate = (typeof input.email === 'string' && input.email) || (typeof input.phone === 'string' && input.phone)
+
+      // 空 input 不消耗版本号：无实际数据变更时跳过版本递增，直接返回当前资料
+      // 避免「乐观锁版本登记先于保存」导致空 input:{} 也消耗版本号，使连续空提交版本不断递增
+      if (!hasUpdate) {
+        return {
+          code: 0,
+          data: {
+            version: currentVersion,
+            studentId: user.studentId,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
+            syncStatus: {
+              email: 'synced',
+              phone: user.profileComplete ? 'pending' : 'synced',
+            },
+          },
+        }
+      }
+
       // 版本登记先于保存生效：比对一旦通过即占用新版本号，后续同版本提交必然 409，
       // 保证「保存生效与版本登记」原子一致（连续两次 expectedVersion=1 时第二次不会重复落库）
       profileLatestVersion[user.id] = currentVersion + 1
-      const input = body.input || {}
       // 保存生效：白名单字段更新 + 资料补齐（资料门联动 profileComplete）
       if (typeof input.email === 'string' && input.email) user.email = input.email
       if (typeof input.phone === 'string' && input.phone) user.phone = input.phone

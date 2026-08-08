@@ -133,29 +133,43 @@ describe('P1-006 资料保存乐观锁：expectedVersion 与最新版本比对',
     expect(out.data?.version).toBe(2)
   })
 
-  it('连续两次提交 expectedVersion=1：版本比对通过即登记新版本，第二次起一律 409（P2-2 原子一致）', () => {
-    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
-    const stale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
+  it('空 input:{} 不消耗版本号：连续两次空提交均返回 200，版本保持 1（MRM-007）', () => {
+    const first = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
+    expect(first.code).toBe(0)
+    expect(first.data?.version).toBe(1)
+    const second = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
+    expect(second.code).toBe(0)
+    expect(second.data?.version).toBe(1)
+  })
+
+  it('连续两次提交 expectedVersion=1（有实际数据变更）：版本比对通过即登记新版本，第二次起一律 409（P2-2 原子一致）', () => {
+    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'a@example.edu.cn' }, expectedVersion: 1 })
+    const stale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'b@example.edu.cn' }, expectedVersion: 1 })
     expect(stale.statusCode).toBe(409)
     expect(stale.body?.code).toBe('IFC-ERR-008')
     expect(stale.body?.currentData).toBeTruthy()
     // 第三次仍携带旧版本：同样 409，不会因「版本登记滞后于保存生效」被放行
-    const stillStale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
+    const stillStale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'c@example.edu.cn' }, expectedVersion: 1 })
     expect(stillStale.statusCode).toBe(409)
   })
 
-  it('GET /api/auth/profile 返回当前版本号（P2-3：页面乐观锁以响应版本为准）', () => {
+  it('GET /api/auth/profile 返回当前版本号（P2-3：页面乐观锁以响应版本为准，空输入不递增）', () => {
     const first = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
     expect(first.data?.version).toBe(1)
+    // 空输入不消耗版本号
     invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
     const after = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
-    expect(after.data?.version).toBe(2)
+    expect(after.data?.version).toBe(1)
+    // 有实际数据变更才递增版本
+    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'x@example.edu.cn' }, expectedVersion: 1 })
+    const afterSave = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
+    expect(afterSave.data?.version).toBe(2)
   })
 
   it('带上最新版本可继续保存（版本追上后不再冲突）', () => {
-    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
-    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 1 })
-    const latest = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: {}, expectedVersion: 2 })
+    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'a@example.edu.cn' }, expectedVersion: 1 })
+    invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'a@example.edu.cn' }, expectedVersion: 1 })
+    const latest = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'b@example.edu.cn' }, expectedVersion: 2 })
     expect(latest.code).toBe(0)
     expect(latest.data?.version).toBe(3)
   })
