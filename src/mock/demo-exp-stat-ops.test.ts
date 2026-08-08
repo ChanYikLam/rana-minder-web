@@ -413,7 +413,7 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
 
     // 走完状态机：generating → processing → completed（每次 GET 推进一个阶段，elapsed 已越过 3000ms）
     vi.advanceTimersByTime(4000)
-    // 首次结算 generating → processing，第二次结算 processing → completed
+    // 首次结算 generating → processing（返回值不需要，结算副作用才是目的）
     await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
     let list = await invokeHandler('/api/org/:clubId/exports', 'get', '/api/org/club-001/exports')
     let items = (list.body.data as { items: { id: string; status: string }[] }).items

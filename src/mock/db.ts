@@ -81,7 +81,7 @@ export interface MockDepartment {
   name: string
 }
 
-// MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly, MockMember 已移至 db-members.ts（消除循环依赖）
+
 
 export type DeptApplyType = 'join' | 'leave' | 'transfer'
 
@@ -238,7 +238,6 @@ export function searchCandidates(_clubId: string, keyword: string): MockCandidat
   })
 }
 
-// members 数组已移至 db-members.ts（消除循环依赖），通过 import { members } from './db-members' 引用
 
 export const departmentApplications: MockDeptApplication[] = [
   {
@@ -330,6 +329,21 @@ export const exitRequests: MockExitRequest[] = [
     dueAt: daysFromNow(-1),
   },
 ]
+
+/** 种子相对时间偏移（#78 遗留）：resetDb 恢复快照时按当前时钟重算 dueAt/expiredAt/scheduledAt，
+ * 避免模块加载固化绝对时间导致跨天/跨周运行时 overdue 派生漂移、用例脆弱。
+ * 仅登记成员生命周期相关种子的相对时间字段；运行期新建记录走各自 daysFromNow 逻辑。 */
+export const SEED_RELATIVE_OFFSETS: Record<string, { field: 'dueAt' | 'expiredAt' | 'scheduledAt'; days: number }> = {
+  'dap-001': { field: 'dueAt', days: 1 },
+  'dap-002': { field: 'dueAt', days: -1 },
+  'minv-001': { field: 'expiredAt', days: 5 },
+  'minv-002': { field: 'expiredAt', days: -2 },
+  'apc-002': { field: 'scheduledAt', days: 2 },
+  'res-001': { field: 'dueAt', days: 2 },
+  'res-002': { field: 'dueAt', days: -1 },
+  'exit-req-001': { field: 'dueAt', days: 1 },
+  'exit-req-002': { field: 'dueAt', days: -1 },
+}
 
 export interface TransitionCandidate {
   memberId: string
@@ -877,7 +891,6 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
   return { ok: true }
 }
 
-// listMembers, getMemberStats 已移至 db-members.ts（消除循环依赖），通过 import 引用
 
 export function getMemberProfile(clubId: string, memberId: string): MockMember | undefined {
   return findMember(clubId, memberId)
@@ -1013,6 +1026,7 @@ export function markMemberExit(clubId: string, byMemberId: string, memberId: str
   return { ok: true, member: target }
 }
 
-// 向后兼容：重新导出共享模块中的成员数据与查询函数
+// 共享成员数据与基础查询已下沉至 db-members.ts（消除 db.ts ↔ db-organization.ts 循环依赖，MRM-008）。
+// 此处保留向后兼容重导出，避免破坏既有 import 链；新增成员相关查询请直接写入 db-members.ts。
 export { members, listMembers, getMemberStats }
 export type { MockMember, MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly }

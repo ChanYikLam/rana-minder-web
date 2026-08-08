@@ -23,7 +23,7 @@ import * as formdb from './db-forms'
 import {
   HIGH_RISK_COMMANDS, trackAccessEvent, listAnomalyAlerts, acknowledgeAnomaly,
   getRealDataSwitch, setRealDataSwitch, getOidcConfig, updateOidcConfig,
-  issueReauthProof, consumeReauthProof, assertHighRisk,
+  issueReauthProof, consumeReauthProof, assertHighRisk, resetGovernanceState,
 } from './governance'
 
 /** 重认证 proof 机制（issueReauthProof / consumeReauthProof / assertHighRisk）统一由 governance.ts 提供 */
@@ -225,6 +225,8 @@ function templateSeed(): PermissionTemplate[] {
   ]
 }
 const permissionTemplates = templateSeed()
+/** MRM-010：权限模板种子快照（模板数组会被 新建/保存/diff/发布 直接改写，需随平台域重置还原） */
+const permissionTemplatesSeed: PermissionTemplate[] = structuredClone(permissionTemplates)
 let templatePreviewVersion = 1
 
 /** 平台配置（US-CFG：内存态持久化；学年/届次为平台级字段，社团域不携带——P2-3） */
@@ -278,6 +280,8 @@ const retentionPolicies: RetentionPolicy[] = [
   { id: 'rp-002', scope: '过期招新活动', retentionDays: 730, action: 'archive', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
   { id: 'rp-003', scope: '审计日志', retentionDays: 1095, action: 'keep', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
 ]
+/** MRM-010：保留策略种子快照（新建草稿/发布会改写数组与 previewVersion，需随平台域重置还原） */
+const retentionPoliciesSeed: RetentionPolicy[] = structuredClone(retentionPolicies)
 let retentionPreviewVersion = 1
 
 /**
@@ -323,9 +327,13 @@ let lastRetentionExecution: { runId: string; executedAt: string; results: Retent
 
 const retentionSubjectsSeed: RetentionSubject[] = structuredClone(retentionSubjects)
 
-/** 测试/演示用：重置保留策略执行器状态（受控对象恢复 active、清空上次执行记录） */
+/** 测试/演示用：重置保留策略执行器状态（受控对象恢复 active、清空上次执行记录）。
+ * MRM-010：一并还原 retentionPolicies（新建草稿/发布会改写数组）与 retentionPreviewVersion，
+ * 避免「先跑发布用例、再跑断言策略状态用例」时策略残留（如多出一条已发布草稿）。 */
 export function resetRetentionState(): void {
   retentionSubjects.splice(0, retentionSubjects.length, ...structuredClone(retentionSubjectsSeed))
+  retentionPolicies.splice(0, retentionPolicies.length, ...structuredClone(retentionPoliciesSeed))
+  retentionPreviewVersion = 1
   lastRetentionExecution = null
 }
 
@@ -432,12 +440,18 @@ const sharedStateSeed = {
   templatePreviewVersion,
 } as const
 
-/** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号。
+/** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号 /
+ * 权限模板 / 保留策略 / 重认证 proof 等治理状态 / 任期提醒去重桶。
  * 与 reset.ts 的 resetDb/resetRecruitmentDB 等并列，供测试与演示环境一键还原。
  *
  * MRM-009：seed 中静态时间戳的 completed 任务（exp-001/exp-003）在 reset 时把 expiredAt 重新设到
  * "当前时间 + 7 天"——保证演示与测试期间 seed 任务不会被 settleExportTask 误转 expired，也不会被
- * gcExportTasks 清出；动态创建的任务走正常过期与 GC 路径。 */
+ * gcExportTasks 清出；动态创建的任务走正常过期与 GC 路径。
+ *
+ * MRM-010：补平台域共享状态缺失的重置——permissionTemplates / retentionPolicies /
+ * retentionPreviewVersion / lastRetentionExecution（复用 resetRetentionState）以及
+ * reauthProofs、真实数据开关、异常访问告警（resetGovernanceState）、termRemindSent 去重桶；
+ * 否则「先跑含发布用例的测试、再跑断言策略状态的用例」时发布残留会污染后续断言。 */
 export function resetSharedState(): void {
   const futureExpiry = new Date(Date.now() + 7 * DAY_MS).toISOString()
   const rehydratedExportTasks = structuredClone(sharedStateSeed.exportTasks).map((t) => (
@@ -451,6 +465,14 @@ export function resetSharedState(): void {
   Object.assign(platformConfig, structuredClone(sharedStateSeed.platformConfig))
   platformConfigVersion = sharedStateSeed.platformConfigVersion
   templatePreviewVersion = sharedStateSeed.templatePreviewVersion
+  // MRM-010：权限模板数组还原（发布/保存/diff 会改写模板状态与 previewVersion）
+  permissionTemplates.splice(0, permissionTemplates.length, ...structuredClone(permissionTemplatesSeed))
+  // MRM-010：保留策略数组/previewVersion/执行记录还原（新建草稿与发布会改写）
+  resetRetentionState()
+  // MRM-010：重认证 proof、真实数据开关、异常访问告警与高风险命令 enforced 标志复位
+  resetGovernanceState()
+  // MRM-010：任期到期提醒去重桶清空，避免跨用例重复投递去重残留
+  termRemindSent.clear()
   db.resetAnomalySeq()
 }
 
@@ -716,10 +738,13 @@ const identityHandlers: MockMethod[] = [
         }
       }
       const input = body.input || {}
-      const hasUpdate = (typeof input.email === 'string' && input.email) || (typeof input.phone === 'string' && input.phone)
+      // 仅当字段「非空且与现值不同」才算实际数据变更：空 input:{} 不消耗版本号，
+      // 「编辑后原样提交」（提交值 === 现值）同样不消耗，避免无实际差异的提交使版本不断递增
+      const hasUpdate =
+        (typeof input.email === 'string' && input.email !== '' && input.email !== user.email) ||
+        (typeof input.phone === 'string' && input.phone !== '' && input.phone !== user.phone)
 
-      // 空 input 不消耗版本号：无实际数据变更时跳过版本递增，直接返回当前资料
-      // 避免「乐观锁版本登记先于保存」导致空 input:{} 也消耗版本号，使连续空提交版本不断递增
+      // 无实际数据变更时跳过版本递增，直接返回当前资料
       if (!hasUpdate) {
         return {
           code: 0,
@@ -1443,12 +1468,12 @@ const memberHandlers: MockMethod[] = [
       const activeMembers = list.filter((m) => m.status === 'active')
       const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
       const deptSource = scope ? db.departments.filter((d) => d.name === scope) : db.departments
-      // MEM-004：任期提醒派生（memberId → 最近到期日），供列表红点提示
-      const termEndByMember = new Map<string, string>()
+      // MEM-004：任期提醒派生（memberId → 最近到期日 + 剩余天数），供列表红点/剩余天数透出
+      const termEndByMember = new Map<string, { termEndAt: string; daysLeft: number }>()
       for (const u of db.upcomingTermEnd(query.clubId, platformConfig.termRemindDays)) {
         const end = u.position.plannedEndDate as string
         const cur = termEndByMember.get(u.memberId)
-        if (!cur || end < cur) termEndByMember.set(u.memberId, end)
+        if (!cur || end < cur.termEndAt) termEndByMember.set(u.memberId, { termEndAt: end, daysLeft: u.daysLeft })
       }
       const byDepartment = deptSource.map((d) => ({
         id: d.id,
@@ -1479,7 +1504,8 @@ const memberHandlers: MockMethod[] = [
               title: activePositions[0]?.title || '成员',
               status: m.status, joinedAt: m.joinedAt.slice(0, 10),
               exitedAt: m.exitedAt ? m.exitedAt.slice(0, 10) : null,
-              termEndAt: termEndByMember.get(m.id) ?? null,
+              termEndAt: termEndByMember.get(m.id)?.termEndAt ?? null,
+              termDaysLeft: termEndByMember.get(m.id)?.daysLeft ?? null,
             }
           }),
           stats: {
@@ -1795,7 +1821,7 @@ const memberHandlers: MockMethod[] = [
   {
     url: '/api/org/:clubId/members/appointments',
     method: 'post',
-response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null; candidateStudentId?: string | null } } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: { action: string; memberId: string; departmentId: string | null; title: string | null; scheduledAt: string | null; candidateStudentId?: string | null } } }) => {
       const user = resolveMockUser(url)
       const actor = actorMemberId(user, query.clubId)
       const member = actor ? db.findMember(query.clubId, actor) : undefined
@@ -2731,7 +2757,9 @@ response: ({ url }: { url: string }) => {
           name: '报名附件.pdf',
           size: 1024 * (8 + Math.floor(Math.random() * 32)),
           mimeType: 'application/octet-stream',
-          status: 'clean',
+          // 与 FilePreviewPage 下载条件一致（status === 'approved' 才显示下载按钮）；
+          // 与 recruitment-api 注册的 /api/files/:fileId 返回 approved 统一口径
+          status: 'approved',
           uploadedAt: new Date().toISOString(),
           checkedAt: new Date().toISOString(),
           downloadUrl: null,
@@ -2772,7 +2800,8 @@ response: ({ url }: { url: string }) => {
           name,
           size: 1024 * (8 + Math.floor(Math.random() * 32)),
           mimeType: 'application/octet-stream',
-          status: 'clean',
+          // 上传完成后即视为已通过 mock 安全检查，与 FilePreviewPage 下载条件（approved）一致
+          status: 'approved',
           uploadedAt: new Date().toISOString(),
         },
       }

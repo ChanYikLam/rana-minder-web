@@ -49,4 +49,13 @@ describe('MyInterviewTasksPage 我的面试任务', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('未排期')
   })
+
+  it('任务卡片提供「去评价」入口，锚定对应申请人跳转评价页', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [task] } })
+    const wrapper = mount(MyInterviewTasksPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    const link = wrapper.find('a[href="/org/club-001/recruitment/act-1/review?applicantId=app-1"]')
+    expect(link.exists(), '缺少去评价入口链接').toBe(true)
+    expect(link.text()).toContain('去评价')
+  })
 })

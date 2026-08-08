@@ -5,7 +5,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import { ScheduleView, type ScheduleSlot } from '@/components/display'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
-import { Calendar, Clock, AlertTriangle, User } from '@lucide/vue'
+import { Calendar, Clock, AlertTriangle, User, Edit3 } from '@lucide/vue'
 
 interface InterviewTask {
   id: string
@@ -116,6 +116,13 @@ onMounted(loadData)
                   <AlertTriangle :size="12" /> 时间冲突
                 </span>
                 <StateTag :status="t.status" />
+                <!-- Issue-4.0-1: 任务卡片提供评价入口，锚定对应申请人 -->
+                <router-link
+                  :to="`/org/${t.clubId}/recruitment/${t.activityId}/review?applicantId=${t.applicantId}`"
+                  class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-primary-subtle text-primary hover:bg-primary/15 transition-colors"
+                >
+                  <Edit3 :size="12" /> 去评价
+                </router-link>
               </div>
             </div>
             <p v-if="t.conflict.conflict && t.conflict.detail" class="mt-2 text-xs text-danger">{{ t.conflict.detail }}</p>
