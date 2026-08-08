@@ -37,7 +37,6 @@ async function loadData() {
 const wizardClub = computed<ClubItem | undefined>(() => items.value.find((c) => c.status === 'wizard_pending'))
 
 const groupKeyword = ref('')
-const groupSearchFailed = ref(false)
 const groupResults = ref<SearchResult[]>([])
 const rawResults = ref<GroupSearchResult[]>([])
 const selectedGroup = ref<GroupSearchResult | null>(null)
@@ -47,7 +46,6 @@ const selectedRoleGroups = ref<string[]>([])
 const selectedLeaderRoleGroup = ref<string>('')
 const groupDetail = ref<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] } | null>(null)
 const groupDetailSeq = ref(0)
-const wizardError = ref('')
 
 interface GroupDetailData {
   id: string
@@ -82,7 +80,6 @@ async function echoWizardSelection() {
   selectedDeptGroups.value = club.wizard?.deptGroups ?? []
   selectedRoleGroups.value = club.wizard?.roleGroups ?? []
   selectedLeaderRoleGroup.value = club.wizard?.leaderRoleGroup ?? ''
-  wizardError.value = ''
 }
 
 function toSearchResult(g: GroupSearchResult): SearchResult {
@@ -93,24 +90,21 @@ function toSearchResult(g: GroupSearchResult): SearchResult {
 const { searching: groupSearching, seq: groupSearchSeq, schedule: scheduleGroupSearch } = useDebouncedSearch({
   onSearch: async (kw) => {
     if (!kw) {
-      groupSearchFailed.value = false
       groupResults.value = []
       rawResults.value = []
       return
     }
-    groupSearchFailed.value = false
     const mySeq = groupSearchSeq.value
     const res = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: kw })
     if (mySeq !== groupSearchSeq.value) return
     if (res.kind === 'completed') {
       rawResults.value = res.data.items
       groupResults.value = res.data.items.map(toSearchResult)
-      groupSearchFailed.value = false
     } else {
       // 搜索失败（非 completed）：清空旧结果并提示，与其余两处保持一致
       rawResults.value = []
       groupResults.value = []
-      groupSearchFailed.value = true
+      toast.error('Group 搜索失败，请重试')
     }
   },
 })
@@ -129,7 +123,6 @@ async function onGroupSelect(result: SearchResult) {
   selectedRoleGroups.value = []
   selectedLeaderRoleGroup.value = ''
   groupDetail.value = null
-  wizardError.value = ''
   await saveWizardStep({ step: 1, selectedGroupId: result.id, leaderGroupId: null, deptGroups: [], roleGroups: [], leaderRoleGroup: '' })
   const seq = ++groupDetailSeq.value
   const detail = await get<{ members: { id: string; name: string }[]; leaderGroups: { id: string; name: string; memberCount: number }[] }>(`/admin/groups/${result.id}`)
@@ -163,7 +156,7 @@ async function saveWizardStep(patch: { step: number; selectedGroupId?: string | 
   if (res.kind === 'completed') {
     await loadData()
   } else {
-    wizardError.value = 'error' in res && res.error ? (res.error as { message?: string }).message || '保存失败，请重试' : '保存失败，请重试'
+    toastError(res, '保存失败，请重试')
   }
 }
 
@@ -171,7 +164,7 @@ async function selectLeader(groupId: string) {
   if (!selectedGroup.value) return
   const leaders = groupDetail.value?.leaderGroups ?? []
   if (!leaders.some((g) => g.id === groupId)) {
-    wizardError.value = '负责人职位 Group 不属于当前所选社团，请重新选择'
+    toast.warning('负责人职位 Group 不属于当前所选社团，请重新选择')
     return
   }
   selectedLeaderId.value = groupId
@@ -199,15 +192,15 @@ const completingBusy = ref(false)
 async function handleComplete() {
   if (!wizardClub.value) return
   if (!selectedGroup.value) {
-    wizardError.value = '请先选择要接入的 Group'
+    toast.warning('请先选择要接入的 Group')
     return
   }
   if (!selectedLeaderId.value) {
-    wizardError.value = '请指定负责人职位 Group'
+    toast.warning('请指定负责人职位 Group')
     return
   }
   if (!wizardBindingWarning.value.ok) {
-    wizardError.value = wizardBindingWarning.value.message
+    toast.warning(wizardBindingWarning.value.message)
     return
   }
   completingBusy.value = true
@@ -218,7 +211,7 @@ async function handleComplete() {
     await loadData()
     activeTab.value = 'manage'
   } else {
-    wizardError.value = 'error' in res && res.error ? (res.error as { message?: string }).message || '接入失败，请重试' : '接入失败，请重试'
+    toastError(res, '接入失败，请重试')
   }
 }
 
@@ -371,8 +364,7 @@ onMounted(loadData)
               @update:model-value="onGroupInput"
               @select="onGroupSelect"
             />
-            <p v-if="groupSearchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
-            <p v-else-if="groupKeyword.trim() && !groupSearching && groupResults.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的 Group</p>
+            <p v-if="groupKeyword.trim() && !groupSearching && groupResults.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的 Group</p>
             <p v-if="selectedGroup" class="mt-2 flex items-center gap-1.5 text-xs" :class="wizardBindingWarning.ok ? 'text-success' : 'text-danger'">
               <CheckCircle2 v-if="wizardBindingWarning.ok" :size="14" />
               <Info v-else :size="14" />
@@ -404,7 +396,6 @@ onMounted(loadData)
 
           <!-- 步骤4：完成 -->
           <div class="flex items-center justify-between">
-            <p v-if="wizardError" class="text-xs text-danger" role="alert">{{ wizardError }}</p>
             <div class="ml-auto flex gap-2">
               <button class="px-3 py-1.5 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="activeTab = 'manage'">暂存</button>
               <button class="px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60" :disabled="completingBusy" @click="handleComplete">

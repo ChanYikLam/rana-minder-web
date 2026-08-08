@@ -3,12 +3,19 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ path: '/me/corrections', meta: { view: 'self' } }),
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
+}))
+vi.mock('vue-sonner', () => ({
+  toast: { success: mockToastSuccess, error: mockToastError },
+}))
+vi.mock('@/utils/toastError', () => ({
+  toastError: mockToastError,
 }))
 
 import CorrectionPage from './CorrectionPage.vue'
@@ -22,6 +29,8 @@ describe('CorrectionPage 事实纠错', () => {
   beforeEach(() => {
     mockGet.mockReset()
     mockPost.mockReset()
+    mockToastSuccess.mockReset()
+    mockToastError.mockReset()
     vi.clearAllMocks()
   })
   afterEach(() => vi.restoreAllMocks())
@@ -45,6 +54,7 @@ describe('CorrectionPage 事实纠错', () => {
     mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
     await flushPromises()
+    console.log('mockGet results:', JSON.stringify(mockGet.mock.results.map(r => r.value?.kind ?? r.type)))
     expect(wrapper.text()).not.toContain('状态显示错误')
   })
 
@@ -81,7 +91,7 @@ describe('CorrectionPage 事实纠错', () => {
     expect(mockPost).toHaveBeenCalledWith('/me/corrections', {
       targetType: '成员信息', targetId: 'mem-001', reason: '手机号有误', evidence: '截图',
     })
-    expect(wrapper.text()).toContain('纠错申请已提交')
+    expect(mockToastSuccess).toHaveBeenCalledWith('纠错申请已提交，等待审核')
     wrapper.unmount()
   })
 })

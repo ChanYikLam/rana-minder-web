@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -38,7 +38,6 @@ const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const allowAdjustment = ref(true)
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
-const savedDraft = ref(false)
 const savingDraft = ref(false)
 
 /** 草稿/已提交 answers 中 file 字段值兼容两种历史形态：fileId 字符串或 FileMeta[]（逻辑见 src/lib/formFile） */
@@ -221,10 +220,6 @@ function onPickDepartments(ids: string[]) {
   preferences.value = [...kept, ...added]
 }
 
-watch([formData, preferences], () => {
-  savedDraft.value = false
-}, { deep: true })
-
 async function handleSaveDraft() {
   if (!showApplyForm.value) return
   savingDraft.value = true
@@ -246,7 +241,6 @@ async function handleSaveDraft() {
   savingDraft.value = false
   if (result.kind === 'completed') {
     const savedAt = (result.data as { savedAt?: string }).savedAt
-    savedDraft.value = true
     toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
   } else {
     toast.error('草稿保存失败，请稍后重试')
@@ -264,7 +258,6 @@ async function handleSubmit() {
   if (!showApplyForm.value) return
   formErrors.value = {}
   submitError.value = null
-
   for (const field of formFields.value) {
     const value = formData.value[field.id]
     if (field.required && !isFilled(value, field)) {
@@ -294,10 +287,8 @@ async function handleSubmit() {
   if (result.kind === 'completed') {
     router.push('/me/ongoing')
   } else if (result.kind === 'rejected') {
-    submitError.value = result.error.message
     toast.error(result.error.message)
   } else {
-    submitError.value = '提交失败，请稍后重试'
     toast.error('提交失败，请稍后重试')
   }
 }
@@ -452,7 +443,6 @@ onUnmounted(() => {
 
       <!-- 错误提示 -->
       <p v-if="submitError && showApplyForm" class="text-sm text-danger mb-4" role="alert">{{ submitError }}</p>
-      <p v-if="savedDraft && showApplyForm" class="text-sm text-success mb-4" role="status">草稿已保存</p>
 
       <!-- 操作区（已提交/已归档/终态后隐藏） -->
       <ResponsiveActionRegion v-if="showApplyForm" page-family="form">

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, CheckCircle2 } from '@lucide/vue'
 
@@ -22,7 +23,6 @@ const detail = ref<InterviewDetail | null>(null)
 const selectedSlotId = ref<string | null>(null)
 const booking = ref(false)
 const leaving = ref(false)
-const bookError = ref<string | null>(null)
 
 async function loadDetail() {
   state.value = 'loading'
@@ -68,26 +68,26 @@ const bookLabel = computed(() => {
 async function handleBookSlot() {
   if (!selectedSlotId.value || !detail.value) return
   booking.value = true
-  bookError.value = null
   const result = await post(`/me/interviews/recruitment/${detail.value.id}/book`, { slotId: selectedSlotId.value })
   booking.value = false
   if (result.kind === 'completed') {
+    toast.success('时段已预约')
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    bookError.value = (result.error as { message?: string }).message || '操作失败，请稍后重试'
+    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
   }
 }
 
 async function handleLeave() {
   if (!detail.value || leaving.value) return
   leaving.value = true
-  bookError.value = null
   const result = await post(`/me/interviews/recruitment/${detail.value.id}/leave`)
   leaving.value = false
   if (result.kind === 'completed') {
+    toast.success('已登记请假，可重新选择时段')
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    bookError.value = (result.error as { message?: string }).message || '请假失败，请稍后重试'
+    toast.error((result.error as { message?: string }).message || '请假失败，请稍后重试')
   }
 }
 
@@ -162,8 +162,6 @@ onMounted(loadDetail)
             </div>
           </button>
         </div>
-
-        <p v-if="bookError" class="mt-3 text-sm text-danger" role="alert">{{ bookError }}</p>
 
         <button
           v-if="selectedSlotId"

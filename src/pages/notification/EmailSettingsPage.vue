@@ -15,7 +15,6 @@ const session = useSessionViewStore()
 const state = ref<PageState>('loading')
 const config = ref({ smtpHost: '', smtpPort: 465, smtpUser: '', fromName: '', encryption: 'ssl', verified: false })
 const testing = ref(false)
-const testResult = ref<string | null>(null)
 const testError = ref<string | null>(null)
 const saving = ref(false)
 const savingPrefs = ref(false)
@@ -82,7 +81,6 @@ async function loadData() {
 
 async function handleTest() {
   testing.value = true
-  testResult.value = null
   testError.value = null
   const apiScope = resolveApiScope(route)
   if (!apiScope) { testing.value = false; return }
@@ -97,7 +95,7 @@ async function handleTest() {
   })
   testing.value = false
   if (result.kind === 'completed') {
-    testResult.value = '测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收'
+    toast.success('测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收')
   } else {
     // 保留通用引导文案，同时透出服务端具体原因（如连接超时），便于定位
     const detail = result.kind === 'rejected' && result.error?.message ? `（${result.error.message}）` : ''
@@ -252,8 +250,6 @@ onMounted(loadData)
         </Card>
 
         <Banner v-if="config.verified" tone="success" title="发信配置已验证" class="mb-4" />
-
-        <p v-if="testResult" class="text-sm text-success mb-4" role="status">{{ testResult }}</p>
 
         <ErrorState
           v-if="testError"

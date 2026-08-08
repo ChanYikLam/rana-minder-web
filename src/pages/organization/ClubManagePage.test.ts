@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
-const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
+const { mockToastSuccess, mockToastError, mockToastWarning } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn(), mockToastWarning: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: {} }),
   useRouter: () => ({ push: vi.fn() }),
@@ -13,7 +13,10 @@ vi.mock('@/services/client', () => ({
   post: (...args: unknown[]) => mockPost(...args),
 }))
 vi.mock('vue-sonner', () => ({
-  toast: { success: mockToastSuccess, error: mockToastError },
+  toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning },
+}))
+vi.mock('@/utils/toastError', () => ({
+  toastError: mockToastError,
 }))
 
 import ClubManagePage from './ClubManagePage.vue'
@@ -122,7 +125,7 @@ describe('ClubManagePage 社团管理', () => {
     await flushPromises()
 
     await wrapper.findAll('button').find((b) => b.text().includes('完成接入并启用'))!.trigger('click')
-    expect(wrapper.text()).toContain('请先选择要接入的 Group')
+    expect(mockToastWarning).toHaveBeenCalledWith('请先选择要接入的 Group')
     wrapper.unmount()
   })
 

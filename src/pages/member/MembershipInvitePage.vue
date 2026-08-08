@@ -48,7 +48,6 @@ const actingId = ref<string | null>(null)
 const showSend = ref(false)
 const candidateKeyword = ref('')
 const candidates = ref<Candidate[]>([])
-const searchFailed = ref(false)
 const selectedCandidate = ref<Candidate | null>(null)
 const targetDept = ref('')
 const sendError = ref('')
@@ -134,21 +133,18 @@ const { searching: candidateSearching, seq: candidateSeq, schedule: scheduleSear
   onSearch: async (kw) => {
     if (!kw) {
       candidates.value = []
-      searchFailed.value = false
       return
     }
-    searchFailed.value = false
     const clubId = route.params.clubId as string
     const mySeq = candidateSeq.value
     const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: kw })
     if (mySeq !== candidateSeq.value) return
     if (r.kind === 'completed') {
       candidates.value = r.data.items
-      searchFailed.value = false
     } else {
       // 搜索失败（非 completed）：清空旧候选结果，避免残留误导
       candidates.value = []
-      searchFailed.value = true
+      toast.error('候选人搜索失败，请重试')
     }
   },
 })
@@ -172,7 +168,6 @@ function onSelectCandidate(r: SearchResult) {
 function openSend() {
   candidateKeyword.value = ''
   candidates.value = []
-  searchFailed.value = false
   selectedCandidate.value = null
   targetDept.value = departments.value[0]?.id ?? ''
   sendError.value = ''
@@ -198,7 +193,7 @@ async function handleSend() {
     showSend.value = false
     await loadData()
   } else {
-    sendError.value = '发送失败，请重试'
+    toastError(r, '发送失败，请重试')
   }
 }
 
@@ -357,8 +352,7 @@ onMounted(loadData)
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword.trim() && searchFailed" class="mt-2 text-xs text-danger" role="alert">候选人搜索失败，请重试</p>
-              <p v-else-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
+              <p v-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
