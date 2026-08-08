@@ -130,7 +130,7 @@ describe('成员提交报名权限链路（member 身份）', () => {
     expect(userIdOfApplicant(app!.applicantId)).toBe('user-member-001')
   })
 
-  it('管理角色（hr）不自动注册为申请人，报名返回 403', async () => {
+  it('管理角色（hr）报名其他社团招新成功（200），动态注册申请人档案（Issue-4.0-2）', async () => {
     const HR_KEY = mockUserKeyOf('user-hr-001')
     resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
     const out = await invokeHandler(applyUrl, otherClubUrl, {
@@ -138,7 +138,38 @@ describe('成员提交报名权限链路（member 身份）', () => {
       preferences: [{ departmentId: 'dept-101' }],
       allowAdjustment: true,
     })
-    expect(out.statusCode).toBe(403)
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === '20210003')
+    expect(app, 'hr 申请未落库').toBeTruthy()
+    expect(app!.applicantId.startsWith('u-auto-')).toBe(true)
+    expect(app!.applicantName).toBe('李思颖')
+  })
+
+  it('管理角色（leader）报名所在社团招新仍被业务规则拒绝（422，非 403）', async () => {
+    const LEADER_KEY = mockUserKeyOf('user-leader-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${LEADER_KEY}`)
+    for (const url of [ownClubUrl, otherClubUrl]) {
+      const out = await invokeHandler(applyUrl, url, {
+        formData: {},
+        preferences: [{ departmentId: 'dept-001' }],
+        allowAdjustment: true,
+      })
+      expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+      expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
+    }
+  })
+
+  it('平台管理员（super_admin）作为在校学生亦可报名其他社团招新（200）', async () => {
+    const ADMIN_KEY = mockUserKeyOf('user-admin-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${ADMIN_KEY}`)
+    const out = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === '20210001')
+    expect(app, 'super_admin 申请未落库').toBeTruthy()
   })
 
   it('同毫秒注册多个档案 id 不冲突（递增后缀）', () => {

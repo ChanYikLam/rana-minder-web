@@ -126,15 +126,13 @@ function notFound(message = '请求的内容不存在或已被移除') {
 
 const ok = (data: unknown) => ({ code: 0, data })
 
-/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户仅限非管理角色
- * （member/applicant）按学号复用/注册申请人档案，使其可报名其他社团招新与联合活动；
- * 管理角色（super_admin/club_leader/hr/department_leader/interviewer）不自动注册为申请人 */
+/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户按学号复用/注册申请人档案，
+ * 使其可报名其他社团招新与联合活动（Issue-4.0-2：不再排除管理角色，干事/负责人/人事/面试官同为在校学生）
+ * 本社报名本社的拦截由 apply 端点按目标社团成员关系校验（isExistingMember → 422），双端语义一致 */
 function actorApplicantId(user: MockUser): string | null {
   const mapped = USER_APPLICANT_MAP[user.id]
   if (mapped) return mapped
   if (!user.studentId) return null
-  const primaryRole = user.roles[0]?.role
-  if (primaryRole !== 'member' && primaryRole !== 'applicant') return null
   return rdb.ensureApplicantProfile(user.studentId, user.name || '')
 }
 
