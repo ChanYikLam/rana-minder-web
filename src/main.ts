@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import '../node_modules/vue-sonner/lib/index.css'
+import 'vue-sonner/style.css'
 import './styles/global.css'
 import App from './App.vue'
 import router from './router'

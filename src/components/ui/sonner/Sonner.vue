@@ -13,11 +13,12 @@ import { Toaster as Sonner } from 'vue-sonner'
 import { cn } from '@/lib/utils'
 
 const props = defineProps<ToasterProps>()
-const delegatedProps = reactiveOmit(props, 'class', 'toastOptions', 'position', 'gap', 'offset', 'visibleToasts')
+const delegatedProps = reactiveOmit(props, 'class', 'toastOptions', 'position', 'gap', 'offset', 'visibleToasts', 'richColors')
 </script>
 
 <template>
   <Sonner
+    rich-colors
     position="top-center"
     :gap="8"
     :offset="16"
