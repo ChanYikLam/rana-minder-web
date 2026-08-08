@@ -230,7 +230,7 @@ describe('ExportPage 任务列表与轮询', () => {
   it('下载已完成任务：请求下载地址并提示开始下载', async () => {
     const completedTask = {
       id: 'exp-003', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
-      completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-08-08T04:00:00Z',
+      completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-09-08T04:00:00Z',
       downloadUrl: '/files/3.xlsx', fileSize: 2048,
     }
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [completedTask] } })
@@ -263,10 +263,33 @@ describe('ExportPage 任务列表与轮询', () => {
     wrapper.unmount()
   })
 
+  it('MRM-009：completed 任务 expiredAt 已过——前端拦截下载并提示重新导出', async () => {
+    const expiredTask = {
+      id: 'exp-005', type: '成员名单', status: 'completed', createdAt: '2026-08-01T04:00:00Z',
+      completedAt: '2026-08-01T04:01:00Z', expiredAt: '2026-08-02T04:00:00Z',
+      downloadUrl: '/files/5.xlsx', fileSize: 2048,
+    }
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [expiredTask] } })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('下载'))!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    // 过期任务不弹出下载确认框，且给出明确提示
+    expect(toast.info).toHaveBeenCalledWith('导出链接已过期，请重新导出')
+    expect(wrapper.findAll('.hrc').some((h) => h.text().includes('确认下载'))).toBe(false)
+    expect(mockPost).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('下载：空原因被拦截', async () => {
     const completedTask = {
       id: 'exp-004', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
-      completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-08-08T04:00:00Z',
+      completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-09-08T04:00:00Z',
       downloadUrl: '/files/4.xlsx', fileSize: 2048,
     }
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [completedTask] } })
