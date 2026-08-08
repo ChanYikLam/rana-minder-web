@@ -148,6 +148,26 @@ describe('ApplicationPage 状态渲染', () => {
     expect(wrapper.text()).toContain('提交报名')
   })
 
+  it('无报名资格（403）：展示阻断提示，隐藏表单与操作按钮（Issue-4.0-2）', async () => {
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: mockActivity })
+    mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: { versions: [{ fields: mockFormFields }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'rejected' as const, error: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限' } })
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 阻断提示可见
+    expect(wrapper.text()).toContain('当前账号无报名资格')
+
+    // 表单区域与操作按钮不可见
+    expect(wrapper.text()).not.toContain('意向方向')
+    expect(wrapper.text()).not.toContain('报名表单')
+    expect(wrapper.text()).not.toContain('保存草稿')
+    expect(wrapper.text()).not.toContain('提交报名')
+  })
+
   it('需修订态：展示修订提示，表单与操作按钮可见', async () => {
     setupGetMocks('revision_requested')
 

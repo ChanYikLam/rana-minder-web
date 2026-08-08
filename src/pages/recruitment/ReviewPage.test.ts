@@ -24,7 +24,7 @@ vi.mock('@/services/client', () => ({
 import ReviewPage from './ReviewPage.vue'
 
 const review = {
-  id: 'app-1', applicantId: 'app-1', applicantName: '张三', departmentName: '技术部',
+  id: 'app-1', applicantId: 'u-1', applicantName: '张三', departmentName: '技术部',
   status: 'in_progress', rating: null, comment: null, concludedAt: null, concludedBy: null,
   reviewId: 'rev-1', roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
   myRating: null, myComment: null, peerViewLocked: false, reviews: [],
@@ -109,7 +109,7 @@ describe('ReviewPage 评审页', () => {
     await clickReviewRow(wrapper)
 
     // 申请详情接口被调用（面试官视角可访问）
-    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/applications/app-1')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/applications/u-1')
     // 表单答案展示
     expect(wrapper.text()).toContain('报名信息')
     expect(wrapper.text()).toContain('自我介绍')
@@ -136,47 +136,54 @@ describe('ReviewPage 评审页', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
-  it('提交评价：使用真实评价主键 reviewId 调用 conclude，成功后 toast 提示', async () => {
+  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败展示 toast + 内联错误，成功后刷新列表', async () => {
     setupGetRouter()
-    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '申请人不存在' } })
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
     await flushPromises()
-    await clickReviewRow(wrapper)
 
+    await clickReviewRow(wrapper)
     await wrapper.find('button[aria-label="4 星"]').trigger('click')
     const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
     expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
     await submitBtn!.trigger('click')
     await flushPromises()
 
-    // Issue-4.0-1: 必须传 rev-xxx 主键，而不是申请 ID app-1
-    expect(mockPost).toHaveBeenCalledWith(
-      '/org/club-001/recruitment/act-1/reviews/rev-1/conclude',
-      { rating: 4, comment: '' },
-    )
-    expect(mockToastSuccess).toHaveBeenCalled()
+    // 契约：conclude 按 applicantId 定位申请人（列表行 applicantId=u-1）
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
+      rating: 4,
+      comment: '',
+    })
+    // 失败不再静默：toast + 内联错误展示
+    expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
+    expect(wrapper.text()).toContain('申请人不存在')
   })
 
-  it('提交评价失败：展示 toast 错误提示，不再静默失败', async () => {
+  it('提交评价成功：toast 提示并刷新列表', async () => {
     setupGetRouter()
-    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: '申请人不存在' } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: { status: 'concluded' } })
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
     await flushPromises()
-    await clickReviewRow(wrapper)
 
+    await clickReviewRow(wrapper)
     await wrapper.find('button[aria-label="4 星"]').trigger('click')
     const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
     expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
     await submitBtn!.trigger('click')
     await flushPromises()
 
-    expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
+      rating: 4,
+      comment: '',
+    })
+    expect(mockToastSuccess).toHaveBeenCalledWith('评价已提交')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews')
   })
 
   it('带 ?applicantId= 锚定进入：自动选中对应申请人', async () => {
     mockUseRoute.mockReturnValue({
       params: { clubId: 'club-001', activityId: 'act-1' },
-      query: { applicantId: 'app-1' },
+      query: { applicantId: 'u-1' },
     })
     setupGetRouter()
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })

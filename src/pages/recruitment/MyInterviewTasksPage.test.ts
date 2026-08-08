@@ -50,7 +50,7 @@ describe('MyInterviewTasksPage 我的面试任务', () => {
     expect(wrapper.text()).toContain('未排期')
   })
 
-  it('任务卡片提供"去评价"入口，锚定对应申请人', async () => {
+  it('任务卡片提供「去评价」入口，锚定对应申请人跳转评价页', async () => {
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [task] } })
     const wrapper = mount(MyInterviewTasksPage, { global: { stubs: pageStubs } })
     await flushPromises()
