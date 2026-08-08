@@ -213,7 +213,7 @@ onMounted(async () => {
               :disabled="actionLoading"
               @click="runAction((row as InvitationRow).id, 'sync')"
             >
-              <RefreshCw :size="12" /> {{ (row as InvitationRow).status === 'sync_failed' ? '重试同步' : '同步生效' }}
+              <CheckCircle2 :size="12" /> {{ (row as InvitationRow).status === 'sync_failed' ? '重试同步' : '同步生效' }}
             </button>
           </div>
         </template>

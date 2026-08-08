@@ -7,6 +7,7 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { ApplicantCard, type ApplicantEntry } from '@/components/display'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { ArrowLeft, ChevronDown } from '@lucide/vue'
 
@@ -91,6 +92,8 @@ async function runAppAction(app: Application, action: string, input?: Record<str
   if (result.kind === 'completed') {
     expandedId.value = null
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败')
   }
@@ -111,6 +114,8 @@ async function runPathAction(app: Application, action: 'decision' | 'waitlist' |
   if (result.kind === 'completed') {
     expandedId.value = null
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败')
   }
@@ -135,6 +140,8 @@ async function handlePublishResult() {
     publishSucceeded.value = true
     expandedId.value = null
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('发布已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     publishError.value = (result.error as { message?: string }).message || '发布失败，请重试'
   }
