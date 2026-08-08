@@ -27,7 +27,6 @@ const applications = ref<JointApp[]>([])
 const slots = ref<Slot[]>([])
 const invalidReason = ref('')
 const actionLoading = ref(false)
-const actionError = ref('')
 const bookOpen = ref(false)
 const bookForm = ref({ applicantId: '', slotId: '' })
 
@@ -61,7 +60,6 @@ function formatTime(iso: string): string {
 async function runAction(applicantId: string, action: string, input?: Record<string, unknown>) {
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(
     `/org/${clubId.value}/joint/${jointId.value}/interviews/${applicantId}/${action}`,
     { ...(input || {}) }
@@ -70,14 +68,13 @@ async function runAction(applicantId: string, action: string, input?: Record<str
   if (result.kind === 'completed') {
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
 async function handleBook() {
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviews/book`, {
     applicantId: bookForm.value.applicantId,
     slotId: bookForm.value.slotId,
@@ -89,7 +86,7 @@ async function handleBook() {
     bookForm.value = { applicantId: '', slotId: '' }
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '预约失败'
+    toast.error((result.error as { message?: string }).message || '预约失败')
   }
 }
 
@@ -127,7 +124,6 @@ async function handleAssignTask() {
   }
   if (actionLoading.value) return
   actionLoading.value = true
-  taskError.value = ''
   const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers`, {
     userId: taskForm.value.userId,
@@ -139,21 +135,20 @@ async function handleAssignTask() {
     taskError.value = ''
     await loadInterviewers()
   } else if (result.kind === 'rejected' && result.error) {
-    taskError.value = (result.error as { message?: string }).message || '指派失败'
+    toast.error((result.error as { message?: string }).message || '指派失败')
   }
 }
 
 async function handleRevokeTask(taskId: string) {
   if (actionLoading.value) return
   actionLoading.value = true
-  taskError.value = ''
   const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers/${taskId}/revoke`, {})
   actionLoading.value = false
   revokingTaskId.value = null
   if (result.kind === 'completed') {
     await loadInterviewers()
   } else if (result.kind === 'rejected' && result.error) {
-    taskError.value = (result.error as { message?: string }).message || '撤销失败'
+    toast.error((result.error as { message?: string }).message || '撤销失败')
   }
 }
 
@@ -290,8 +285,6 @@ onMounted(async () => {
           </div>
         </Card>
       </PermissionGuard>
-
-      <p v-if="actionError" class="mb-3 text-xs text-destructive">{{ actionError }}</p>
 
       <div class="grid gap-3">
         <Card v-for="iv in interviews" :key="iv.id">

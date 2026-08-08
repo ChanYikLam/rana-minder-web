@@ -136,7 +136,7 @@ describe('ReviewPage 评审页', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
-  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败展示 toast + 内联错误，成功后刷新列表', async () => {
+  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败仅 toast 展示，成功后刷新列表', async () => {
     setupGetRouter()
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '申请人不存在' } })
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })

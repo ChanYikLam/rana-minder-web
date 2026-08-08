@@ -7,6 +7,7 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import {
   Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck,
@@ -31,7 +32,7 @@ const submitting = ref(false)
 
 // 管理操作
 const actionLoading = ref(false)
-const actionError = ref('')
+const riskError = ref('')
 const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 
@@ -50,28 +51,27 @@ async function loadDetail() {
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/${action}`, { ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    riskError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error(riskError.value)
   }
 }
 
 async function runChannel(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/channel`, { action, ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -104,7 +104,6 @@ async function openAdjust() {
 async function handleAdjust() {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/clubs`, {
     clubIds: selectedClubs.value,
@@ -115,7 +114,7 @@ async function handleAdjust() {
     adjustOpen.value = false
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '调整失败'
+    toast.error((result.error as { message?: string }).message || '调整失败')
   }
 }
 
@@ -349,8 +348,6 @@ onMounted(loadDetail)
               </button>
             </div>
           </div>
-
-          <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
         </Card>
       </PermissionGuard>
 
@@ -385,7 +382,7 @@ onMounted(loadDetail)
         confirm-label="确认取消"
         reauth-required
         :executing="actionLoading"
-        :error="actionError || null"
+        :error-message="riskError"
         @confirm="runAction('cancel', { confirm: true, reason: '发起方取消联合活动' })"
       />
     </div>

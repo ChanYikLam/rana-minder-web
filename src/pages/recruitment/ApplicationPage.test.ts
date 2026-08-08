@@ -359,7 +359,7 @@ describe('ApplicationPage 交互流程', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('姓名为必填项')
-    expect(wrapper.text()).toContain('请至少选择一个意向方向')
+    expect(toast.error).toHaveBeenCalledWith('请至少选择一个意向方向')
     expect(mockPost).not.toHaveBeenCalled()
   })
 
