@@ -134,7 +134,6 @@ const statusOptions: FilterOption[] = [
   { value: 'suspended', label: '已暂停' },
   { value: 'exiting', label: '退出中' },
   { value: 'exited', label: '已退出' },
-  { value: 'removed', label: '已移除' },
 ]
 
 const filterFields = computed<FilterField[]>(() => {

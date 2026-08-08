@@ -91,7 +91,7 @@ export interface MockMember {
   name: string
   email: string
   phone: string
-  status: 'non_member' | 'pending_effective' | 'active' | 'exiting' | 'exited' | 'removed'
+  status: 'non_member' | 'pending_effective' | 'active' | 'exiting' | 'exited' | 'sync_anomaly'
   positions: MockPosition[]
   tenures: MockTenure[]
   departmentHistory: MockDeptHistoryEntry[]
@@ -601,7 +601,7 @@ export function confirmInvitationSync(invitationId: string): { ok: boolean; erro
  */
 export function createMemberFromAdmission(clubId: string, input: { studentId: string; name: string; departmentId: string | null; departmentName: string | null; acceptedAt: string; email?: string; phone?: string }): { ok: boolean; created: boolean; member?: MockMember; error?: string } {
   if (!input.studentId) return { ok: false, created: false, error: '学号为空，无法创建成员' }
-  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited' && m.status !== 'removed')
+  const existing = members.find((m) => m.clubId === clubId && m.studentId === input.studentId && m.status !== 'exited')
   // exiting（离职中）/pending_effective（待生效）并非可用的在职成员：直接复用会静默产生「已确认但无 active 成员」的边界态，显式报错要求先完成原流程
   if (existing && (existing.status === 'exiting' || existing.status === 'pending_effective')) {
     return { ok: false, created: false, error: `该学号在本社团存在${existing.status === 'exiting' ? '离职中' : '待生效'}的成员记录，请先完成原有流程` }
@@ -772,5 +772,5 @@ export function getMemberProfile(clubId: string, memberId: string): MockMember |
 
 export function getMemberStats(clubId: string): { total: number; active: number; exited: number } {
   const list = listMembers(clubId)
-  return { total: list.length, active: list.filter((m) => m.status === 'active').length, exited: list.filter((m) => m.status === 'exited' || m.status === 'removed').length }
+  return { total: list.length, active: list.filter((m) => m.status === 'active').length, exited: list.filter((m) => m.status === 'exited').length }
 }

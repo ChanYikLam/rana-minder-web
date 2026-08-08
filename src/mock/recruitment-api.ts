@@ -26,7 +26,7 @@ function isErrorEnvelope(v: unknown): v is ErrorEnvelope {
   return !!v && typeof v === 'object' && 'statusCode' in v && typeof (v as ErrorEnvelope).statusCode === 'number'
 }
 
-/** 读取请求体（rawResponse 下自行解析） */
+/** 读取请求体（rawResponse 下自行解析；畸形 JSON 抛 parseError，与 mock-plugin 的 400/IFC-ERR-017 契约对齐） */
 async function readBody(req: RawReq): Promise<unknown> {
   const chunks: any[] = []
   for await (const chunk of req) chunks.push(chunk)
@@ -36,7 +36,7 @@ async function readBody(req: RawReq): Promise<unknown> {
   try {
     return JSON.parse(text)
   } catch {
-    return {}
+    throw Object.assign(new Error('请求体 JSON 解析失败'), { parseError: true })
   }
 }
 
@@ -77,7 +77,7 @@ export function withStatus(handler: MockMethod): MockMethod {
         const query = { ...pathParamsFrom(pathname, handler.url), ...rawQuery }
         const body = await readBody(req)
         const headers = (req.headers || {}) as Record<string, string>
-        const out = (original as (r: unknown) => unknown)({ url: req.url, query, body, headers })
+        const out = await (original as (r: unknown) => unknown)({ url: req.url, query, body, headers })
         res.setHeader('Content-Type', 'application/json')
         if (isErrorEnvelope(out)) {
           res.statusCode = out.statusCode
@@ -86,7 +86,12 @@ export function withStatus(handler: MockMethod): MockMethod {
         }
         res.statusCode = 200
         res.end(JSON.stringify(out ?? { code: 0, data: null }))
-      } catch {
+      } catch (error) {
+        if (error && typeof error === 'object' && 'parseError' in error) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ code: 'IFC-ERR-017', message: '请求体 JSON 解析失败' }))
+          return
+        }
         res.statusCode = 500
         res.end(
           JSON.stringify({
@@ -1402,8 +1407,10 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     url: '/api/files/:fileId',
     method: 'get',
     response: ({ query }: { query: Record<string, string> }) => {
+      const fileId = query.fileId || ''
+      if (!/^file-\d+-[a-z0-9]+$/.test(fileId)) return notFound('文件不存在或已过期')
       return ok({
-        id: query.fileId || 'file-001', name: '作品集.pdf', size: 1048576,
+        id: fileId, name: '作品集.pdf', size: 1048576,
         mimeType: 'application/pdf', status: 'approved',
         uploadedAt: '2025-08-01T14:00:00+08:00', checkedAt: '2025-08-01T14:01:00+08:00', downloadUrl: null,
       })

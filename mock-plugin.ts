@@ -9,7 +9,7 @@ interface MatchedHandler {
   specificity: number
 }
 
-function matchRoute(handler: MockMethod, method: string, pathname: string): MatchedHandler | null {
+export function matchRoute(handler: MockMethod, method: string, pathname: string): MatchedHandler | null {
   if (handler.method.toUpperCase() !== method.toUpperCase()) return null
 
   const names: string[] = []
@@ -24,7 +24,16 @@ function matchRoute(handler: MockMethod, method: string, pathname: string): Matc
   const match = pathname.match(new RegExp(`^/${pattern}/?$`))
   if (!match) return null
 
-  const params = Object.fromEntries(names.map((name, index) => [name, decodeURIComponent(match[index + 1] || '')]))
+  const params = Object.fromEntries(
+    names.map((name, index) => {
+      const raw = match[index + 1] || ''
+      try {
+        return [name, decodeURIComponent(raw)]
+      } catch {
+        return [name, raw]
+      }
+    }),
+  )
   return { handler, params, specificity: segments.length * 10 - names.length }
 }
 

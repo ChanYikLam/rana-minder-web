@@ -1055,7 +1055,7 @@ const memberHandlers: MockMethod[] = [
         ? list.filter((m) => m.name.includes(search) || m.studentId === search)
         : list
       const activeMembers = list.filter((m) => m.status === 'active')
-      const exitedMembers = list.filter((m) => m.status === 'exited' || m.status === 'removed')
+      const exitedMembers = list.filter((m) => m.status === 'exited')
       const deptSource = scope ? db.departments.filter((d) => d.name === scope) : db.departments
       const byDepartment = deptSource.map((d) => ({
         id: d.id,
@@ -1529,7 +1529,7 @@ const memberHandlers: MockMethod[] = [
       if (!canManageMembers(user, query.clubId)) return forbidden()
       const scope = departmentScopeFor(user, query.clubId)
       const list = db.listMembers(query.clubId).filter((m) =>
-        !scope || m.positions.some((p) => p.departmentName === scope),
+        m.status !== 'exited' && (!scope || m.positions.some((p) => p.departmentName === scope)),
       )
       return {
         code: 0,
@@ -1564,10 +1564,11 @@ const memberHandlers: MockMethod[] = [
       if (memberId === actor) return businessError('不能移除自己')
       const member = db.findMember(query.clubId, memberId)
       if (!member) return businessError('成员不存在')
+      if (member.status === 'exited') return businessError('该成员已退出，无需重复操作')
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) return forbidden()
       if (db.isLastLeader(query.clubId, memberId)) return businessError('最后一名负责人不能无交接离任，请先安排交接')
-      member.status = 'removed'
+      member.status = 'exited'
       member.exitedAt = new Date().toISOString()
       member.positions.forEach((p) => {
         if (p.status === 'active') { p.status = 'ended'; p.endDate = new Date().toISOString().slice(0, 10) }
@@ -2060,38 +2061,14 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 文件详情（FORM/REC：FilePreviewPage 打开前先取元数据）
-  {
-    url: '/api/files/:fileId',
-    method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
-      const fileId = query.fileId
-      if (!fileId.startsWith('file-')) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
-      }
-      return {
-        code: 0,
-        data: {
-          id: fileId,
-          name: '报名附件.pdf',
-          size: 1024 * (8 + Math.floor(Math.random() * 32)),
-          mimeType: 'application/octet-stream',
-          status: 'clean',
-          uploadedAt: new Date().toISOString(),
-          checkedAt: new Date().toISOString(),
-          downloadUrl: null,
-        },
-      }
-    },
-  },
   // 文件下载
   {
     url: '/api/files/:fileId/download',
     method: 'post',
     response: ({ query }: { query: Record<string, string> }) => {
       const fileId = query.fileId || query.id || ''
-      if (!fileId.startsWith('file-')) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+      if (!/^file-\d+-[a-z0-9]+$/.test(fileId)) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '文件不存在或已过期', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
       }
       return {
         code: 0,
@@ -3341,7 +3318,7 @@ const mockFileHandlers: MockMethod[] = [
     response: ({ query }: { query: Record<string, string> }) => {
       const fileId = query.fileId || ''
       if (!/^(file-|exp-)[\w.-]+\.csv$/.test(fileId)) {
-        return { statusCode: 404, body: { code: 'IFC-ERR-012', message: '文件不存在或已过期' } }
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '文件不存在或已过期', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
       }
       return {
         statusCode: 200,
