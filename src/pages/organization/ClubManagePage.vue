@@ -262,17 +262,23 @@ const riskImpact = computed(() => {
   return '停用后仅保留只读访问，进行中的业务与期限均会受影响。'
 })
 
-const riskReauth = computed<boolean>(() => risk.value?.op === 'force_suspend' || risk.value?.op === 'disconnect' || risk.value?.op === 'recover')
+// recover（恢复启用）不在 13 类高风险命令中，无需重认证；仅 force_suspend/disconnect 需要
+const riskReauth = computed<boolean>(() => risk.value?.op === 'force_suspend' || risk.value?.op === 'disconnect')
 
-async function riskExec() {
+async function riskExec(proof?: string) {
   const t = risk.value
   if (!t) return
   riskExecuting.value = true
   let result: Awaited<ReturnType<typeof post>>
-  if (t.op === 'normal_suspend') result = await post(`/admin/clubs/${t.club.clubId}/normal-suspend`, { reason: reasonDraft.value || '常规业务调整' })
-  else if (t.op === 'force_suspend') result = await post(`/admin/clubs/${t.club.clubId}/force-suspend`, { reason: reasonDraft.value })
-  else if (t.op === 'recover') result = await post(`/admin/clubs/${t.club.clubId}/recover`)
-  else result = await post(`/admin/clubs/${t.club.clubId}/disconnect`)
+  if (t.op === 'normal_suspend') {
+    result = await post(`/admin/clubs/${t.club.clubId}/normal-suspend`, { reason: reasonDraft.value || '常规业务调整' })
+  } else if (t.op === 'force_suspend') {
+    result = await post(`/admin/clubs/${t.club.clubId}/force-suspend`, { reason: reasonDraft.value, reauthProof: proof })
+  } else if (t.op === 'recover') {
+    result = await post(`/admin/clubs/${t.club.clubId}/recover`)
+  } else {
+    result = await post(`/admin/clubs/${t.club.clubId}/disconnect`, { reason: reasonDraft.value, reauthProof: proof })
+  }
   riskExecuting.value = false
   if (result.kind === 'completed') {
     toast.success('操作已执行')
@@ -444,9 +450,9 @@ onMounted(loadData)
               <span v-if="club.hasActiveBusiness" class="text-warning">有进行中业务</span>
             </div>
 
-            <!-- 停用原因输入（紧急/普通停用） -->
-            <div v-if="risk?.club.clubId === club.clubId && (risk.op === 'normal_suspend' || risk.op === 'force_suspend')" class="mt-3 flex gap-2">
-              <input v-model="reasonDraft" type="text" placeholder="请输入停用原因" class="flex-1 h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
+            <!-- 原因输入（紧急停用/解除接入需要，普通停用可选；均用于审计） -->
+            <div v-if="risk?.club.clubId === club.clubId && (risk.op === 'normal_suspend' || risk.op === 'force_suspend' || risk.op === 'disconnect')" class="mt-3 flex gap-2">
+              <input v-model="reasonDraft" type="text" placeholder="请输入操作原因（解除接入至少 5 字）" class="flex-1 h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
             </div>
 
             <div class="mt-3 flex flex-wrap gap-2">

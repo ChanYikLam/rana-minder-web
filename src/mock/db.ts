@@ -5,6 +5,8 @@
 
 import { assertTransition } from './state-machines/transitions'
 import { syncPositionMembership } from './db-organization'
+import { members, listMembers, getMemberStats } from './db-members'
+import type { MockMember, MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly } from './db-members'
 
 /** 登录账号 id → 其所属社团成员 id（在 db.members 中按「用户 × 社团」唯一）
  * 原静态映射 auth.USER_MEMBER_MAP 仅按用户维度映射，无法表达多社团用户在不同社团的成员 id，
@@ -79,56 +81,7 @@ export interface MockDepartment {
   name: string
 }
 
-export interface MockPosition {
-  id: string
-  departmentId: string
-  departmentName: string
-  title: string
-  startDate: string
-  endDate: string | null
-  /** 计划任期结束时间（仅用于换届/到期提醒，不触发自动卸任，MEM-004/MEM-012） */
-  plannedEndDate: string | null
-  status: 'active' | 'pending_confirmation' | 'transferring' | 'suspended' | 'ended'
-}
-
-export interface MockTenure {
-  id: string
-  departmentName: string
-  title: string
-  startDate: string
-  endDate: string | null
-  endReason: string | null
-}
-
-export interface MockDeptHistoryEntry {
-  id: string
-  action: 'join' | 'leave' | 'transfer'
-  departmentName: string
-  at: string
-}
-
-export interface MockAnomaly {
-  id: string
-  kind: 'casdoor_mismatch' | 'external_change'
-  message: string
-  createdAt: string
-}
-
-export interface MockMember {
-  id: string
-  clubId: string
-  studentId: string
-  name: string
-  email: string
-  phone: string
-  status: 'non_member' | 'pending_effective' | 'active' | 'exiting' | 'exited' | 'sync_anomaly'
-  positions: MockPosition[]
-  tenures: MockTenure[]
-  departmentHistory: MockDeptHistoryEntry[]
-  anomalies: MockAnomaly[]
-  joinedAt: string
-  exitedAt: string | null
-}
+// MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly, MockMember 已移至 db-members.ts（消除循环依赖）
 
 export type DeptApplyType = 'join' | 'leave' | 'transfer'
 
@@ -285,137 +238,7 @@ export function searchCandidates(_clubId: string, keyword: string): MockCandidat
   })
 }
 
-export const members: MockMember[] = [
-  {
-    id: 'mem-001', clubId: 'club-001', studentId: '20210005',
-    name: '陈雨桐', email: 'member@example.edu.cn', phone: '13800000005',
-    status: 'active', joinedAt: '2024-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [
-      { id: 'pos-001', departmentId: 'dept-001', departmentName: '技术部', title: '干事', startDate: '2024-09-01', endDate: null, plannedEndDate: '2027-06-30', status: 'active' },
-    ],
-    tenures: [
-      { id: 'ten-001', departmentName: '技术部', title: '干事', startDate: '2024-09-01', endDate: null, endReason: null },
-    ],
-    departmentHistory: [
-      { id: 'dhis-001', action: 'join', departmentName: '技术部', at: '2024-09-01T10:00:00+08:00' },
-    ],
-    anomalies: [],
-  },
-  {
-    id: 'mem-002', clubId: 'club-001', studentId: '20210004',
-    name: '王浩然', email: 'wang@example.edu.cn', phone: '13800000004',
-    status: 'active', joinedAt: '2023-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [
-      { id: 'pos-002', departmentId: 'dept-001', departmentName: '技术部', title: '副部长', startDate: '2024-09-01', endDate: null, plannedEndDate: '2026-08-31', status: 'active' },
-    ],
-    tenures: [
-      { id: 'ten-002', departmentName: '技术部', title: '干事', startDate: '2023-09-01', endDate: '2024-08-31', endReason: '任期结束' },
-      { id: 'ten-003', departmentName: '技术部', title: '副部长', startDate: '2024-09-01', endDate: null, endReason: null },
-    ],
-    departmentHistory: [
-      { id: 'dhis-002', action: 'join', departmentName: '技术部', at: '2023-09-01T10:00:00+08:00' },
-    ],
-    anomalies: [],
-  },
-  {
-    id: 'mem-003', clubId: 'club-001', studentId: '20210003',
-    name: '李思颖', email: 'hr@example.edu.cn', phone: '13800000003',
-    status: 'active', joinedAt: '2023-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [
-      { id: 'pos-003', departmentId: 'dept-004', departmentName: '人事部', title: '部长', startDate: '2024-09-01', endDate: null, plannedEndDate: '2026-09-30', status: 'active' },
-    ],
-    tenures: [
-      { id: 'ten-004', departmentName: '人事部', title: '部长', startDate: '2024-09-01', endDate: null, endReason: null },
-    ],
-    departmentHistory: [
-      { id: 'dhis-003', action: 'join', departmentName: '人事部', at: '2023-09-01T10:00:00+08:00' },
-    ],
-    anomalies: [
-      { id: 'anm-001', kind: 'casdoor_mismatch', message: 'Casdoor 侧部门与本地不一致，以 Casdoor 为准', createdAt: '2025-07-28T10:00:00+08:00' },
-    ],
-  },
-  {
-    id: 'mem-004', clubId: 'club-001', studentId: '20210002',
-    name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002',
-    status: 'active', joinedAt: '2022-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [
-      { id: 'pos-004', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', startDate: '2024-09-01', endDate: null, plannedEndDate: '2026-08-20', status: 'active' },
-    ],
-    tenures: [
-      { id: 'ten-005', departmentName: '管理', title: '负责人', startDate: '2024-09-01', endDate: null, endReason: null },
-    ],
-    departmentHistory: [
-      { id: 'dhis-004', action: 'join', departmentName: '管理', at: '2022-09-01T10:00:00+08:00' },
-    ],
-    anomalies: [],
-  },
-  {
-    id: 'mem-006', clubId: 'club-001', studentId: '20210006',
-    name: '林晓薇', email: 'deptleader@example.edu.cn', phone: '13800000007',
-    status: 'active', joinedAt: '2022-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [
-      { id: 'pos-006', departmentId: 'dept-001', departmentName: '技术部', title: '部长', startDate: '2024-09-01', endDate: null, plannedEndDate: null, status: 'active' },
-    ],
-    tenures: [
-      { id: 'ten-007', departmentName: '技术部', title: '干事', startDate: '2022-09-01', endDate: '2023-08-31', endReason: '任期结束' },
-      { id: 'ten-008', departmentName: '技术部', title: '副部长', startDate: '2023-09-01', endDate: '2024-08-31', endReason: '任期结束' },
-      { id: 'ten-009', departmentName: '技术部', title: '部长', startDate: '2024-09-01', endDate: null, endReason: null },
-    ],
-    departmentHistory: [
-      { id: 'dhis-007', action: 'join', departmentName: '技术部', at: '2022-09-01T10:00:00+08:00' },
-    ],
-    anomalies: [],
-  },
-  {
-    id: 'mem-007', clubId: 'club-001', studentId: '20240201',
-    name: '赵雨萌', email: 'incomplete@example.edu.cn', phone: '13800000021',
-    status: 'active', joinedAt: '2025-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [],
-    tenures: [],
-    departmentHistory: [],
-    anomalies: [],
-  },
-  {
-    id: 'mem-008', clubId: 'club-001', studentId: '20240202',
-    name: '孙雅静', email: 'unverified@example.edu.cn', phone: '13800000022',
-    status: 'active', joinedAt: '2025-09-01T00:00:00+08:00', exitedAt: null,
-    positions: [],
-    tenures: [],
-    departmentHistory: [],
-    anomalies: [],
-  },
-  {
-    id: 'mem-101', clubId: 'club-002', studentId: '20210002',
-    name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002',
-    status: 'active', joinedAt: '2024-03-01T00:00:00+08:00', exitedAt: null,
-    positions: [
-      { id: 'pos-101', departmentId: 'dept-101', departmentName: '嵌入式组', title: '人事', startDate: '2024-03-01', endDate: null, plannedEndDate: null, status: 'active' },
-    ],
-    tenures: [
-      { id: 'ten-101', departmentName: '嵌入式组', title: '人事', startDate: '2024-03-01', endDate: null, endReason: null },
-    ],
-    departmentHistory: [
-      { id: 'dhis-101', action: 'join', departmentName: '嵌入式组', at: '2024-03-01T10:00:00+08:00' },
-    ],
-    anomalies: [],
-  },
-  {
-    id: 'mem-005', clubId: 'club-001', studentId: '20240001',
-    name: '刘子豪', email: 'former@example.edu.cn', phone: '13800000006',
-    status: 'exited', joinedAt: '2023-09-01T00:00:00+08:00', exitedAt: '2024-06-01T00:00:00+08:00',
-    positions: [
-      { id: 'pos-005', departmentId: 'dept-001', departmentName: '技术部', title: '成员', startDate: '2023-09-01', endDate: '2024-06-01', plannedEndDate: null, status: 'ended' },
-    ],
-    tenures: [
-      { id: 'ten-006', departmentName: '技术部', title: '成员', startDate: '2023-09-01', endDate: '2024-06-01', endReason: '主动退出' },
-    ],
-    departmentHistory: [
-      { id: 'dhis-005', action: 'join', departmentName: '技术部', at: '2023-09-01T10:00:00+08:00' },
-      { id: 'dhis-006', action: 'leave', departmentName: '技术部', at: '2024-06-01T10:00:00+08:00' },
-    ],
-    anomalies: [],
-  },
-]
+// members 数组已移至 db-members.ts（消除循环依赖），通过 import { members } from './db-members' 引用
 
 export const departmentApplications: MockDeptApplication[] = [
   {
@@ -507,6 +330,21 @@ export const exitRequests: MockExitRequest[] = [
     dueAt: daysFromNow(-1),
   },
 ]
+
+/** 种子相对时间偏移（#78 遗留）：resetDb 恢复快照时按当前时钟重算 dueAt/expiredAt/scheduledAt，
+ * 避免模块加载固化绝对时间导致跨天/跨周运行时 overdue 派生漂移、用例脆弱。
+ * 仅登记成员生命周期相关种子的相对时间字段；运行期新建记录走各自 daysFromNow 逻辑。 */
+export const SEED_RELATIVE_OFFSETS: Record<string, { field: 'dueAt' | 'expiredAt' | 'scheduledAt'; days: number }> = {
+  'dap-001': { field: 'dueAt', days: 1 },
+  'dap-002': { field: 'dueAt', days: -1 },
+  'minv-001': { field: 'expiredAt', days: 5 },
+  'minv-002': { field: 'expiredAt', days: -2 },
+  'apc-002': { field: 'scheduledAt', days: 2 },
+  'res-001': { field: 'dueAt', days: 2 },
+  'res-002': { field: 'dueAt', days: -1 },
+  'exit-req-001': { field: 'dueAt', days: 1 },
+  'exit-req-002': { field: 'dueAt', days: -1 },
+}
 
 export interface TransitionCandidate {
   memberId: string
@@ -1054,18 +892,12 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
   return { ok: true }
 }
 
-export function listMembers(clubId: string): MockMember[] {
-  return members.filter((m) => m.clubId === clubId)
-}
+// listMembers, getMemberStats 已移至 db-members.ts（消除循环依赖），通过 import 引用
 
 export function getMemberProfile(clubId: string, memberId: string): MockMember | undefined {
   return findMember(clubId, memberId)
 }
 
-export function getMemberStats(clubId: string): { total: number; active: number; exited: number } {
-  const list = listMembers(clubId)
-  return { total: list.length, active: list.filter((m) => m.status === 'active').length, exited: list.filter((m) => m.status === 'exited').length }
-}
 
 /** 成员管理级别（MEM-006 角色白名单用）：由职位标题与 mock 用户角色综合判定 */
 export type MemberManagerLevel = 'club_leader' | 'hr' | 'department_leader' | 'member'
@@ -1196,3 +1028,7 @@ export function markMemberExit(clubId: string, byMemberId: string, memberId: str
   target.exitedAt = new Date().toISOString()
   return { ok: true, member: target }
 }
+
+// 向后兼容：重新导出共享模块中的成员数据与查询函数
+export { members, listMembers, getMemberStats }
+export type { MockMember, MockPosition, MockTenure, MockDeptHistoryEntry, MockAnomaly }

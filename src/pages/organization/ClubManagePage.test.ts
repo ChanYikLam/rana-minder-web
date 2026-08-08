@@ -189,7 +189,7 @@ describe('ClubManagePage 社团管理', () => {
 
     await wrapper.findAll('button').find((b) => b.text().includes('普通停用'))!.trigger('click')
     // 停用原因输入框出现 + 高危确认打开
-    const reasonInput = wrapper.find('input[placeholder="请输入停用原因"]')
+    const reasonInput = wrapper.find('input[placeholder="请输入操作原因（解除接入至少 5 字）"]')
     expect(reasonInput.exists(), '停用原因输入').toBe(true)
     await reasonInput.setValue('业务调整')
     await wrapper.find('.hrc-confirm').trigger('click')
@@ -213,6 +213,57 @@ describe('ClubManagePage 社团管理', () => {
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/admin/clubs/club-001/repair')
     expect(mockToastSuccess).toHaveBeenCalledWith('已修复原 Group 并进入停用状态')
+    wrapper.unmount()
+  })
+
+  it('强制停用：@confirm 携带 reauthProof 提交', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [enabledClub] } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(ClubManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('社团管理'))!.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('紧急停用'))!.trigger('click')
+    await flushPromises()
+
+    const hrc = wrapper.find('.hrc')
+    expect(hrc.exists(), '高危确认弹窗').toBe(true)
+    // 填原因后确认：携带 reauthProof
+    const reasonInput = wrapper.find('input[placeholder="请输入操作原因（解除接入至少 5 字）"]')
+    expect(reasonInput.exists(), '停用原因输入').toBe(true)
+    await reasonInput.setValue('紧急安全事件处置')
+    await hrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/clubs/club-001/force-suspend', {
+      reason: '紧急安全事件处置',
+      reauthProof: 'mock-reauth-proof',
+    })
+    wrapper.unmount()
+  })
+
+  it('解除接入：@confirm 携带 reauthProof 提交', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [enabledClub] } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(ClubManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('社团管理'))!.trigger('click')
+    const disconnectBtn = wrapper.findAll('button').find((b) => b.text().includes('解除接入'))
+    expect(disconnectBtn, '解除接入按钮').toBeTruthy()
+    await disconnectBtn!.trigger('click')
+    await flushPromises()
+
+    const hrc = wrapper.find('.hrc')
+    expect(hrc.exists(), '高危确认弹窗').toBe(true)
+    const reasonInput = wrapper.find('input[placeholder="请输入操作原因（解除接入至少 5 字）"]')
+    expect(reasonInput.exists(), '解除接入原因输入').toBe(true)
+    await reasonInput.setValue('社团长期未运营需解除接入')
+    await hrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/clubs/club-001/disconnect', {
+      reason: '社团长期未运营需解除接入',
+      reauthProof: 'mock-reauth-proof',
+    })
     wrapper.unmount()
   })
 })

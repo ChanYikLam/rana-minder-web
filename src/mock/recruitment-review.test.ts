@@ -123,6 +123,59 @@ describe('面试官提交评价（conclude）权限链路', () => {
   })
 })
 
+// ================= Issue-4.0-1 契约对齐：列表返回评价主键，conclude 兼容申请 ID =================
+
+describe('Issue-4.0-1 评价提交契约对齐', () => {
+  beforeEach(() => {
+    clearMockSession()
+    snapshotDb()
+  })
+  afterEach(() => {
+    restoreDb()
+  })
+
+  const reviewsListUrl = '/api/org/:clubId/recruitment/:activityId/reviews'
+  const reviewsListPlainUrl = `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews`
+
+  it('列表返回 reviewId（真实评价主键 rev-xxx），与 id（申请 ID app-xxx）分离', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${mockUserKeyOf('user-leader-001')}`)
+    const out = await invokeHandler(reviewsListUrl, reviewsListPlainUrl, 'get')
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const items = (out.body.data as { items: Record<string, unknown>[] }).items
+    const seedApp = rdb.recruitmentApplications.find((a) => a.activityId === SEED_ACTIVITY_ID && a.applicantId === SEED_APPLICANT_ID)
+    expect(seedApp, '缺少种子申请').toBeTruthy()
+    const row = items.find((i) => i.applicantId === SEED_APPLICANT_ID)
+    expect(row, '列表缺少申请人行').toBeTruthy()
+    // id 保持申请 ID（前端行标识兼容），reviewId 为真实评价主键
+    expect(row!.id).toBe(seedApp!.id)
+    expect(row!.reviewId).toBe(SEED_REVIEW_ID)
+  })
+
+  it('conclude 按申请 ID（app-xxx）提交同样成功（兼容既有前端行为）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
+    const seedApp = rdb.recruitmentApplications.find((a) => a.activityId === SEED_ACTIVITY_ID && a.applicantId === SEED_APPLICANT_ID)
+    if (!seedApp) throw new Error('缺少种子申请')
+    // 用申请 ID（app-xxx）代替评价主键调用 conclude
+    const out = await invokeHandler(concludeUrl, `/api/org/club-001/recruitment/${SEED_ACTIVITY_ID}/reviews/${seedApp.id}/conclude`)
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect(out.body.code).toBe(0)
+    const written = rdb.recruitmentReviews.find((r) => r.activityId === SEED_ACTIVITY_ID && r.applicantId === SEED_APPLICANT_ID && r.authorId === INTERVIEWER_MEMBER_ID)
+    expect(written, '评价未按面试官本人 memberId 落库').toBeTruthy()
+  })
+
+  it('列表返回轮次名与最近面试时间（界面上下文）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${mockUserKeyOf('user-leader-001')}`)
+    const out = await invokeHandler(reviewsListUrl, reviewsListPlainUrl, 'get')
+    expect(out.statusCode).toBe(200)
+    const items = (out.body.data as { items: Record<string, unknown>[] }).items
+    const row = items.find((i) => i.applicantId === SEED_APPLICANT_ID)
+    expect(row).toBeTruthy()
+    expect(typeof row!.roundName).toBe('string')
+    // 未排期面试时 interviewAt 允许为 null
+    expect(row!.interviewAt == null || typeof row!.interviewAt === 'string').toBe(true)
+  })
+})
+
 // ================= 申请详情接口（面试官查看附件/表单答案，bug #83 修复） =================
 
 const appDetailUrl = '/api/org/:clubId/recruitment/:activityId/applications/:applicantId'

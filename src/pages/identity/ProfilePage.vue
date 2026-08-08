@@ -123,6 +123,12 @@ async function handleSave() {
     return
   }
 
+  // 无实际改动则不上送：避免「编辑后原样提交」触发无效版本递增（MRM-007 边界）
+  if (parsed.data.email === profile.value?.email && parsed.data.phone === profile.value?.phone) {
+    editing.value = false
+    return
+  }
+
   submitting.value = true
   const result = await put<Profile>('/auth/profile', parsed.data, { expectedVersion: version.value })
   submitting.value = false

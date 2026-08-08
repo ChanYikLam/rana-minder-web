@@ -34,7 +34,7 @@ async function loadData() {
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
-async function handleForceClose() {
+async function handleForceClose(proof?: string) {
   if (!closeTarget.value || busy.value) return
   if (!closeReason.value.trim()) {
     closeError.value = '请填写强制关闭原因'
@@ -42,7 +42,7 @@ async function handleForceClose() {
   }
   busy.value = true
   closeError.value = ''
-  const result = await post(`/admin/joint/${closeTarget.value.id}/force-close`, { reason: closeReason.value.trim() })
+  const result = await post(`/admin/joint/${closeTarget.value.id}/force-close`, { reason: closeReason.value.trim(), reauthProof: proof })
   busy.value = false
   if (result.kind === 'completed') {
     closeOpen.value = false

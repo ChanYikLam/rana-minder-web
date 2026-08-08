@@ -31,7 +31,7 @@ async function loadData() {
   } else { state.value = 'error' }
 }
 
-async function handleForceComplete() {
+async function handleForceComplete(proof?: string) {
   if (!target.value || busy.value) return
   if (!reason.value.trim()) {
     reasonError.value = '请填写强制结束原因'
@@ -39,7 +39,7 @@ async function handleForceComplete() {
   }
   busy.value = true
   reasonError.value = ''
-  const result = await post(`/admin/recruitment/${target.value.id}/force-complete`, { reason: reason.value.trim() })
+  const result = await post(`/admin/recruitment/${target.value.id}/force-complete`, { reason: reason.value.trim(), reauthProof: proof })
   busy.value = false
   if (result.kind === 'completed') {
     open.value = false

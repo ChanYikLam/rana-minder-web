@@ -62,7 +62,7 @@ describe('AdminRecruitmentListPage 平台招新列表', () => {
     await wrapper.find('.hrc-confirm').trigger('click')
     await flushPromises()
 
-    expect(mockPost).toHaveBeenCalledWith('/admin/recruitment/act-1/force-complete', { reason: '活动异常终止' })
+    expect(mockPost).toHaveBeenCalledWith('/admin/recruitment/act-1/force-complete', { reason: '活动异常终止', reauthProof: 'mock-reauth-proof' })
     // 成功后关闭弹窗（重新加载列表触发第二次 get）
     expect(mockGet).toHaveBeenCalledTimes(2)
     wrapper.unmount()

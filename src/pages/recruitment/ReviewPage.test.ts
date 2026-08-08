@@ -3,9 +3,18 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, mockToastError, mockToastSuccess, mockUseRoute } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockToastError: vi.fn(),
+  mockToastSuccess: vi.fn(),
+  mockUseRoute: vi.fn(() => ({ params: { clubId: 'club-001', activityId: 'act-1' }, query: {} })),
+}))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { clubId: 'club-001', activityId: 'act-1' } }),
+  useRoute: () => mockUseRoute(),
+}))
+vi.mock('vue-sonner', () => ({
+  toast: { success: (...a: unknown[]) => mockToastSuccess(...a), error: (...a: unknown[]) => mockToastError(...a) },
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
@@ -15,8 +24,9 @@ vi.mock('@/services/client', () => ({
 import ReviewPage from './ReviewPage.vue'
 
 const review = {
-  id: 'rv-1', applicantId: 'app-1', applicantName: '张三', departmentName: '技术部',
+  id: 'app-1', applicantId: 'app-1', applicantName: '张三', departmentName: '技术部',
   status: 'in_progress', rating: null, comment: null, concludedAt: null, concludedBy: null,
+  reviewId: 'rev-1', roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
   myRating: null, myComment: null, peerViewLocked: false, reviews: [],
 }
 
@@ -71,9 +81,8 @@ async function clickReviewRow(wrapper: ReturnType<typeof mount>) {
 describe('ReviewPage 评审页', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    mockGet.mockReset()
-    mockPost.mockReset()
     vi.clearAllMocks()
+    mockUseRoute.mockReturnValue({ params: { clubId: 'club-001', activityId: 'act-1' }, query: {} })
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -125,5 +134,55 @@ describe('ReviewPage 评审页', () => {
     // 不展示报名信息块，但评价面板仍可渲染
     expect(wrapper.text()).not.toContain('报名信息')
     expect(wrapper.text()).toContain('张三')
+  })
+
+  it('提交评价：使用真实评价主键 reviewId 调用 conclude，成功后 toast 提示', async () => {
+    setupGetRouter()
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    await clickReviewRow(wrapper)
+
+    await wrapper.find('button[aria-label="4 星"]').trigger('click')
+    const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
+    expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
+    await submitBtn!.trigger('click')
+    await flushPromises()
+
+    // Issue-4.0-1: 必须传 rev-xxx 主键，而不是申请 ID app-1
+    expect(mockPost).toHaveBeenCalledWith(
+      '/org/club-001/recruitment/act-1/reviews/rev-1/conclude',
+      { rating: 4, comment: '' },
+    )
+    expect(mockToastSuccess).toHaveBeenCalled()
+  })
+
+  it('提交评价失败：展示 toast 错误提示，不再静默失败', async () => {
+    setupGetRouter()
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: '申请人不存在' } })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    await clickReviewRow(wrapper)
+
+    await wrapper.find('button[aria-label="4 星"]').trigger('click')
+    const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
+    expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
+    await submitBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
+  })
+
+  it('带 ?applicantId= 锚定进入：自动选中对应申请人', async () => {
+    mockUseRoute.mockReturnValue({
+      params: { clubId: 'club-001', activityId: 'act-1' },
+      query: { applicantId: 'app-1' },
+    })
+    setupGetRouter()
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('张三')
+    // 评价面板已展开（非"点击左侧申请人查看详情"占位）
+    expect(wrapper.text()).not.toContain('点击左侧申请人查看详情')
   })
 })

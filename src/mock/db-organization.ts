@@ -6,7 +6,7 @@
  * 停用体系：普通停用（进行中业务阻止）/紧急停用（只读+期限暂停）/恢复顺延/解除接入/修复/重绑/重新接入
  */
 import { assertTransition } from './state-machines/transitions'
-import { getMemberStats } from './db'
+import { getMemberStats } from './db-members'
 import type { ClubAccessItem, ClubAccessStatus, GroupNode, GroupMatchTier, GroupSearchResult } from '../types/domain/organization'
 
 const SM = 'SM-ORG-001'
