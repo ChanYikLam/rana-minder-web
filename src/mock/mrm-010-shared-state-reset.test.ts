@@ -100,13 +100,13 @@ describe('MRM-010 平台域共享状态重置', () => {
     expect(items.every((t) => (t as { status: string }).status === 'published')).toBe(true)
     expect(items.every((t) => (t as { draftVersion: number | null }).draftVersion === null)).toBe(true)
 
-    // previewVersion 回到种子：种子为 1，diff 端点先自增再返回，故重置后首个 diff 应为 2（发布用例残留的 4+ 不复现）
+    // previewVersion 回到种子：种子为 1；MRM-011 修复后 GET diff 幂等（不自增），重置后首个 diff 应为 1（发布用例残留的 4+ 不复现）
     const tpl2 = await invokeHandler('/api/admin/config/permission-templates', 'post', '/api/admin/config/permission-templates', {
       input: { name: '临时模板', permissions: ['club:member:manage'] },
     })
     const tplId2 = (tpl2.body.data as { id: string }).id
     const diff2 = await invokeHandler('/api/admin/config/permission-templates/:templateId/diff', 'get', `/api/admin/config/permission-templates/${tplId2}/diff`)
-    expect((diff2.body.data as { previewVersion: number }).previewVersion).toBe(2)
+    expect((diff2.body.data as { previewVersion: number }).previewVersion).toBe(1)
   })
 
   it('显式 resetSharedState：发布污染后平台域共享状态还原到种子', async () => {
