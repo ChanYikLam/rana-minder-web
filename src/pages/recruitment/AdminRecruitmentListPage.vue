@@ -15,7 +15,6 @@ interface RecItem {
 const state = ref<PageState>('loading')
 const items = ref<RecItem[]>([])
 const busy = ref(false)
-const error = ref('')
 
 const target = ref<RecItem | null>(null)
 const open = ref(false)
@@ -60,7 +59,6 @@ onMounted(loadData)
       <h1 class="text-2xl font-bold text-text-primary mb-2">招新活动管理</h1>
       <p class="text-sm text-text-secondary mb-6">平台视角查看所有招新活动，可强制结束异常活动</p>
 
-      <p v-if="error" class="mb-3 text-xs text-destructive">{{ error }}</p>
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无招新活动" />
 
       <div v-else class="space-y-3">

@@ -12,7 +12,6 @@ const route = useRoute()
 const router = useRouter()
 const state = ref<PageState>('loading')
 const closing = ref(false)
-const actionError = ref('')
 const detail = ref<{
   id: string; title: string; status: string
   participants: { clubId: string; clubName: string; status: string; concludedCount: number; invitationSent: number; endConfirmed: boolean }[]
@@ -38,7 +37,6 @@ const allConfirmed = computed(() => {
 async function handleStartClose() {
   if (!detail.value || closing.value) return
   closing.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/close/start`, {})
   closing.value = false
@@ -46,14 +44,13 @@ async function handleStartClose() {
     toast.success('已进入结束确认阶段')
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '进入结束确认失败'
+    toast.error((result.error as { message?: string }).message || '进入结束确认失败')
   }
 }
 
 async function handleClose() {
   if (!detail.value || closing.value) return
   closing.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const jointId = route.params.jointId as string
   const result = await post(`/org/${clubId}/joint/${jointId}/close`, {})
@@ -62,7 +59,7 @@ async function handleClose() {
     toast.success('本社团确认完成')
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '确认失败'
+    toast.error((result.error as { message?: string }).message || '确认失败')
   }
 }
 
@@ -159,8 +156,6 @@ onMounted(loadData)
       <p v-if="['cancelled', 'force_closed'].includes(detail.status)" class="flex items-center justify-center gap-2 text-sm text-text-secondary">
         <XCircle :size="18" /> 活动已取消，无需结束确认
       </p>
-
-      <p v-if="actionError" class="mt-3 text-xs text-destructive text-center">{{ actionError }}</p>
     </div>
   </PageStateBoundary>
 </template>

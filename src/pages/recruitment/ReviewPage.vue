@@ -37,7 +37,6 @@ const selectedId = ref<string | null>(null)
 const rating = ref(0)
 const comment = ref('')
 const submitting = ref(false)
-const submitError = ref('')
 const publishOpen = ref(false)
 const publishSucceeded = ref(false)
 const publishError = ref('')
@@ -139,7 +138,6 @@ function handleRowClick(row: unknown) {
   // 预填本人已有评分/评语（Issue-4.0-1：锚定/重选时保留上次提交内容）
   rating.value = item.myRating ?? 0
   comment.value = item.myComment ?? ''
-  submitError.value = ''
   void loadApplicationDetail(item)
 }
 
@@ -195,7 +193,6 @@ function formatDateTime(iso?: string | null): string {
 async function handleSubmitReview() {
   if (!selected.value || rating.value === 0) return
   submitting.value = true
-  submitError.value = ''
   const scope = routeScope()
   if (!scope) { submitting.value = false; return }
   // 契约：conclude 按 applicantId 定位申请人（行 id 为 app-xxx，不能作为评价标识）
@@ -209,7 +206,6 @@ async function handleSubmitReview() {
     await loadReviews()
   } else {
     const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请稍后重试'
-    submitError.value = message
     toast.error(message)
   }
 }
@@ -358,7 +354,6 @@ onMounted(() => {
                 placeholder="填写评价内容..."
               />
             </div>
-            <p v-if="submitError" class="text-xs text-danger">{{ submitError }}</p>
             <PermissionGuard
               :permission="['club:interview:evaluate', 'club:recruitment:manage']"
               scope="workspace"
@@ -419,7 +414,6 @@ onMounted(() => {
                   placeholder="填写评价内容..."
                 />
               </div>
-              <p v-if="submitError" class="text-xs text-danger">{{ submitError }}</p>
               <PermissionGuard permission="club:interview:evaluate" fallback="disable" disable-reason="无面试评价权限">
                 <button
                   class="w-full h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"

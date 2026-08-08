@@ -91,9 +91,9 @@ async function handleSubmitExitRequest() {
     exitReason.value = ''
     await loadData()
   } else if (r.kind === 'rejected' && r.error) {
-    exitError.value = (r.error as { message?: string }).message || '提交失败'
+    toast.error((r.error as { message?: string }).message || '提交失败')
   } else {
-    exitError.value = '提交失败，请稍后重试'
+    toast.error('提交失败，请稍后重试')
   }
 }
 
@@ -274,9 +274,9 @@ async function handleSubmitResignation() {
     resignReason.value = ''
     await loadData()
   } else if (r.kind === 'rejected' && r.error) {
-    resignError.value = (r.error as { message?: string }).message || '提交失败'
+    toast.error((r.error as { message?: string }).message || '提交失败')
   } else {
-    resignError.value = '提交失败，请稍后重试'
+    toast.error('提交失败，请稍后重试')
   }
 }
 
