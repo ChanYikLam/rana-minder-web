@@ -21,4 +21,5 @@ export const pageStubs = {
   FieldPermission: { template: '<span />' },
   AttachmentUpload: { template: '<div />' },
   DateTimePicker: { template: '<div />' },
+  RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] },
 }
