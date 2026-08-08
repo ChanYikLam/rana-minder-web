@@ -142,6 +142,27 @@ describe('P1-006 资料保存乐观锁：expectedVersion 与最新版本比对',
     expect(second.data?.version).toBe(1)
   })
 
+  it('编辑后原样提交不消耗版本号：提交值 === 现值时版本保持不变（MRM-007 边界）', () => {
+    const member = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
+    expect(member.data?.version).toBe(1)
+    // 原样提交当前 email/phone，无实际差异，不应递增版本
+    const same = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', {
+      input: { email: 'member@example.edu.cn', phone: '13800000005' },
+      expectedVersion: 1,
+    })
+    expect(same.code).toBe(0)
+    expect(same.data?.version).toBe(1)
+    const after = invoke('/api/auth/profile', 'get', '/api/auth/profile?_mock_user=member')
+    expect(after.data?.version).toBe(1)
+    // 真正变更后才递增
+    const changed = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', {
+      input: { email: 'member@example.edu.cn', phone: '13800000009' },
+      expectedVersion: 1,
+    })
+    expect(changed.code).toBe(0)
+    expect(changed.data?.version).toBe(2)
+  })
+
   it('连续两次提交 expectedVersion=1（有实际数据变更）：版本比对通过即登记新版本，第二次起一律 409（P2-2 原子一致）', () => {
     invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'a@example.edu.cn' }, expectedVersion: 1 })
     const stale = invoke('/api/auth/profile', 'put', '/api/auth/profile?_mock_user=member', { input: { email: 'b@example.edu.cn' }, expectedVersion: 1 })
@@ -183,11 +204,13 @@ describe('P1-006 资料保存乐观锁：expectedVersion 与最新版本比对',
     const before = invoke('/api/auth/session', 'get', '/api/auth/session?_mock_user=incomplete')
     expect(before.data?.profileGate).toEqual({ complete: false, emailVerified: true })
 
+    // 使用有实际变更的输入（incomplete 默认 phone 为 13800000021，此处改为 13800000022），
+    // 原样提交在 MRM-007 边界下不再触发保存，无法用于验证资料门翻转
     const saved = invoke(
       '/api/auth/profile',
       'put',
       '/api/auth/profile?_mock_user=incomplete',
-      { input: { email: 'incomplete@example.edu.cn', phone: '13800000021' }, expectedVersion: 1 },
+      { input: { email: 'incomplete@example.edu.cn', phone: '13800000022' }, expectedVersion: 1 },
     )
     expect(saved.code).toBe(0)
 

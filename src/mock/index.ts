@@ -647,10 +647,13 @@ const identityHandlers: MockMethod[] = [
         }
       }
       const input = body.input || {}
-      const hasUpdate = (typeof input.email === 'string' && input.email) || (typeof input.phone === 'string' && input.phone)
+      // 仅当字段「非空且与现值不同」才算实际数据变更：空 input:{} 不消耗版本号，
+      // 「编辑后原样提交」（提交值 === 现值）同样不消耗，避免无实际差异的提交使版本不断递增
+      const hasUpdate =
+        (typeof input.email === 'string' && input.email !== '' && input.email !== user.email) ||
+        (typeof input.phone === 'string' && input.phone !== '' && input.phone !== user.phone)
 
-      // 空 input 不消耗版本号：无实际数据变更时跳过版本递增，直接返回当前资料
-      // 避免「乐观锁版本登记先于保存」导致空 input:{} 也消耗版本号，使连续空提交版本不断递增
+      // 无实际数据变更时跳过版本递增，直接返回当前资料
       if (!hasUpdate) {
         return {
           code: 0,
