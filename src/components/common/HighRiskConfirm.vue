@@ -259,6 +259,10 @@ const remainingSeconds = computed(() => {
         <p class="text-sm font-medium text-primary">操作完成</p>
       </div>
 
+      <DialogFooter v-if="step === 'done'">
+        <Button variant="outline" @click="handleCancel">关闭</Button>
+      </DialogFooter>
+
       <DialogFooter v-if="step === 'preview' || step === 'confirm'">
         <Button variant="outline" @click="handleCancel">{{ cancelLabel }}</Button>
         <Button v-if="step === 'preview'" @click="handleNext">下一步</Button>

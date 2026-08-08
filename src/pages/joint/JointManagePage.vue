@@ -8,6 +8,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import {
   Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck,
@@ -35,6 +36,7 @@ const actionLoading = ref(false)
 const riskError = ref('')
 const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
+const riskSucceeded = ref(false)
 
 async function loadDetail() {
   if (isCreate.value) { state.value = 'normal'; return }
@@ -55,7 +57,18 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/${action}`, { ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
+    // P1：#5 取消活动成功后需关闭弹窗并置位 succeeded，否则 HighRiskConfirm 永久停留“正在执行...”
+    if (action === 'cancel') {
+      riskSucceeded.value = true
+      riskOpen.value = false
+      riskError.value = ''
+    }
     await loadDetail()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
+    if (action === 'cancel') {
+      riskOpen.value = false
+    }
   } else if (result.kind === 'rejected' && result.error) {
     riskError.value = (result.error as { message?: string }).message || '操作失败'
     toast.error(riskError.value)
@@ -125,6 +138,11 @@ async function handleCreate() {
   submitting.value = false
   if (result.kind === 'completed') {
     router.push(`/org/${clubId}/joint/${(result.data as { id: string }).id}`)
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('创建已受理，正在后台处理')
+  } else {
+    // P1：#6 创建活动失败不再完全静默，给出明确错误提示
+    toast.error((result as { error?: { message?: string } }).error?.message || '创建失败，请稍后重试')
   }
 }
 
@@ -382,6 +400,7 @@ onMounted(loadDetail)
         confirm-label="确认取消"
         reauth-required
         :executing="actionLoading"
+        :succeeded="riskSucceeded"
         :error-message="riskError"
         @confirm="runAction('cancel', { confirm: true, reason: '发起方取消联合活动' })"
       />
