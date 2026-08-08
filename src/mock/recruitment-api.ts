@@ -627,16 +627,22 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return ok({ items, nextCursor: null })
     },
   },
-  // 报名申请详情（管理视角）
+  // 报名申请详情（管理视角 + 面试官视角）
+  // REC-013/ORG-037：面试官（含轮次级临时任务）可查看申请表单答案与附件，轮次级任务仅可见其轮次申请人
   {
     url: '/api/org/:clubId/recruitment/:activityId/applications/:applicantId',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      if (!canManageRec(url, query.clubId)) return forbidden()
+      if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const act = rdb.findActivity(query.clubId, query.activityId)
       if (!act) return notFound('活动不存在')
       const app = rdb.recruitmentApplications.find((a) => a.activityId === query.activityId && a.applicantId === query.applicantId)
       if (!app) return notFound('申请不存在')
+      // 轮次级面试官仅可见其轮次对应的申请人（REC-013）
+      if (!canManageRec(url, query.clubId)) {
+        const ws = interviewerWorkspace(url, query.clubId, query.activityId)
+        if (!appInWorkspace(ws, app)) return forbidden()
+      }
       return ok({
         id: app.id, activityId: app.activityId, applicantId: app.applicantId, applicantName: app.applicantName,
         applicantStudentId: app.studentId, status: app.status, preferences: app.preferences,
