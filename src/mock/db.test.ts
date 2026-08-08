@@ -98,4 +98,28 @@ describe('#78 遗留：种子相对时间运行期派生', () => {
     expect(new Date(membershipInvitations.find((i) => i.id === 'minv-002')!.expiredAt as string).getTime()).toBeLessThan(Date.now())
     expect(new Date(appointmentCommands.find((c) => c.id === 'apc-002')!.scheduledAt as string).getTime()).toBeGreaterThan(Date.now())
   })
+
+  it('跨天/跨周后 resetDb 对 live 数组按当前时钟重算（非固化 seed 快照）', () => {
+    // 模拟“模块加载 7 天前”场景：先把 live 数组改成陈旧时间，再 resetDb 应恢复为相对当前时钟
+    const dayMs = 24 * 60 * 60 * 1000
+    const stale = new Date(Date.now() - 7 * dayMs).toISOString()
+    const req = resignationRequests.find((r) => r.id === 'res-001')!
+    req.dueAt = stale
+    const exit = exitRequests.find((r) => r.id === 'exit-req-002')!
+    exit.dueAt = stale
+    const dap = departmentApplications.find((a) => a.id === 'dap-002')!
+    dap.dueAt = stale
+
+    resetDb()
+
+    // res-001 偏移 +2 天 → 重算后为未来；exit-req-002 / dap-002 偏移 -1 天 → 重算后为过去（而非残留的 7 天前陈旧值）
+    const resDue = new Date(resignationRequests.find((r) => r.id === 'res-001')!.dueAt).getTime()
+    const exitDue = new Date(exitRequests.find((r) => r.id === 'exit-req-002')!.dueAt).getTime()
+    const dapDue = new Date(departmentApplications.find((a) => a.id === 'dap-002')!.dueAt).getTime()
+    expect(resDue).toBeGreaterThan(Date.now())
+    expect(exitDue).toBeLessThan(Date.now())
+    expect(exitDue).toBeGreaterThan(Date.now() - 2 * dayMs)
+    expect(dapDue).toBeLessThan(Date.now())
+    expect(dapDue).toBeGreaterThan(Date.now() - 2 * dayMs)
+  })
 })

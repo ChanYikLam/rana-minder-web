@@ -56,7 +56,8 @@ export function resetRecruitmentDB(): void {
 }
 
 /** 按当前时钟重算种子相对时间字段（#78 遗留：避免绝对时间固化导致跨天/跨周 overdue 漂移）。
- * 将 daysFromNow(days) 的语义一致化：正数=未来、负数=已过期。 */
+ * 在 resetDb() splice 恢复 live 数组后调用，直接作用于 live 数据（而非 seed 快照），
+ * 保证恢复后的数据携带当前时钟。将 daysFromNow(days) 的语义一致化：正数=未来、负数=已过期。 */
 function reseedRelativeTimes(): void {
   const dayMs = 24 * 60 * 60 * 1000
   const apply = (target: { id: string }, field: string, days: number) => {
@@ -64,11 +65,11 @@ function reseedRelativeTimes(): void {
     ;(target as unknown as Record<string, unknown>)[field] = iso
   }
   const targets: { id: string }[] = [
-    ...seed.departmentApplications,
-    ...seed.membershipInvitations,
-    ...seed.appointmentCommands,
-    ...seed.resignationRequests,
-    ...seed.exitRequests,
+    ...departmentApplications,
+    ...membershipInvitations,
+    ...appointmentCommands,
+    ...resignationRequests,
+    ...exitRequests,
   ]
   for (const [id, meta] of Object.entries(SEED_RELATIVE_OFFSETS)) {
     const target = targets.find((t) => t.id === id)
