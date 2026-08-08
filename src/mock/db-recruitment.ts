@@ -1096,10 +1096,15 @@ export function setDeptLabel(activityId: string, applicantId: string, department
   if (isDeptLeader && !vol) return err('部门负责人仅能为正式报名本部门的申请人设置标签')
   if (isDeptLeader && actorId === app.applicantId) return err('不能设置自己的标签')
   if (label) {
+    const t = assertTransition('SM-REC-004', path.status, 'decided', 'set_label')
+    if (!t.ok) return err(t.reason || '当前路径不可设置标签')
     path.status = 'decided'
     path.decided = 'admit'
     path.labelSetBy = actorName
   } else {
+    const toStatus = path.waitlist ? 'waitlist' : 'evaluating'
+    const t = assertTransition('SM-REC-004', path.status, toStatus, 'clear_label')
+    if (!t.ok) return err(t.reason || '当前路径不可清除标签')
     path.decided = null
     path.labelSetBy = null
     if (path.waitlist) path.status = 'waitlist'
@@ -1117,13 +1122,21 @@ export function decidePath(activityId: string, applicantId: string, departmentId
   if (!path) return err('路径不存在')
   if (decision === 'hold') {
     if (!holdDeadline) return err('暂缓必须设置处理期限')
+    const t = assertTransition('SM-REC-004', path.status, 'hold', 'hold')
+    if (!t.ok) return err(t.reason || '当前路径不可暂缓')
     path.status = 'hold'
     path.holdDeadline = holdDeadline
   } else if (decision === 'admit') {
+    const toStatus = path.status === 'waitlist' ? 'published' : 'decided'
+    const event = path.status === 'waitlist' ? 'promote_invite' : 'decide'
+    const t = assertTransition('SM-REC-004', path.status, toStatus, event)
+    if (!t.ok) return err(t.reason || '当前路径不可作出录取决定')
     if (path.status === 'waitlist') path.status = 'published'
     else path.status = 'decided'
     path.decided = 'admit'
   } else {
+    const t = assertTransition('SM-REC-004', path.status, 'published', 'publish')
+    if (!t.ok) return err(t.reason || '当前路径不可发布拒绝结论')
     path.decided = 'not_admit'
     path.status = 'published'
     path.publishedAt = now()
@@ -1139,9 +1152,14 @@ export function setWaitlist(activityId: string, applicantId: string, departmentI
   const path = app.paths[departmentId]
   if (!path) return err('路径不存在')
   if (on) {
+    const t = assertTransition('SM-REC-004', path.status, 'waitlist', 'waitlist')
+    if (!t.ok) return err(t.reason || '当前路径不可设为候补')
     path.status = 'waitlist'
     path.waitlist = true
   } else {
+    const toStatus = path.decided === 'admit' ? 'decided' : 'evaluating'
+    const t = assertTransition('SM-REC-004', path.status, toStatus, 'waitlist_off')
+    if (!t.ok) return err(t.reason || '当前路径不可取消候补')
     path.waitlist = false
     if (path.decided === 'admit') path.status = 'decided'
     else path.status = 'evaluating'
@@ -1175,6 +1193,8 @@ export function publishDepartmentResult(activityId: string, applicantId: string,
   const path = app.paths[departmentId]
   if (!path) return err('路径不存在')
   if (path.status !== 'decided' && path.status !== 'waitlist') return err('该路径尚未形成可发布的决定')
+  const t = assertTransition('SM-REC-004', path.status, 'published', 'publish')
+  if (!t.ok) return err(t.reason || '该路径尚未形成可发布的决定')
   path.status = 'published'
   path.publishedAt = now()
   path.version += 1
