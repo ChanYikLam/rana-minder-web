@@ -23,7 +23,7 @@ import * as formdb from './db-forms'
 import {
   HIGH_RISK_COMMANDS, trackAccessEvent, listAnomalyAlerts, acknowledgeAnomaly,
   getRealDataSwitch, setRealDataSwitch, getOidcConfig, updateOidcConfig,
-  issueReauthProof, consumeReauthProof, assertHighRisk,
+  issueReauthProof, consumeReauthProof, assertHighRisk, resetGovernanceState,
 } from './governance'
 
 /** 重认证 proof 机制（issueReauthProof / consumeReauthProof / assertHighRisk）统一由 governance.ts 提供 */
@@ -225,6 +225,8 @@ function templateSeed(): PermissionTemplate[] {
   ]
 }
 const permissionTemplates = templateSeed()
+/** MRM-010：权限模板种子快照（模板数组会被 新建/保存/diff/发布 直接改写，需随平台域重置还原） */
+const permissionTemplatesSeed: PermissionTemplate[] = structuredClone(permissionTemplates)
 let templatePreviewVersion = 1
 
 /** 平台配置（US-CFG：内存态持久化；学年/届次为平台级字段，社团域不携带——P2-3） */
@@ -278,6 +280,8 @@ const retentionPolicies: RetentionPolicy[] = [
   { id: 'rp-002', scope: '过期招新活动', retentionDays: 730, action: 'archive', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
   { id: 'rp-003', scope: '审计日志', retentionDays: 1095, action: 'keep', status: 'active', version: 1, updatedAt: '2025-07-01T00:00:00+08:00', publishedAt: '2025-07-01T00:00:00+08:00' },
 ]
+/** MRM-010：保留策略种子快照（新建草稿/发布会改写数组与 previewVersion，需随平台域重置还原） */
+const retentionPoliciesSeed: RetentionPolicy[] = structuredClone(retentionPolicies)
 let retentionPreviewVersion = 1
 
 /**
@@ -323,9 +327,13 @@ let lastRetentionExecution: { runId: string; executedAt: string; results: Retent
 
 const retentionSubjectsSeed: RetentionSubject[] = structuredClone(retentionSubjects)
 
-/** 测试/演示用：重置保留策略执行器状态（受控对象恢复 active、清空上次执行记录） */
+/** 测试/演示用：重置保留策略执行器状态（受控对象恢复 active、清空上次执行记录）。
+ * MRM-010：一并还原 retentionPolicies（新建草稿/发布会改写数组）与 retentionPreviewVersion，
+ * 避免「先跑发布用例、再跑断言策略状态用例」时策略残留（如多出一条已发布草稿）。 */
 export function resetRetentionState(): void {
   retentionSubjects.splice(0, retentionSubjects.length, ...structuredClone(retentionSubjectsSeed))
+  retentionPolicies.splice(0, retentionPolicies.length, ...structuredClone(retentionPoliciesSeed))
+  retentionPreviewVersion = 1
   lastRetentionExecution = null
 }
 
@@ -430,12 +438,18 @@ const sharedStateSeed = {
   templatePreviewVersion,
 } as const
 
-/** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号。
+/** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号 /
+ * 权限模板 / 保留策略 / 重认证 proof 等治理状态 / 任期提醒去重桶。
  * 与 reset.ts 的 resetDb/resetRecruitmentDB 等并列，供测试与演示环境一键还原。
  *
  * MRM-009：seed 中静态时间戳的 completed 任务（exp-001/exp-003）在 reset 时把 expiredAt 重新设到
  * "当前时间 + 7 天"——保证演示与测试期间 seed 任务不会被 settleExportTask 误转 expired，也不会被
- * gcExportTasks 清出；动态创建的任务走正常过期与 GC 路径。 */
+ * gcExportTasks 清出；动态创建的任务走正常过期与 GC 路径。
+ *
+ * MRM-010：补平台域共享状态缺失的重置——permissionTemplates / retentionPolicies /
+ * retentionPreviewVersion / lastRetentionExecution（复用 resetRetentionState）以及
+ * reauthProofs、真实数据开关、异常访问告警（resetGovernanceState）、termRemindSent 去重桶；
+ * 否则「先跑含发布用例的测试、再跑断言策略状态的用例」时发布残留会污染后续断言。 */
 export function resetSharedState(): void {
   const futureExpiry = new Date(Date.now() + 7 * DAY_MS).toISOString()
   const rehydratedExportTasks = structuredClone(sharedStateSeed.exportTasks).map((t) => (
@@ -449,6 +463,14 @@ export function resetSharedState(): void {
   Object.assign(platformConfig, structuredClone(sharedStateSeed.platformConfig))
   platformConfigVersion = sharedStateSeed.platformConfigVersion
   templatePreviewVersion = sharedStateSeed.templatePreviewVersion
+  // MRM-010：权限模板数组还原（发布/保存/diff 会改写模板状态与 previewVersion）
+  permissionTemplates.splice(0, permissionTemplates.length, ...structuredClone(permissionTemplatesSeed))
+  // MRM-010：保留策略数组/previewVersion/执行记录还原（新建草稿与发布会改写）
+  resetRetentionState()
+  // MRM-010：重认证 proof、真实数据开关、异常访问告警与高风险命令 enforced 标志复位
+  resetGovernanceState()
+  // MRM-010：任期到期提醒去重桶清空，避免跨用例重复投递去重残留
+  termRemindSent.clear()
   db.resetAnomalySeq()
 }
 
