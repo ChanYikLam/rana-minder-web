@@ -139,11 +139,12 @@ function notFound(message = '请求的内容不存在或已被移除') {
 
 const ok = (data: unknown) => ({ code: 0, data })
 
-/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户仅限非管理角色
- * （member/applicant）按学号复用/注册申请人档案，使其可报名其他社团招新与联合活动。
- * 管理角色（super_admin/club_leader/hr/department_leader/interviewer）默认不自动注册为申请人，
- * 但报名端点携带目标社团上下文（opts.clubId，普通招新）或宽松模式（opts.allowAnyRole，联合活动）时放行，
+/** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户按学号复用/注册申请人档案，
+ * 使其可报名其他社团招新与联合活动（Issue-4.0-2：不再排除管理角色，干事/负责人/人事/面试官同为在校学生）。
+ * 管理角色（super_admin/club_leader/hr/department_leader/interviewer）在报名端点携带目标社团上下文
+ * （opts.clubId，普通招新）或宽松模式（opts.allowAnyRole，联合活动）时放行，
  * 由端点层 per-club 成员判断兜底（本社团成员 → 422；跨社团 → 200 动态注册 u-auto-* 档案）。
+ * 本社报名本社的拦截由 apply 端点按目标社团成员关系校验（isExistingMember → 422），双端语义一致。
  * 不传 opts 时回退「全局首个角色」，旧调用点（面试/候选人查询等）行为不变。 */
 function actorApplicantId(
   user: MockUser,

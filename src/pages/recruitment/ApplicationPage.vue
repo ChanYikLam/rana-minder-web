@@ -64,6 +64,7 @@ async function loadData() {
 }
 
 const myApplication = ref<MyApplication | null>(null)
+const applyDenied = ref(false)
 const withdrawing = ref(false)
 const confirmWithdraw = ref(false)
 let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
@@ -73,9 +74,10 @@ const hasSubmitted = computed(() => myApplication.value?.status === 'submitted')
 const hasArchived = computed(() => myApplication.value?.status === 'archived')
 const hasReadonlyStatus = computed(() => ['submitted', 'identity_anomaly'].includes(myApplication.value?.status || ''))
 
-/** 可编辑性统一走共享状态机：draft/revision_requested 可编辑，exited 恢复窗口内可重新提交（recovery_resubmit） */
-const showApplyForm = computed(() => isEditableStatus(myApplication.value))
-const isTerminal = computed(() => !showApplyForm.value)
+/** 可编辑性统一走共享状态机：draft/revision_requested 可编辑，exited 恢复窗口内可重新提交（recovery_resubmit）；
+ * 无报名资格（403）时始终不可编辑 */
+const showApplyForm = computed(() => !applyDenied.value && isEditableStatus(myApplication.value))
+const isTerminal = computed(() => !applyDenied.value && !showApplyForm.value)
 const recoveryWindowDeadline = computed(() => myApplication.value?.recoveryWindowDeadline || null)
 
 function renderAnswerValue(v: unknown): string {
@@ -163,7 +165,12 @@ async function loadMyApplication() {
       myApplication.value = null
       return
     }
-    // 其他拒绝/错误（如无权限）不影响表单填写
+    if (result.kind === 'rejected' && result.error.code === 'IFC-ERR-003') {
+      // 无报名资格（403）：明确阻断表单填写并给出提示（Issue-4.0-2 不静默吞并）
+      applyDenied.value = true
+      return
+    }
+    // 其他拒绝/错误不影响表单填写
     myApplication.value = null
   } catch {
     // 忽略：草稿恢复失败不影响表单填写
@@ -321,6 +328,15 @@ onUnmounted(() => {
 
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ activity.title }}</h1>
       <p class="text-sm text-text-secondary mb-6">{{ activity.clubName }} · 报名申请</p>
+
+      <!-- 无报名资格（403）：阻断填写并明确提示，避免静默吞并成"无申请"（Issue-4.0-2） -->
+      <Card v-if="applyDenied" class="mb-4">
+        <div class="flex items-center gap-2 text-danger" role="alert">
+          <AlertTriangle :size="18" />
+          <p class="text-sm font-medium text-text-primary">当前账号无报名资格</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">报名仅面向在校学生开放，如确认符合条件请联系管理员核实账号状态。</p>
+      </Card>
 
       <!-- 非可编辑终态（已提交/身份异常、已归档、其他终态互斥展示）；仅 submitted 可撤销（与联合报名一致） -->
       <Card v-if="isTerminal" class="mb-4">
