@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost, mockPush } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPush: vi.fn() }))
+const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { clubId: 'club-001' } }),
   useRouter: () => ({ push: mockPush }),
@@ -12,7 +13,7 @@ vi.mock('@/services/client', () => ({
   post: (...args: unknown[]) => mockPost(...args),
 }))
 vi.mock('vue-sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: mockToastSuccess, error: mockToastError },
 }))
 
 import ActivityCreatePage from './ActivityCreatePage.vue'
@@ -21,6 +22,8 @@ describe('ActivityCreatePage 创建招新活动', () => {
   beforeEach(() => {
     mockGet.mockReset()
     mockPost.mockReset()
+    mockToastSuccess.mockReset()
+    mockToastError.mockReset()
     vi.clearAllMocks()
   })
   afterEach(() => vi.restoreAllMocks())
@@ -119,7 +122,7 @@ describe('ActivityCreatePage 创建招新活动', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
     await wrapper.findAll('button').find((b) => b.text().includes('发布活动'))!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('发布失败，请稍后重试')
+    expect(mockToastError).toHaveBeenCalledWith('发布失败，请稍后重试')
     expect(mockPush).not.toHaveBeenCalled()
     wrapper.unmount()
   })

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { toast } from 'vue-sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
 import { DEMO_ROLES } from '@/mock/auth'
@@ -16,7 +17,6 @@ const route = useRoute()
 const session = useSessionViewStore()
 
 const loggingIn = ref(false)
-const loginError = ref<string | null>(null)
 const selectedRole = ref('leader')
 
 const roleIcons: Record<MockRole['role'], typeof ShieldCheck> = {
@@ -50,26 +50,25 @@ onMounted(async () => {
 async function handleLogin() {
   if (loggingIn.value || authMode === 'disabled') return
   loggingIn.value = true
-  loginError.value = null
 
   try {
     const result = await startLogin(parseSameOriginRedirect(route.query.redirect) ?? '/me', selectedRole.value)
     if (result === 'redirected') return
     if (result === 'disabled') {
-      loginError.value = '统一认证尚未配置，当前无法登录'
+      toast.error('统一认证尚未配置，当前无法登录')
       return
     }
 
     await session.loadSession()
     if (!session.isAuthenticated) {
-      loginError.value = session.lastError || '登录失败，请稍后重试'
+      toast.error(session.lastError || '登录失败，请稍后重试')
       return
     }
 
     await router.push(resolveTargetAfterLogin())
   } catch {
     // 兜底：优先透出会话层具体原因（如账号禁用），再退化为通用文案
-    loginError.value = session.lastError || '登录失败，请稍后重试'
+    toast.error(session.lastError || '登录失败，请稍后重试')
   } finally {
     loggingIn.value = false
   }
@@ -130,10 +129,6 @@ async function handleLogin() {
         <LogIn v-else :size="18" aria-hidden="true" />
         {{ loggingIn ? '正在登录...' : authMode === 'disabled' ? '统一认证未配置' : '使用统一身份认证登录' }}
       </button>
-
-      <p v-if="loginError" class="mt-3 text-sm text-danger text-center" role="alert">
-        {{ loginError }}
-      </p>
 
       <div class="mt-6 pt-6 border-t border-border">
         <p class="text-xs text-text-secondary text-center mb-3">无需登录也可以</p>

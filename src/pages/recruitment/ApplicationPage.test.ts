@@ -398,7 +398,6 @@ describe('ApplicationPage 交互流程', () => {
     await flushPromises()
     await nextTick()
 
-    expect(wrapper.text()).toContain('报名已截止')
     expect(toast.error).toHaveBeenCalledWith('报名已截止')
     expect(mockPush).not.toHaveBeenCalled()
   })
@@ -415,7 +414,6 @@ describe('ApplicationPage 交互流程', () => {
     await nextTick()
 
     expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/draft', { answers: {} })
-    expect(wrapper.text()).toContain('草稿已保存')
     expect(toast.success).toHaveBeenCalled()
   })
 

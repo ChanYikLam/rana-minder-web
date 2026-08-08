@@ -168,7 +168,7 @@ async function handleCreate() {
     showCreate.value = false
     await loadData()
   } else {
-    createError.value = '提交失败，请重试'
+    toastError(r, '提交失败，请重试')
   }
 }
 

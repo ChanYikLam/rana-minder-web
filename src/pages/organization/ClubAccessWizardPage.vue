@@ -117,7 +117,6 @@ const { searching, seq, schedule } = useDebouncedSearch({
       searchFailed.value = false
       return
     }
-    searchFailed.value = false
     const mySeq = seq.value
     const result = await get<{ items: GroupRow[] }>('/admin/groups/search', { q: kw })
     if (mySeq !== seq.value) return
@@ -129,6 +128,7 @@ const { searching, seq, schedule } = useDebouncedSearch({
       // 搜索失败（非 completed）：清空旧结果避免残留误导，与其余两处保持一致
       searchResults.value = []
       searchFailed.value = true
+      toast.error('Group 搜索失败，请重试')
     }
   },
 })
@@ -213,8 +213,7 @@ onMounted(loadInitial)
           </p>
           <p class="text-xs text-text-secondary mt-1">{{ selectedGroup.path }} · {{ selectedGroup.members.length }} 名成员</p>
         </div>
-        <p v-if="searchFailed" class="mt-2 text-xs text-danger" role="alert">Group 搜索失败，请重试</p>
-        <p v-else-if="searchResults.length === 0 && keyword.trim() && !searching" class="mt-2 text-xs text-text-secondary">
+        <p v-if="searchResults.length === 0 && keyword.trim() && !searching && !searchFailed" class="mt-2 text-xs text-text-secondary">
           无匹配 Group：需满足社团级层级且未重复绑定；部门/职位级 Group 不可作为社团接入。
         </p>
       </Card>

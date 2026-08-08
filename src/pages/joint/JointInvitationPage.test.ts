@@ -3,12 +3,16 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { invitationId: 'jinv-1' }, meta: {} }),
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
+}))
+vi.mock('vue-sonner', () => ({
+  toast: { success: mockToastSuccess, error: mockToastError },
 }))
 
 import JointInvitationPage from './JointInvitationPage.vue'
@@ -30,6 +34,8 @@ describe('JointInvitationPage 联合邀请', () => {
   beforeEach(() => {
     mockGet.mockReset()
     mockPost.mockReset()
+    mockToastSuccess.mockReset()
+    mockToastError.mockReset()
     vi.clearAllMocks()
   })
   afterEach(() => vi.restoreAllMocks())
@@ -64,7 +70,7 @@ describe('JointInvitationPage 联合邀请', () => {
     expect(rejectBtn, '待处理邀请应渲染拒绝按钮').toBeTruthy()
     await rejectBtn!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('活动已结束')
+    expect(mockToastError).toHaveBeenCalledWith('活动已结束')
   })
 
   // 新-2：已接受且同步中展示「确认生效」按钮，点击后调用申请人侧 sync-confirm
