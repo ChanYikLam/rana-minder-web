@@ -1263,11 +1263,20 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
           if (anyPublished) status = 'published'
           else if (shown) status = 'concluded'
           else if (anyEvaluating) status = 'evaluating'
+          // Issue-4.0-1: 展示轮次/面试时间上下文（最近一场未取消面试）
+          const interviews = rdb.recruitmentInterviews
+            .filter((i) => i.activityId === query.activityId && i.applicantId === app.applicantId && i.status !== 'cancelled')
+            .sort((x, y) => ((x.startAt || '').localeCompare(y.startAt || '')))
+          const lastInterview = interviews[interviews.length - 1]
+          const roundName = act?.rounds.find((r) => r.id === lastInterview?.roundId)?.name || ''
           return {
             id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
             departmentName: app.preferences[0]?.departmentName || '', status,
             rating: shown?.rating ?? null, comment: shown?.comment || '',
             concludedAt: shown?.updatedAt || null, concludedBy: shown?.authorName || null,
+            // Issue-4.0-1: 返回真实评价主键（rev-xxx）供 conclude 提交；id 保持申请 ID 兼容既有前端
+            reviewId: shown?.id ?? null,
+            roundName, interviewAt: lastInterview?.startAt ?? null,
             peerViewLocked,
             reviews: peerViewLocked ? [] : sorted.map((r) => ({
               authorName: r.authorName, authorRole: r.authorRole, comment: r.comment,
@@ -1287,9 +1296,15 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { rating?: number; comment?: string }
-      // reviewId 对应 recruitmentReviews.id（如 rev-001），需先定位到 applicantId
+      // reviewId 优先按 recruitmentReviews.id（rev-xxx）定位；兼容按申请 ID（app-xxx）定位（Issue-4.0-1 契约对齐）
       const review = rdb.recruitmentReviews.find((r) => r.id === query.reviewId && r.activityId === query.activityId)
-      const applicantId = review?.applicantId
+      let applicantId = review?.applicantId
+      if (!applicantId) {
+        const appByApplicationId = rdb.recruitmentApplications.find(
+          (a) => a.id === query.reviewId && a.activityId === query.activityId,
+        )
+        applicantId = appByApplicationId?.applicantId
+      }
       const app = applicantId
         ? rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
         : undefined
