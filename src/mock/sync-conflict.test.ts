@@ -80,4 +80,23 @@ describe('P0-3 同步冲突（sync-conflict）：真实冲突清单与写回', (
     expect(same.code).toBe(0)
     expect(mockUsers.leader.name).toBe('张明远')
   })
+
+  it('解决冲突：邮箱/手机号格式非法返回 422（与 PUT profile 一致，避免垃圾格式值落库）', () => {
+    resolveMockUser('/api/auth/profile?_mock_user=leader')
+    const badEmail = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'email', chosenValue: 'not-an-email' },
+    })
+    expect(badEmail.statusCode).toBe(422)
+    expect(badEmail.body?.code).toBe('IFC-ERR-006')
+
+    const badPhone = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'phone', chosenValue: '123' },
+    })
+    expect(badPhone.statusCode).toBe(422)
+    expect(badPhone.body?.code).toBe('IFC-ERR-006')
+
+    // 非法值未写入本地档案
+    expect(mockUsers.leader.email).toBe('leader@example.edu.cn')
+    expect(mockUsers.leader.phone).toBe('13800000002')
+  })
 })

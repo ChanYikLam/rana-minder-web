@@ -876,6 +876,31 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      // 写回前按字段类型做格式校验，与 PUT /auth/profile 保持一致（避免垃圾格式值经冲突解决落库）
+      if (typeof chosenValue === 'string' && chosenValue !== '') {
+        if (field === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(chosenValue)) {
+          return {
+            statusCode: 422,
+            body: {
+              code: 'IFC-ERR-006',
+              message: '邮箱格式不正确',
+              fieldErrors: { [field]: ['邮箱格式不正确'] },
+              supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+            },
+          }
+        }
+        if (field === 'phone' && !/^1[3-9]\d{9}$/.test(chosenValue)) {
+          return {
+            statusCode: 422,
+            body: {
+              code: 'IFC-ERR-006',
+              message: '手机号格式不正确',
+              fieldErrors: { [field]: ['手机号格式不正确'] },
+              supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+            },
+          }
+        }
+      }
       // 空值或与本地当前值相同的提交不产生实际变更，直接返回当前资料
       const user = resolveMockUser(url)
       const typedField = field as 'name' | 'email' | 'phone' | 'studentId'

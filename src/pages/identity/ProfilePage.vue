@@ -101,6 +101,26 @@ async function loadProfile() {
   }
 }
 
+// 统一入口：按模式分派加载逻辑（正常模式加载资料，sync-conflict 模式先拉资料再拉冲突清单）
+async function loadPage() {
+  if (!isSyncConflict.value) {
+    await loadProfile()
+    return
+  }
+  // sync-conflict 模式：先拉取真实本地档案，再请求真实冲突清单
+  state.value = 'loading'
+  error.value = null
+  const result = await get<Profile>('/auth/profile')
+  if (result.kind === 'completed') {
+    profile.value = result.data
+    state.value = 'normal'
+    await loadConflicts()
+  } else {
+    state.value = 'error'
+    error.value = result.kind === 'rejected' && result.error ? result.error : { code: 'IFC-ERR-016', message: '加载失败' }
+  }
+}
+
 function startEdit() {
   if (!profile.value) return
   formEmail.value = profile.value.email
@@ -208,7 +228,7 @@ async function loadConflicts() {
   const result = await get<{ conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> }>('/auth/profile/sync-conflicts')
   conflictLoading.value = false
   if (result.kind === 'completed') {
-    conflictFields.value = result.data.conflicts.map((c) => ({ ...c, chosen: 'local' as const }))
+    conflictFields.value = result.data.conflicts.map((c) => ({ ...c, chosen: 'remote' as const }))
     if (conflictFields.value.length === 0) {
       toast.success('没有待处理的同步冲突')
       router.push('/me/profile')
@@ -232,6 +252,9 @@ async function handleResolveConflicts() {
     if (r.kind === 'rejected' && r.error) {
       conflictSubmitting.value = false
       toastError(r, '冲突解决失败')
+      // 逐条写回过程中途失败：已写回字段已生效，重新拉取冲突清单使页面与服务端状态对齐，
+      // 避免已解决字段留在页面上被重复提交
+      await loadConflicts()
       return
     }
   }
@@ -245,20 +268,7 @@ async function handleResolveConflicts() {
 }
 
 onMounted(async () => {
-  if (!isSyncConflict.value) {
-    await loadProfile()
-    return
-  }
-  // sync-conflict 模式：先拉取真实本地档案，再请求真实冲突清单
-  const result = await get<Profile>('/auth/profile')
-  if (result.kind === 'completed') {
-    profile.value = result.data
-    state.value = 'normal'
-    await loadConflicts()
-  } else {
-    state.value = 'error'
-    error.value = result.kind === 'rejected' && result.error ? result.error : { code: 'IFC-ERR-016', message: '加载失败' }
-  }
+  await loadPage()
 })
 </script>
 
@@ -268,7 +278,7 @@ onMounted(async () => {
     title="个人资料"
     :error="error"
     error-message="资料加载失败"
-    @retry="loadProfile"
+    @retry="loadPage"
   >
     <div class="max-w-2xl mx-auto" v-if="profile">
       <!-- 同步冲突解决模式 -->
