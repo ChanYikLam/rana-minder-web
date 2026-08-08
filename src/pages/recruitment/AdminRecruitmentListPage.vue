@@ -5,6 +5,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { Flag, ShieldAlert } from '@lucide/vue'
 
@@ -46,8 +47,16 @@ async function handleForceComplete(proof?: string) {
     target.value = null
     reason.value = ''
     await loadData()
+  } else if (result.kind === 'accepted') {
+    // P1-1：202/IFC-ERR-014 异步受理——关闭弹窗并提示已受理，避免停留在“正在执行...”
+    toastAcceptedAction('强制结束已受理，正在后台处理')
+    open.value = false
+    target.value = null
+    reason.value = ''
   } else if (result.kind === 'rejected' && result.error) {
     reasonError.value = (result.error as { message?: string }).message || '操作失败'
+  } else {
+    reasonError.value = '操作失败，请稍后重试'
   }
 }
 

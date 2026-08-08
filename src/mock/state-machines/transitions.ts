@@ -227,29 +227,51 @@ const TRANSITIONS_CONST = {
 
   /** SM-REC-004 部门路径与结论 */
   'SM-REC-004': {
-    pending: { formal_volunteer: 'evaluating', transfer_path: 'evaluating' },
+    pending: {
+      formal_volunteer: 'evaluating',
+      transfer_path: 'evaluating',
+      publish: 'published',
+      waitlist: 'waitlist',
+      set_label: 'decided',
+      clear_label: 'evaluating',
+      hold: 'hold',
+    },
     evaluating: {
       hold: 'hold',
       decide: 'decided',
       set_label: 'decided',
+      clear_label: 'evaluating',
       waitlist: 'waitlist',
+      waitlist_off: 'evaluating',
       publish: 'published',
     },
     hold: {
       resume: 'evaluating',
       decide: 'decided',
       waitlist: 'waitlist',
+      waitlist_off: 'hold',
       deadline_reminder: 'hold',
+      hold: 'hold',
+      publish: 'published',
+      set_label: 'decided',
+      clear_label: 'evaluating',
     },
     decided: {
       clear_label: 'evaluating',
       waitlist: 'waitlist',
+      waitlist_off: 'decided',
       publish: 'published',
       revise: 'published',
+      set_label: 'decided',
+      decide: 'decided',
     },
     waitlist: {
       promote_invite: 'published',
       publish: 'published',
+      set_label: 'decided',
+      clear_label: 'waitlist',
+      waitlist: 'waitlist',
+      waitlist_off: ['decided', 'evaluating'],
     },
     published: {
       revise_before_accept: 'published',

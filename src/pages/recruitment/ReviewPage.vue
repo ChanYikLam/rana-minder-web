@@ -8,6 +8,7 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import type { FormField, FileMeta } from '@/types/domain/form'
@@ -203,6 +204,8 @@ async function handleSubmitReview() {
   if (result.kind === 'completed') {
     toast.success('评价已提交')
     await loadReviews()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('评价已受理，正在后台处理')
   } else {
     const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
     toast.error(message)
@@ -223,6 +226,8 @@ async function handlePublishAll() {
   if (result.kind === 'completed') {
     publishSucceeded.value = true
     reviews.value.forEach((r) => { if (r.status === 'concluded') r.status = 'published' })
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('发布已受理，正在后台处理')
   } else {
     publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
   }

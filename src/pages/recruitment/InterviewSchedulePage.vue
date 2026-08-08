@@ -6,6 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, CheckCircle2 } from '@lucide/vue'
 
@@ -72,6 +73,8 @@ async function handleBookSlot() {
   if (result.kind === 'completed') {
     toast.success('时段已预约')
     await loadDetail()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('预约已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
   }
@@ -85,6 +88,8 @@ async function handleLeave() {
   if (result.kind === 'completed') {
     toast.success('已登记请假，可重新选择时段')
     await loadDetail()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('请假已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '请假失败，请稍后重试')
   }

@@ -7,6 +7,7 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post, put } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw, Users } from '@lucide/vue'
 
@@ -126,6 +127,8 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadInterviews()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败')
   }

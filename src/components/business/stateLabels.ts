@@ -146,6 +146,8 @@ export const STATE_LABELS: Record<string, StatusLabel> = {
   locked: { variant: 'neutral', label: '已锁定' },
 
   // ===== 联合（SM-JNT-*）=====
+  // `concluded` 是联合结论显示态（结论 + 评价已提交，经 upsertJointReviewExtra 派生，非状态机状态）
+  concluded: { variant: 'success', label: '已结论' },
   club_confirm: { variant: 'info', label: '社团确认中' },
   closing_confirm: { variant: 'warning', label: '关闭确认中' },
   force_suspended: { variant: 'danger', label: '已强制暂停' },
