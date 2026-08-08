@@ -23,6 +23,7 @@ interface ReviewItem {
   departmentName: string; status: string; rating: number | null
   roundName: string; interviewAt: string | null
   comment: string; concludedAt: string | null; concludedBy: string | null
+  reviewId: string | null
   myRating: number | null; myComment: string | null
   peerViewLocked: boolean
   reviews: PeerReview[]
@@ -86,6 +87,12 @@ async function loadReviews() {
   if (result.kind === 'completed') {
     reviews.value = (result as { kind: 'completed'; data: { items: ReviewItem[] } }).data.items
     state.value = 'normal'
+    // Issue-4.0-1: 支持从任务页带 ?applicantId= 锚定进入，自动选中对应申请人
+    const anchor = typeof route.query.applicantId === 'string' ? route.query.applicantId : null
+    if (anchor) {
+      const target = reviews.value.find((r) => r.applicantId === anchor)
+      if (target) handleRowClick(target)
+    }
   } else {
     state.value = 'error'
   }
@@ -129,8 +136,9 @@ function handleRowClick(row: unknown) {
   const item = row as ReviewItem
   selected.value = item
   selectedId.value = item.id
-  rating.value = 0
-  comment.value = ''
+  // 预填本人已有评分/评语（Issue-4.0-1：锚定/重选时保留上次提交内容）
+  rating.value = item.myRating ?? 0
+  comment.value = item.myComment ?? ''
   submitError.value = ''
   void loadApplicationDetail(item)
 }
@@ -257,10 +265,10 @@ onMounted(() => {
           @row-click="handleRowClick"
         >
           <template #cell-roundName="{ row }">
-            <span class="text-text-secondary">{{ (row as ReviewItem).roundName || '-' }}</span>
+            <span class="text-sm text-text-secondary">{{ (row as ReviewItem).roundName || '-' }}</span>
           </template>
           <template #cell-interviewAt="{ row }">
-            <span class="text-text-secondary">{{ formatDateTime((row as ReviewItem).interviewAt) || '-' }}</span>
+            <span class="text-sm text-text-secondary">{{ formatDateTime((row as ReviewItem).interviewAt) || '-' }}</span>
           </template>
           <template #cell-status="{ row }">
             <StateTag :status="(row as ReviewItem).status" />

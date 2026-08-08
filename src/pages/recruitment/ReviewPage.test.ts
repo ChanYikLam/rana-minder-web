@@ -3,16 +3,22 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, mockToastError, mockToastSuccess, mockUseRoute } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockToastError: vi.fn(),
+  mockToastSuccess: vi.fn(),
+  mockUseRoute: vi.fn(() => ({ params: { clubId: 'club-001', activityId: 'act-1' }, query: {} })),
+}))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { clubId: 'club-001', activityId: 'act-1' } }),
+  useRoute: () => mockUseRoute(),
+}))
+vi.mock('vue-sonner', () => ({
+  toast: { success: (...a: unknown[]) => mockToastSuccess(...a), error: (...a: unknown[]) => mockToastError(...a) },
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
-}))
-vi.mock('vue-sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
 }))
 
 import ReviewPage from './ReviewPage.vue'
@@ -20,7 +26,7 @@ import ReviewPage from './ReviewPage.vue'
 const review = {
   id: 'app-1', applicantId: 'u-1', applicantName: '张三', departmentName: '技术部',
   status: 'in_progress', rating: null, comment: null, concludedAt: null, concludedBy: null,
-  roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
+  reviewId: 'rev-1', roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
   myRating: null, myComment: null, peerViewLocked: false, reviews: [],
 }
 
@@ -75,9 +81,8 @@ async function clickReviewRow(wrapper: ReturnType<typeof mount>) {
 describe('ReviewPage 评审页', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    mockGet.mockReset()
-    mockPost.mockReset()
     vi.clearAllMocks()
+    mockUseRoute.mockReturnValue({ params: { clubId: 'club-001', activityId: 'act-1' }, query: {} })
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -131,25 +136,7 @@ describe('ReviewPage 评审页', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
-  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），成功后刷新列表', async () => {
-    setupGetRouter()
-    mockPost.mockResolvedValue({ kind: 'completed', data: { status: 'concluded' } })
-    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
-    await flushPromises()
-
-    await clickReviewRow(wrapper)
-    await wrapper.find('button[aria-label="4 星"]').trigger('click')
-    await wrapper.findAll('button').find((b) => b.text().includes('提交评价'))!.trigger('click')
-    await flushPromises()
-
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
-      rating: 4,
-      comment: '',
-    })
-    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews')
-  })
-
-  it('提交评价失败：错误信息展示，不再静默吞掉', async () => {
+  it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败展示 toast + 内联错误，成功后刷新列表', async () => {
     setupGetRouter()
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '申请人不存在' } })
     const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
@@ -157,9 +144,52 @@ describe('ReviewPage 评审页', () => {
 
     await clickReviewRow(wrapper)
     await wrapper.find('button[aria-label="4 星"]').trigger('click')
-    await wrapper.findAll('button').find((b) => b.text().includes('提交评价'))!.trigger('click')
+    const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
+    expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
+    await submitBtn!.trigger('click')
     await flushPromises()
 
+    // 契约：conclude 按 applicantId 定位申请人（列表行 applicantId=u-1）
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
+      rating: 4,
+      comment: '',
+    })
+    // 失败不再静默：toast + 内联错误展示
+    expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
     expect(wrapper.text()).toContain('申请人不存在')
+  })
+
+  it('提交评价成功：toast 提示并刷新列表', async () => {
+    setupGetRouter()
+    mockPost.mockResolvedValue({ kind: 'completed', data: { status: 'concluded' } })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await clickReviewRow(wrapper)
+    await wrapper.find('button[aria-label="4 星"]').trigger('click')
+    const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
+    expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
+    await submitBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
+      rating: 4,
+      comment: '',
+    })
+    expect(mockToastSuccess).toHaveBeenCalledWith('评价已提交')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews')
+  })
+
+  it('带 ?applicantId= 锚定进入：自动选中对应申请人', async () => {
+    mockUseRoute.mockReturnValue({
+      params: { clubId: 'club-001', activityId: 'act-1' },
+      query: { applicantId: 'u-1' },
+    })
+    setupGetRouter()
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('张三')
+    // 评价面板已展开（非"点击左侧申请人查看详情"占位）
+    expect(wrapper.text()).not.toContain('点击左侧申请人查看详情')
   })
 })

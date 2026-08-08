@@ -1276,6 +1276,8 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
             interviewAt: lastInterview?.startAt || null,
             rating: shown?.rating ?? null, comment: shown?.comment || '',
             concludedAt: shown?.updatedAt || null, concludedBy: shown?.authorName || null,
+            // Issue-4.0-1: 返回真实评价主键（rev-xxx）供 conclude 提交；id 保持申请 ID 兼容既有前端
+            reviewId: shown?.id ?? null,
             peerViewLocked,
             reviews: peerViewLocked ? [] : sorted.map((r) => ({
               id: r.id,
@@ -1297,7 +1299,16 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { rating?: number; comment?: string }
-      const applicantId = query.applicantId
+      // 契约：:applicantId 定位申请人（列表行 applicantId），首评无 rev-xxx 亦可提交；
+      // 兼容按评价主键 rev-xxx / 申请 ID app-xxx 定位（旧契约不破）
+      const review = rdb.recruitmentReviews.find((r) => r.id === query.applicantId && r.activityId === query.activityId)
+      let applicantId = review?.applicantId
+      if (!applicantId) {
+        const appByApplicationId = rdb.recruitmentApplications.find(
+          (a) => a.id === query.applicantId && a.activityId === query.activityId,
+        )
+        applicantId = appByApplicationId?.applicantId ?? query.applicantId
+      }
       const app = rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
       if (!app) return notFound('申请人不存在')
       const me = actorInfo(url, query.clubId)
