@@ -5,6 +5,7 @@ import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { CheckCircle2, XCircle, Clock, Mail, ArrowLeft } from '@lucide/vue'
 
@@ -48,6 +49,8 @@ async function handleRespond(action: 'accept' | 'reject') {
     } else {
       toast.success('已拒绝邀请')
     }
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction(action === 'accept' ? '接受邀请已受理，正在后台处理' : '拒绝邀请已受理，正在后台处理')
   } else {
     toast.error('操作失败，请稍后重试')
   }

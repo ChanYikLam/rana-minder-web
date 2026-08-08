@@ -8,6 +8,7 @@ import { BatchActionBar, type BatchItem } from '@/components/operation'
 import { PartialSuccess, type PartialResult } from '@/components/operation'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { ArrowRight, ArrowLeft, ChevronRight } from '@lucide/vue'
 
 type BatchType = 'assign_interviewer' | 'schedule_interview' | 'publish_result' | 'send_invitation'
@@ -132,6 +133,10 @@ async function runBatch(memberIds: string[], reason: string, proof?: string) {
   if (result.kind === 'completed') {
     applyResults(result.data.results)
     toast.success('批量操作执行完成')
+    return true
+  }
+  if (result.kind === 'accepted') {
+    toastAcceptedAction('批量操作已受理，正在后台处理')
     return true
   }
   toast.error('批量操作执行失败，请重试')
