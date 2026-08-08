@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, CheckCircle2, AlertTriangle } from '@lucide/vue'
 
@@ -21,7 +23,7 @@ const state = ref<PageState>('loading')
 const detail = ref<JointInterviewDetail | null>(null)
 const selectedSlotId = ref<string | null>(null)
 const booking = ref(false)
-const bookError = ref<string | null>(null)
+const leaving = ref(false)
 
 async function loadDetail() {
   state.value = 'loading'
@@ -30,9 +32,7 @@ async function loadDetail() {
   if (result.kind === 'completed') {
     detail.value = result.data
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function formatTime(iso: string): string {
@@ -42,16 +42,52 @@ function formatTime(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${days[d.getDay()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+const canReschedule = (s: string | null | undefined) => ['leave', 'late', 'absent', 'invalidated'].includes(s || '')
+
+const panelTitle = computed(() => {
+  if (!detail.value) return ''
+  if (canReschedule(detail.value.status)) return '重新安排联合面试'
+  if (detail.value.scheduledTime) return '换时（重新选择联合时段）'
+  return '选择联合面试时段'
+})
+
+const panelHint = computed(() => {
+  if (!detail.value) return ''
+  if (canReschedule(detail.value.status)) return '您当前为请假/缺席状态，可重新选择时段以补面'
+  if (detail.value.scheduledTime) return '换时将在确认后原子替换原时段，失败时原安排保持有效'
+  return '请选择一个可用的联合面试时段，每时段容量有限'
+})
+
+const bookLabel = computed(() => {
+  if (!detail.value) return '确认预约'
+  if (canReschedule(detail.value.status)) return '确认重新安排'
+  if (detail.value.scheduledTime) return '确认换时'
+  return '确认预约'
+})
+
 async function handleBookSlot() {
   if (!selectedSlotId.value || !detail.value) return
   booking.value = true
-  bookError.value = null
   const result = await post(`/me/interviews/joint/${detail.value.jointId}/book`, { slotId: selectedSlotId.value })
   booking.value = false
   if (result.kind === 'completed') {
+    toast.success('时段已预约')
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    bookError.value = (result.error as { message?: string }).message || '预约失败，该时段可能已被占用'
+    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
+  }
+}
+
+async function handleLeave() {
+  if (!detail.value || leaving.value) return
+  leaving.value = true
+  const result = await post(`/me/interviews/joint/${detail.value.jointId}/leave`)
+  leaving.value = false
+  if (result.kind === 'completed') {
+    toast.success('已登记请假，可重新选择时段')
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '请假失败，请稍后重试')
   }
 }
 
@@ -84,12 +120,20 @@ onMounted(loadDetail)
             <AlertTriangle :size="13" /> 作废原因：{{ detail.invalidReason }} — 等待补面安排
           </p>
         </div>
+        <button
+          v-if="detail.status === 'scheduled'"
+          class="mt-3 w-full h-10 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+          :disabled="leaving || booking"
+          @click="handleLeave"
+        >
+          {{ leaving ? '提交中...' : '申请请假（登记后可选新时段补面）' }}
+        </button>
       </Card>
 
       <!-- 选时面板 -->
-      <Card v-if="detail.status === 'scheduled' || !detail.scheduledTime">
-        <h2 class="text-base font-medium text-text-primary mb-2">{{ detail.scheduledTime ? '改期（重新选择时段）' : '选择面试时段' }}</h2>
-        <p class="text-xs text-text-secondary mb-4">请选择一个可用的联合面试时段，每时段容量有限</p>
+      <Card v-if="detail.status === 'scheduled' || canReschedule(detail.status) || !detail.scheduledTime">
+        <h2 class="text-base font-medium text-text-primary mb-2">{{ panelTitle }}</h2>
+        <p class="text-xs text-text-secondary mb-4">{{ panelHint }}</p>
 
         <div class="space-y-2">
           <button
@@ -118,15 +162,13 @@ onMounted(loadDetail)
           </button>
         </div>
 
-        <p v-if="bookError" class="mt-3 text-sm text-danger" role="alert">{{ bookError }}</p>
-
         <button
           v-if="selectedSlotId"
           class="w-full mt-4 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
           :disabled="booking"
           @click="handleBookSlot"
         >
-          {{ booking ? '预约中...' : '确认预约' }}
+          {{ booking ? '提交中...' : bookLabel }}
         </button>
       </Card>
 

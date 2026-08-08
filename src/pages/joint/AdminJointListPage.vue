@@ -4,6 +4,8 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Users, ShieldAlert, ShieldOff, RotateCcw } from '@lucide/vue'
 
@@ -16,7 +18,6 @@ interface JointItem {
 const state = ref<PageState>('loading')
 const items = ref<JointItem[]>([])
 const busy = ref(false)
-const error = ref('')
 
 const closeTarget = ref<JointItem | null>(null)
 const closeOpen = ref(false)
@@ -30,10 +31,10 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: JointItem[] } }).data.items
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
-async function handleForceClose() {
+async function handleForceClose(proof?: string) {
   if (!closeTarget.value || busy.value) return
   if (!closeReason.value.trim()) {
     closeError.value = '请填写强制关闭原因'
@@ -41,7 +42,7 @@ async function handleForceClose() {
   }
   busy.value = true
   closeError.value = ''
-  const result = await post(`/admin/joint/${closeTarget.value.id}/force-close`, { reason: closeReason.value.trim() })
+  const result = await post(`/admin/joint/${closeTarget.value.id}/force-close`, { reason: closeReason.value.trim(), reauthProof: proof })
   busy.value = false
   if (result.kind === 'completed') {
     closeOpen.value = false
@@ -56,13 +57,12 @@ async function handleForceClose() {
 async function toggleClub(jnt: JointItem, club: JointClub) {
   if (clubBusy.value) return
   clubBusy.value = `${jnt.id}:${club.clubId}`
-  error.value = ''
   const result = await post(`/admin/joint/${jnt.id}/clubs/${club.clubId}/${club.suspended ? 're-enable' : 'force-suspend'}`, {})
   clubBusy.value = ''
   if (result.kind === 'completed') {
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    error.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -75,7 +75,6 @@ onMounted(loadData)
       <h1 class="text-2xl font-bold text-text-primary mb-2">联合活动管理</h1>
       <p class="text-sm text-text-secondary mb-6">平台视角查看所有联合活动，可强制关闭异常活动、停用或恢复参与社团</p>
 
-      <p v-if="error" class="mb-3 text-xs text-destructive">{{ error }}</p>
       <EmptyState v-if="items.length === 0" type="no_data" title="暂无联合活动" />
 
       <div v-else class="space-y-3">
@@ -127,8 +126,9 @@ onMounted(loadData)
         :targets="closeTarget ? [{ id: closeTarget.id, label: closeTarget.title, detail: '强制关闭前请填写原因' }] : []"
         impact-summary="强制关闭后活动进入平台强制结束状态，不经过社团确认。"
         confirm-label="确认强制关闭"
+        reauth-required
         :executing="busy"
-        :error="closeError || null"
+        :error-message="closeError || undefined"
         @confirm="handleForceClose"
       >
         <template #extra>
@@ -137,7 +137,6 @@ onMounted(loadData)
             class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
             placeholder="强制关闭原因（必填）"
           />
-          <p v-if="closeError" class="mt-2 text-xs text-destructive">{{ closeError }}</p>
         </template>
       </HighRiskConfirm>
     </div>

@@ -7,6 +7,8 @@ export type ObjectGroupType = 'person' | 'club' | 'department' | 'position'
 export interface PickerGroup {
   type: ObjectGroupType
   label: string
+  /** 渲染分组用的稳定唯一键；缺省时回退为 type（单分组场景） */
+  key?: string
   items: { id: string; label: string; subtitle?: string }[]
 }
 
@@ -71,7 +73,7 @@ function isSelected(id: string): boolean {
     </div>
 
     <div class="max-h-64 overflow-y-auto p-2" role="listbox" :aria-multiselectable="multiple || undefined">
-      <template v-for="group in filtered" :key="group.type">
+      <template v-for="group in filtered" :key="group.key ?? group.type">
         <p class="px-2 pt-2 pb-1 text-xs font-medium text-text-secondary">{{ group.label }}</p>
         <button
           v-for="item in group.items"

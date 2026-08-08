@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { CheckCircle2, XCircle, Clock, Mail, ArrowLeft } from '@lucide/vue'
 
@@ -11,13 +13,14 @@ interface InvitationDetail {
   id: string; activityId: string; activityTitle: string
   clubName: string; applicantName: string; status: string
   sentAt: string; expiredAt: string; departmentName: string
+  casdoorSync: 'none' | 'processing' | 'confirmed' | 'failed'
 }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
 const detail = ref<InvitationDetail | null>(null)
 const responding = ref(false)
-const respondError = ref<string | null>(null)
+const syncing = ref(false)
 
 const isManageView = computed(() => route.meta.view === 'manage')
 
@@ -36,13 +39,34 @@ async function loadDetail() {
 async function handleRespond(action: 'accept' | 'reject') {
   if (!detail.value || responding.value) return
   responding.value = true
-  respondError.value = null
   const result = await post(`/me/invitations/recruitment/${detail.value.id}/respond`, { action })
   responding.value = false
   if (result.kind === 'completed') {
     detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
+    if (action === 'accept') {
+      detail.value.casdoorSync = 'processing'
+      toast.success('已接受邀请，等待身份同步生效')
+    } else {
+      toast.success('已拒绝邀请')
+    }
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction(action === 'accept' ? '接受邀请已受理，正在后台处理' : '拒绝邀请已受理，正在后台处理')
   } else {
-    respondError.value = '操作失败，请稍后重试'
+    toast.error('操作失败，请稍后重试')
+  }
+}
+
+// 新-2：申请人侧「确认生效」——接受录取后主动触发 Casdoor 同步确认（原仅有管理端点）
+async function handleSyncConfirm() {
+  if (!detail.value || syncing.value) return
+  syncing.value = true
+  const result = await post(`/me/invitations/recruitment/${detail.value.id}/sync-confirm`)
+  syncing.value = false
+  if (result.kind === 'completed') {
+    detail.value.casdoorSync = 'confirmed'
+    toast.success('成员身份已生效')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
   }
 }
 
@@ -103,8 +127,6 @@ onMounted(loadDetail)
           </div>
         </Card>
 
-        <p v-if="respondError" class="text-sm text-danger mb-4" role="alert">{{ respondError }}</p>
-
         <div class="flex gap-3">
           <button
             class="flex-1 h-12 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
@@ -132,6 +154,24 @@ onMounted(loadDetail)
         <p class="text-xs text-text-secondary mt-1">系统正在与统一身份认证同步，生效后您将成为正式成员</p>
         <!-- REC-028: 普通招新不提供"撤销已接受录取"操作 -->
         <p class="text-xs text-warning mt-2">已接受的录取邀请不可撤销</p>
+
+        <!-- 新-2：申请人侧确认生效入口（casdoorSync=processing 时） -->
+        <div v-if="detail.casdoorSync === 'processing'" class="mt-3">
+          <div class="rounded-lg bg-warning-subtle p-2.5 mb-3 flex items-center gap-2">
+            <Clock :size="14" class="text-warning shrink-0" />
+            <p class="text-xs text-warning">已接受，正在等待成员身份生效确认</p>
+          </div>
+          <button
+            class="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+            :disabled="syncing"
+            @click="handleSyncConfirm"
+          >
+            <CheckCircle2 :size="14" /> {{ syncing ? '确认中...' : '确认生效' }}
+          </button>
+        </div>
+        <p v-else-if="detail.casdoorSync === 'confirmed'" class="text-xs text-success mt-2 flex items-center gap-1">
+          <CheckCircle2 :size="12" /> 已生效，欢迎加入
+        </p>
       </Card>
 
       <Card v-else-if="detail.status === 'rejected'">

@@ -14,6 +14,7 @@ const saving = ref(false)
 const config = ref({
   clubName: '', clubDescription: '', requireEmailVerification: true, requireProfileComplete: true,
   maxMembers: 200, allowSelfExit: true, academicYearStart: 9,
+  academicYear: '', cohort: '',
 })
 
 const isAdmin = computed(() => route.path.startsWith('/admin'))
@@ -33,11 +34,15 @@ async function handleSave() {
   saving.value = true
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
-  const result = await post(`${apiScope.prefix}/config`, { ...config.value })
+  // 学年/届次为平台级字段（P2-3）：社团域提交时剥离，避免空串误写入社团配置
+  const payload = { ...config.value } as Record<string, unknown>
+  if (!isAdmin.value) {
+    delete payload.academicYear
+    delete payload.cohort
+  }
+  const result = await post(`${apiScope.prefix}/config`, payload)
   saving.value = false
-  if (result.kind === 'completed') {
-    toast.success('配置已保存')
-  } else {
+  if (result.kind !== 'completed') {
     toast.error('保存失败，请重试')
   }
 }
@@ -104,6 +109,16 @@ onMounted(loadData)
               <option v-for="m in 12" :key="m" :value="m">{{ m }}月</option>
             </select>
           </div>
+          <template v-if="isAdmin">
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">当前学年</label>
+              <input v-model="config.academicYear" type="text" placeholder="如 2026—2027" class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">当前届次</label>
+              <input v-model="config.cohort" type="text" placeholder="如 2026级" class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
+            </div>
+          </template>
         </div>
       </Card>
 

@@ -5,11 +5,12 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
 import type { PageState } from '@/types/machine'
 import { Plus, FileSearch } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
 
-interface Correction { id: string; targetType: string; targetId: string; reason: string; evidence: string; status: string; submittedAt: string; submitterName: string }
+interface Correction { id: string; targetType: string; targetId: string; reason: string; evidence: string; status: string; submittedAt: string; submitterName: string; decidedBy?: string; decidedAt?: string; withdrawnBy?: string; withdrawnAt?: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -20,6 +21,9 @@ const form = ref({ targetType: '', targetId: '', reason: '', evidence: '' })
 const creating = ref(false)
 const actingId = ref<string | null>(null)
 
+function flashSubmitted(message: string) {
+  toast.success(message)
+}
 function correctionsPrefix(): string | null {
   if (view.value === 'self') return '/me/corrections'
   const apiScope = resolveApiScope(route)
@@ -40,27 +44,27 @@ async function loadData() {
 async function handleCreate() {
   creating.value = true
   const prefix = correctionsPrefix()
-  if (!prefix) { creating.value = false; return }
+  if (!prefix) { creating.value = false; toast.error('页面作用域不可用，无法提交'); return }
   const result = await post(prefix, { ...form.value })
   creating.value = false
   if (result.kind === 'completed') {
-    toast.success('纠错申请已提交')
     showForm.value = false
     form.value = { targetType: '', targetId: '', reason: '', evidence: '' }
+    flashSubmitted('纠错申请已提交，等待审核')
     await loadData()
   } else {
-    toast.error('提交失败，请重试')
+    toastError(result, '提交失败，请重试')
   }
 }
 
 async function handleDecide(item: Correction, decision: 'approve' | 'reject') {
   actingId.value = item.id
   const prefix = correctionsPrefix()
-  if (!prefix) { actingId.value = null; return }
+  if (!prefix) { actingId.value = null; toast.error('页面作用域不可用，无法处理'); return }
   const result = await post(`${prefix}/${item.id}/decide`, { decision })
   actingId.value = null
   if (result.kind === 'completed') {
-    toast.success(decision === 'approve' ? '已批准纠错' : '已拒绝纠错')
+    flashSubmitted(decision === 'approve' ? '纠错申请已批准' : '纠错申请已拒绝')
     await loadData()
   } else {
     toast.error('操作失败，请重试')
@@ -70,11 +74,11 @@ async function handleDecide(item: Correction, decision: 'approve' | 'reject') {
 async function handleWithdraw(item: Correction) {
   actingId.value = item.id
   const prefix = correctionsPrefix()
-  if (!prefix) { actingId.value = null; return }
+  if (!prefix) { actingId.value = null; toast.error('页面作用域不可用，无法撤回'); return }
   const result = await post(`${prefix}/${item.id}/withdraw`, {})
   actingId.value = null
   if (result.kind === 'completed') {
-    toast.success('纠错申请已撤回')
+    flashSubmitted('纠错申请已撤回')
     await loadData()
   } else {
     toast.error('撤回失败，请重试')
@@ -145,6 +149,14 @@ onMounted(loadData)
           </div>
           <p class="text-sm text-text-secondary">{{ item.reason }}</p>
           <p class="text-xs text-text-secondary mt-2">提交人：{{ item.submitterName }} · {{ formatDate(item.submittedAt) }}</p>
+          <!-- 审计轨迹：审批/撤回闭环可追溯（P1-010） -->
+          <p v-if="item.decidedBy && item.decidedAt" class="text-xs text-text-secondary mt-1">
+            审批人：{{ item.decidedBy }} · {{ formatDate(item.decidedAt) }}
+            <span>（{{ item.status === 'approved' ? '已批准' : '已拒绝' }}）</span>
+          </p>
+          <p v-if="item.withdrawnBy && item.withdrawnAt" class="text-xs text-text-secondary mt-1">
+            撤回人：{{ item.withdrawnBy }} · {{ formatDate(item.withdrawnAt) }}
+          </p>
 
           <div v-if="view !== 'self' && item.status === 'submitted'" class="mt-3 flex gap-2">
             <button

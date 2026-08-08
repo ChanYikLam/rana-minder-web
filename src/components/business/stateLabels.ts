@@ -42,6 +42,8 @@ export const STATE_LABELS: Record<string, StatusLabel> = {
 
   // ===== 社团接入（SM-ORG-001）=====
   wizard_pending: { variant: 'info', label: '接入引导中' },
+  pending_review: { variant: 'warning', label: '待审核' },
+  emergency_suspended: { variant: 'danger', label: '紧急停用' },
   pending_rebind: { variant: 'warning', label: '待重绑' },
   enabled: { variant: 'success', label: '已启用' },
   bound: { variant: 'success', label: '已绑定' },
@@ -144,6 +146,8 @@ export const STATE_LABELS: Record<string, StatusLabel> = {
   locked: { variant: 'neutral', label: '已锁定' },
 
   // ===== 联合（SM-JNT-*）=====
+  // `concluded` 是联合结论显示态（结论 + 评价已提交，经 upsertJointReviewExtra 派生，非状态机状态）
+  concluded: { variant: 'success', label: '已结论' },
   club_confirm: { variant: 'info', label: '社团确认中' },
   closing_confirm: { variant: 'warning', label: '关闭确认中' },
   force_suspended: { variant: 'danger', label: '已强制暂停' },

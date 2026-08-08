@@ -7,6 +7,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import { NameSearch, type SearchResult } from '@/components/form'
 import WithdrawAction from '@/components/operation/WithdrawAction.vue'
 import { get, post } from '@/services/client'
+import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
@@ -47,6 +48,7 @@ const actingId = ref<string | null>(null)
 const showSend = ref(false)
 const candidateKeyword = ref('')
 const candidates = ref<Candidate[]>([])
+const searchFailed = ref(false)
 const selectedCandidate = ref<Candidate | null>(null)
 const targetDept = ref('')
 const sendError = ref('')
@@ -75,7 +77,9 @@ async function loadData() {
       if (result.data.departments) departments.value = result.data.departments
       state.value = 'normal'
     } else if (result.kind === 'accepted') {
-      state.value = 'loading'
+      // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
+      state.value = 'error'
+      pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
     } else {
       const code = result.error.code as ErrorCode
       pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -91,7 +95,9 @@ async function loadData() {
       items.value = [result.data]
       state.value = 'normal'
     } else if (result.kind === 'accepted') {
-      state.value = 'loading'
+      // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
+      state.value = 'error'
+      pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
     } else {
       const code = result.error.code as ErrorCode
       pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -105,7 +111,9 @@ async function loadData() {
     if (result.data.departments) departments.value = result.data.departments
     state.value = 'normal'
   } else if (result.kind === 'accepted') {
-    state.value = 'loading'
+    // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
+    state.value = 'error'
+    pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
   } else {
     const code = result.error.code as ErrorCode
     pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -127,14 +135,29 @@ function isExpired(inv: Invite): boolean {
   return inv.status === 'expired' || (isActionable(inv) && new Date(inv.expiredAt).getTime() < Date.now())
 }
 
-// 候选搜索（姓名连续子串/学号精确）
-async function searchCandidates() {
-  const clubId = route.params.clubId as string
-  const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: candidateKeyword.value })
-  if (r.kind === 'completed') {
-    candidates.value = r.data.items
-  }
-}
+// 候选搜索（姓名连续子串/学号精确）——300ms 防抖；清空关键字立即重置并作废在途请求
+const { searching: candidateSearching, seq: candidateSeq, schedule: scheduleSearch } = useDebouncedSearch({
+  onSearch: async (kw) => {
+    if (!kw) {
+      candidates.value = []
+      searchFailed.value = false
+      return
+    }
+    const clubId = route.params.clubId as string
+    const mySeq = candidateSeq.value
+    const r = await get<{ items: Candidate[] }>(`/org/${clubId}/members/invite/candidates`, { search: kw })
+    if (mySeq !== candidateSeq.value) return
+    if (r.kind === 'completed') {
+      candidates.value = r.data.items
+      searchFailed.value = false
+    } else {
+      // 搜索失败（非 completed）：清空旧候选结果，避免残留误导
+      candidates.value = []
+      searchFailed.value = true
+      toast.error('候选人搜索失败，请重试')
+    }
+  },
+})
 
 const searchResults = computed<SearchResult[]>(() =>
   candidates.value.map((c) => ({
@@ -180,7 +203,7 @@ async function handleSend() {
     showSend.value = false
     await loadData()
   } else {
-    sendError.value = '发送失败，请重试'
+    toastError(r, '发送失败，请重试')
   }
 }
 
@@ -334,12 +357,12 @@ onMounted(loadData)
               <NameSearch
                 v-model="candidateKeyword"
                 :results="searchResults"
-                :loading="false"
+                :loading="candidateSearching"
                 placeholder="姓名或学号..."
-                @update:model-value="searchCandidates"
+                @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword && candidates.length === 0" class="mt-2 text-xs text-text-secondary">未找到匹配的候选人</p>
+              <p v-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0 && !searchFailed" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>

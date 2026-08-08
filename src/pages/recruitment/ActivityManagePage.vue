@@ -6,6 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post, put } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import {
   ClipboardList, Users, Mail, Rocket, PauseCircle, Flag, XCircle, PlayCircle,
@@ -25,8 +26,9 @@ const router = useRouter()
 const state = ref<PageState>('loading')
 const detail = ref<ActivityManage | null>(null)
 const actionLoading = ref(false)
-const actionError = ref('')
-const newDeadline = ref('2026-09-16T23:59:00+08:00')
+const tightenError = ref('')
+const riskError = ref('')
+const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 const riskAction = ref<'complete' | 'cancel' | null>(null)
 
@@ -51,28 +53,28 @@ function formatDeadline(iso: string): string {
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/${action}`, { ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    const message = (result.error as { message?: string }).message || '操作失败'
+    riskError.value = message
+    toast.error(message)
   }
 }
 
 async function runChannel(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/channel`, { action, ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -84,6 +86,35 @@ const canOpenChannel = computed(() => {
 const canCloseChannel = computed(() => {
   return detail.value?.channelStatus === 'open'
 })
+
+// 规则收紧（REC-007/044）
+const tightenOpen = ref(false)
+const tightenForm = ref({ reason: '', days: 7 })
+const tightenResult = ref<{ affectedCount: number } | null>(null)
+
+async function runTighten() {
+  if (!detail.value || actionLoading.value) return
+  if (!tightenForm.value.reason.trim()) {
+    tightenError.value = '必须填写收紧原因'
+    return
+  }
+  actionLoading.value = true
+  tightenError.value = ''
+  tightenResult.value = null
+  const clubId = route.params.clubId as string
+  const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/rules/tighten`, {
+    reason: tightenForm.value.reason.trim(),
+    deadlineDays: Number(tightenForm.value.days) || 7,
+  })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    tightenResult.value = result.data as { affectedCount: number }
+    tightenOpen.value = false
+    await loadDetail()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '操作失败')
+  }
+}
 
 // 活动编辑
 const editOpen = ref(false)
@@ -115,7 +146,7 @@ async function handleSaveEdit() {
     editOpen.value = false
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
-    editError.value = (result.error as { message?: string }).message || '保存失败'
+    toast.error((result.error as { message?: string }).message || '保存失败')
   }
 }
 
@@ -253,6 +284,14 @@ onMounted(loadDetail)
                 <PauseCircle :size="15" /> 暂停通道
               </button>
               <button
+                v-if="detail.channelStatus === 'open'"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
+                :disabled="actionLoading"
+                @click="tightenOpen = !tightenOpen"
+              >
+                <PencilLine :size="15" /> 收紧规则
+              </button>
+              <button
                 v-if="detail.channelStatus === 'paused'"
                 class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
                 :disabled="actionLoading"
@@ -260,6 +299,44 @@ onMounted(loadDetail)
               >
                 <RefreshCw :size="15" /> 恢复通道
               </button>
+            </div>
+            <div v-if="tightenOpen" class="mt-3 space-y-2 rounded-lg border border-border bg-elevated p-3">
+              <p class="text-xs text-text-secondary">
+                收紧规则将暂停报名通道，为已提交申请开放补救窗口；逾期未处理将进入调整逾期，不会被自动淘汰。
+              </p>
+              <textarea
+                v-model="tightenForm.reason"
+                rows="2"
+                class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                placeholder="收紧原因（必填，将作为调整依据留痕）"
+              />
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-text-secondary shrink-0">补救窗口（天）</label>
+                <input
+                  v-model.number="tightenForm.days"
+                  type="number"
+                  min="1"
+                  max="30"
+                  class="w-24 px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                />
+                <button
+                  class="px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="runTighten"
+                >
+                  {{ actionLoading ? '执行中...' : '确认收紧' }}
+                </button>
+                <button
+                  class="px-3 h-9 rounded-md border border-border text-text-secondary text-sm hover:bg-subtle"
+                  @click="tightenOpen = false"
+                >
+                  取消
+                </button>
+              </div>
+              <p v-if="tightenError" class="text-xs text-destructive">{{ tightenError }}</p>
+              <p v-if="tightenResult" class="text-xs text-primary">
+                已为 {{ tightenResult.affectedCount }} 名已提交申请人开放补救窗口，通道已暂停。
+              </p>
             </div>
           </div>
 
@@ -293,8 +370,6 @@ onMounted(loadDetail)
               <p v-if="editError" class="text-xs text-destructive">{{ editError }}</p>
             </div>
           </div>
-
-          <p v-if="actionError" class="mt-3 text-xs text-destructive">{{ actionError }}</p>
         </Card>
       </PermissionGuard>
 
@@ -302,12 +377,32 @@ onMounted(loadDetail)
       <Card class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-3">管理操作</h2>
         <div class="space-y-1">
+          <PermissionGuard permission="club:recruitment:manage">
+            <div class="space-y-1">
+              <button
+                v-for="item in [
+                  { label: '报名申请管理', desc: '查看和处理所有报名申请', icon: ClipboardList, path: 'applications' },
+                  { label: '面试排期管理', desc: '安排面试时段和面试官', icon: Users, path: 'interview' },
+                  { label: '邀请管理', desc: '发送和管理录取邀请', icon: Mail, path: 'invitations' },
+                ]"
+                :key="item.path"
+                class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle transition-colors text-left"
+                @click="router.push(`/org/${route.params.clubId}/recruitment/${detail.id}/${item.path}`)"
+              >
+                <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-subtle text-primary shrink-0">
+                  <component :is="item.icon" :size="18" />
+                </div>
+                <div class="flex-1">
+                  <p class="text-sm font-medium text-text-primary">{{ item.label }}</p>
+                  <p class="text-xs text-text-secondary">{{ item.desc }}</p>
+                </div>
+                <ChevronRight :size="18" class="text-text-secondary" />
+              </button>
+            </div>
+          </PermissionGuard>
           <button
             v-for="item in [
-              { label: '报名申请管理', desc: '查看和处理所有报名申请', icon: ClipboardList, path: 'applications' },
-              { label: '面试排期管理', desc: '安排面试时段和面试官', icon: Users, path: 'interview' },
               { label: '评价与结论', desc: '评价申请人并发布结论', icon: FileText, path: 'review' },
-              { label: '邀请管理', desc: '发送和管理录取邀请', icon: Mail, path: 'invitations' },
             ]"
             :key="item.path"
             class="w-full flex items-center gap-3 rounded-lg p-3 hover:bg-subtle transition-colors text-left"
@@ -362,7 +457,7 @@ onMounted(loadDetail)
         impact-summary="操作后活动状态不可自行恢复；取消仅限未发出邀请的活动。"
         confirm-label="确认执行"
         :executing="actionLoading"
-        :error="actionError || null"
+        :error-message="riskError"
         @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
       />
     </div>

@@ -10,6 +10,7 @@ const data = ref<{
   appVersion: string; uptime: string
   dependencies: { name: string; status: string; latency: number }[]
   taskQueue: { pending: number; processing: number; failed: number }
+  syncHealth: { abnormalClubs: number; pendingCorrections: number; recentEvents: { id: string; kind: string; clubId: string; clubName: string; at: string; note: string }[] }
   lastCheckAt: string
 } | null>(null)
 
@@ -28,6 +29,8 @@ function formatCheck(iso: string): string {
   const d = new Date(iso)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
+
+const eventKindLabels: Record<string, string> = { group_lost: 'Group 失权', suspend: '停用', recover: '恢复', disconnect: '解除接入', rebind: '重新绑定', reaccess: '重新接入', repair: '修复', import: '成员导入' }
 
 onMounted(loadData)
 </script>
@@ -74,12 +77,12 @@ onMounted(loadData)
       </Card>
 
       <!-- 任务队列 -->
-      <Card>
-        <h2 class="text-base font-medium text-text-primary mb-3">任务队列</h2>
+      <Card class="mb-4">
+        <h2 class="text-base font-medium text-text-primary mb-3">导出任务队列</h2>
         <div class="grid grid-cols-3 gap-3 text-center">
           <div>
             <p class="text-2xl font-bold text-text-primary">{{ data.taskQueue.pending }}</p>
-            <p class="text-xs text-text-secondary">等待中</p>
+            <p class="text-xs text-text-secondary">生成中</p>
           </div>
           <div>
             <p class="text-2xl font-bold text-text-primary">{{ data.taskQueue.processing }}</p>
@@ -89,6 +92,38 @@ onMounted(loadData)
             <p class="text-2xl font-bold" :class="data.taskQueue.failed > 0 ? 'text-danger' : 'text-text-primary'">{{ data.taskQueue.failed }}</p>
             <p class="text-xs text-text-secondary">失败</p>
           </div>
+        </div>
+      </Card>
+
+      <!-- 数据同步健康 -->
+      <Card class="mb-4">
+        <h2 class="text-base font-medium text-text-primary mb-3 flex items-center gap-2">
+          <AlertTriangle :size="16" :class="data.syncHealth.abnormalClubs > 0 ? 'text-danger' : 'text-success'" />
+          数据同步健康
+        </h2>
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <div class="rounded-lg border border-border p-3">
+            <p class="text-2xl font-bold" :class="data.syncHealth.abnormalClubs > 0 ? 'text-danger' : 'text-text-primary'">{{ data.syncHealth.abnormalClubs }}</p>
+            <p class="text-xs text-text-secondary">同步异常社团</p>
+          </div>
+          <div class="rounded-lg border border-border p-3">
+            <p class="text-2xl font-bold text-text-primary">{{ data.syncHealth.pendingCorrections }}</p>
+            <p class="text-xs text-text-secondary">待处理纠错</p>
+          </div>
+        </div>
+        <p class="text-xs font-medium text-text-secondary mb-2">最近同步事件</p>
+        <div class="space-y-2">
+          <div v-for="ev in data.syncHealth.recentEvents" :key="ev.id" class="flex items-center justify-between rounded-lg border border-border p-2.5">
+            <div class="min-w-0">
+              <p class="text-sm text-text-primary truncate">
+                <span class="text-warning">{{ eventKindLabels[ev.kind] || ev.kind }}</span>
+                <span class="text-text-secondary"> · {{ ev.clubName }}</span>
+              </p>
+              <p class="text-xs text-text-secondary truncate">{{ ev.note }}</p>
+            </div>
+            <span class="text-xs text-text-secondary shrink-0 ml-2">{{ formatCheck(ev.at) }}</span>
+          </div>
+          <p v-if="data.syncHealth.recentEvents.length === 0" class="text-xs text-text-secondary">暂无同步事件</p>
         </div>
       </Card>
     </div>

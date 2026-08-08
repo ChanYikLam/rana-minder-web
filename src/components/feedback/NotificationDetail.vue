@@ -11,6 +11,7 @@ export interface NotificationDetailData {
   type: string
   read?: boolean
   link?: string | null
+  clubName?: string | null
   actions?: { label: string; key: string; variant?: 'default' | 'outline'; primary?: boolean }[]
 }
 
@@ -31,6 +32,10 @@ const typeLabel = computed(() => {
     system: '系统',
     member: '成员',
     transition: '换届',
+    conclusion: '结论',
+    correction: '纠错',
+    label_override: '标签改判',
+    overall_not_admitted: '整体未录取',
   }
   return map[props.notification.type] || props.notification.type
 })
@@ -48,6 +53,7 @@ const typeLabel = computed(() => {
         <ArrowLeft :size="14" /> 返回
       </button>
       <span class="text-xs rounded-full border border-border px-2 py-0.5 text-text-secondary">{{ typeLabel }}</span>
+      <span v-if="notification.clubName" class="text-xs rounded-full border border-border px-2 py-0.5 text-text-secondary">{{ notification.clubName }}</span>
       <span class="ml-auto text-xs text-text-secondary flex items-center gap-1">
         <Clock3 :size="12" aria-hidden="true" /> {{ timeLabel }}
       </span>

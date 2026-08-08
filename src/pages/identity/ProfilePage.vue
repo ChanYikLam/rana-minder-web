@@ -1,24 +1,43 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
 import { identityApi } from '@/services/modules'
+import { authMode } from '@/services/auth'
+import { toast } from 'vue-sonner'
+import { toastError } from '@/utils/toastError'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { MailCheck, ShieldCheck, RefreshCw, CheckCircle2, AlertTriangle, Scale } from '@lucide/vue'
 
 interface Profile {
+  version?: number
   studentId: string
   name: string
   email: string
   phone: string
   emailVerified: boolean
   profileComplete: boolean
+  syncStatus?: Record<string, SyncState>
+}
+
+type SyncState = 'synced' | 'pending' | 'retrying' | 'awaiting' | 'conflict' | 'reverted'
+
+// SRS-SM-IDN-003 同步状态展示映射（已同步/同步中/重试中/等待核验/冲突待处理/已回退）
+const SYNC_META: Record<SyncState, { label: string; className: string }> = {
+  synced: { label: '已同步', className: 'text-success' },
+  pending: { label: '同步中', className: 'text-info' },
+  retrying: { label: '同步重试中', className: 'text-warning' },
+  awaiting: { label: '等待核验', className: 'text-warning' },
+  conflict: { label: '冲突待处理', className: 'text-danger' },
+  reverted: { label: '已回退至修改前值', className: 'text-muted-foreground' },
 }
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionViewStore()
 const isSyncConflict = computed(() => route.meta.mode === 'sync-conflict')
 
 const state = ref<PageState>('loading')
@@ -31,15 +50,31 @@ const formEmail = ref('')
 const formPhone = ref('')
 const formErrors = ref<Record<string, string>>({})
 const submitting = ref(false)
-const submitError = ref<string | null>(null)
 
 // 邮箱验证
 const showVerify = ref(false)
 const verifyCode = ref('')
-const verifyError = ref('')
 const codeSent = ref(false)
 const sendingCode = ref(false)
 const verifying = ref(false)
+const resendCountdown = ref(0)
+let resendTimer: ReturnType<typeof setInterval> | null = null
+
+function startResendCountdown() {
+  resendCountdown.value = 60
+  if (resendTimer) clearInterval(resendTimer)
+  resendTimer = setInterval(() => {
+    resendCountdown.value -= 1
+    if (resendCountdown.value <= 0 && resendTimer) {
+      clearInterval(resendTimer)
+      resendTimer = null
+    }
+  }, 1000)
+}
+
+onUnmounted(() => {
+  if (resendTimer) clearInterval(resendTimer)
+})
 
 const profileSchema = z.object({
   email: z.string().email('请输入正确的邮箱格式'),
@@ -52,7 +87,8 @@ async function loadProfile() {
   const result = await get<Profile>('/auth/profile')
   if (result.kind === 'completed') {
     profile.value = result.data
-    version.value = 1
+    // 版本号以响应为准（P2-3：删除硬编码 1，与 mock 侧最新版本保持一致）
+    version.value = result.data.version ?? 1
     state.value = 'normal'
   } else if (result.kind === 'rejected') {
     state.value = result.error.code.startsWith('IFC-ERR-00') && ['IFC-ERR-001', 'IFC-ERR-002', 'IFC-ERR-003'].includes(result.error.code)
@@ -70,13 +106,11 @@ function startEdit() {
   formEmail.value = profile.value.email
   formPhone.value = profile.value.phone
   formErrors.value = {}
-  submitError.value = null
   editing.value = true
 }
 
 async function handleSave() {
   formErrors.value = {}
-  submitError.value = null
 
   const parsed = profileSchema.safeParse({ email: formEmail.value, phone: formPhone.value })
   if (!parsed.success) {
@@ -87,6 +121,12 @@ async function handleSave() {
     return
   }
 
+  // 无实际改动则不上送：避免「编辑后原样提交」触发无效版本递增（MRM-007 边界）
+  if (parsed.data.email === profile.value?.email && parsed.data.phone === profile.value?.phone) {
+    editing.value = false
+    return
+  }
+
   submitting.value = true
   const result = await put<Profile>('/auth/profile', parsed.data, { expectedVersion: version.value })
   submitting.value = false
@@ -94,35 +134,39 @@ async function handleSave() {
   if (result.kind === 'completed') {
     profile.value = result.data
     editing.value = false
-    version.value += 1
+    // 版本号以响应为准，避免「本地自增与服务器登记不一致」再次触发 409（P2-3）
+    version.value = result.data.version ?? version.value + 1
+    toast.success('资料已保存')
+    // 保存后刷新会话：资料门 profileComplete 翻转即时生效（P2-3：页面保存与会话联动）
+    await session.loadSession()
   } else if (result.kind === 'concurrency_conflict') {
-    submitError.value = '资料已被其他会话修改，请刷新后重试'
+    toast.error('资料已被其他会话修改，请刷新后重试')
   } else if (result.kind === 'rejected') {
     if (result.error.fieldErrors) {
       for (const [field, msgs] of Object.entries(result.error.fieldErrors)) {
         formErrors.value[field] = msgs[0]
       }
     } else {
-      submitError.value = result.error.message
+      toast.error(result.error.message)
     }
   } else {
-    submitError.value = '保存失败，请稍后重试'
+    toast.error('保存失败，请稍后重试')
   }
 }
 
 async function handleSendCode() {
-  if (sendingCode.value) return
+  if (sendingCode.value || resendCountdown.value > 0) return
   sendingCode.value = true
   const result = await post<{ sent: boolean }>('/auth/profile/send-email-code')
   sendingCode.value = false
   if (result.kind === 'completed') {
     codeSent.value = true
+    startResendCountdown()
   }
 }
 
 async function handleVerify() {
   if (verifying.value) return
-  verifyError.value = ''
   verifying.value = true
   const result = await post<{ emailVerified: boolean }>('/auth/profile/verify-email', { code: verifyCode.value })
   verifying.value = false
@@ -131,8 +175,11 @@ async function handleVerify() {
     showVerify.value = false
     verifyCode.value = ''
     codeSent.value = false
+    toast.success('邮箱验证成功')
+    // 验证通过后刷新会话：资料门 emailVerified 翻转即时生效（P2-3）
+    await session.loadSession()
   } else if (result.kind === 'rejected') {
-    verifyError.value = result.error.fieldErrors?.code?.[0] || result.error.message
+    toast.error(result.error.fieldErrors?.code?.[0] || result.error.message)
   }
 }
 
@@ -145,12 +192,15 @@ const readonlyFields = computed(() =>
     : []
 )
 
+function syncTag(field: string): { label: string; className: string } | null {
+  const state = profile.value?.syncStatus?.[field]
+  return state ? SYNC_META[state] : null
+}
+
 // 同步冲突解决（sync-conflict 模式）
 interface ConflictField { field: string; label: string; localValue: string; remoteValue: string; chosen: 'local' | 'remote' }
 const conflictFields = ref<ConflictField[]>([])
 const conflictSubmitting = ref(false)
-const conflictError = ref('')
-const conflictDone = ref(false)
 
 function buildConflicts(p: Profile) {
   conflictFields.value = [
@@ -179,7 +229,6 @@ onMounted(() => {
 async function handleResolveConflicts() {
   if (!profile.value || conflictSubmitting.value) return
   conflictSubmitting.value = true
-  conflictError.value = ''
   const resolved: { field: string; chosenValue: string }[] = []
   for (const f of conflictFields.value) {
     const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
@@ -187,15 +236,15 @@ async function handleResolveConflicts() {
     const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
     if (r.kind === 'rejected' && r.error) {
       conflictSubmitting.value = false
-      conflictError.value = (r.error as { message?: string }).message || '冲突解决失败'
+      toastError(r, '冲突解决失败')
       return
     }
   }
   conflictSubmitting.value = false
-  conflictDone.value = true
   profile.value = { ...profile.value }
   buildConflicts(profile.value)
-  setTimeout(() => router.push('/me/profile'), 1200)
+  toast.success('冲突已解决')
+  router.push('/me/profile')
 }
 </script>
 
@@ -236,12 +285,6 @@ async function handleResolveConflicts() {
               </label>
             </div>
           </div>
-        </div>
-
-        <p v-if="conflictError" class="text-sm text-danger mb-3" role="alert">{{ conflictError }}</p>
-
-        <div v-if="conflictDone" class="flex items-center gap-2 text-sm text-success mb-4">
-          <CheckCircle2 :size="16" /> 冲突已解决，即将返回个人资料
         </div>
 
         <div class="flex gap-3">
@@ -311,11 +354,17 @@ async function handleResolveConflicts() {
         <dl v-if="!editing" class="divide-y divide-border">
           <div class="px-4 py-3 flex items-center justify-between">
             <dt class="text-sm text-text-secondary">邮箱</dt>
-            <dd class="text-sm text-primary font-medium">{{ profile.email }}</dd>
+            <dd class="text-sm text-primary font-medium flex items-center gap-2">
+              {{ profile.email }}
+              <span v-if="syncTag('email')" class="text-xs" :class="syncTag('email')!.className">{{ syncTag('email')!.label }}</span>
+            </dd>
           </div>
           <div class="px-4 py-3 flex items-center justify-between">
             <dt class="text-sm text-text-secondary">手机号</dt>
-            <dd class="text-sm text-primary font-medium">{{ profile.phone }}</dd>
+            <dd class="text-sm text-primary font-medium flex items-center gap-2">
+              {{ profile.phone }}
+              <span v-if="syncTag('phone')" class="text-xs" :class="syncTag('phone')!.className">{{ syncTag('phone')!.label }}</span>
+            </dd>
           </div>
         </dl>
 
@@ -356,8 +405,6 @@ async function handleResolveConflicts() {
             </p>
           </div>
 
-          <p v-if="submitError" class="text-sm text-danger" role="alert">{{ submitError }}</p>
-
           <div class="flex gap-2 pt-2">
             <button
               class="px-4 py-2 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60"
@@ -384,15 +431,15 @@ async function handleResolveConflicts() {
           <span class="text-sm font-medium text-primary">验证邮箱</span>
         </div>
         <p class="text-xs text-text-secondary mb-3">
-          验证码将发送至 <span class="font-medium">{{ profile.email }}</span>
+          验证码 5 分钟内有效，将发送至 <span class="font-medium">{{ profile.email }}</span>
         </p>
         <div class="flex gap-2">
           <button
             class="px-3 py-2 rounded-md border border-border text-sm text-primary hover:bg-elevated transition-colors disabled:opacity-60"
-            :disabled="sendingCode || codeSent"
+            :disabled="sendingCode || codeSent || resendCountdown > 0"
             @click="handleSendCode"
           >
-            {{ codeSent ? '已发送（mock 验证码：123456）' : sendingCode ? '发送中...' : '发送验证码' }}
+            {{ codeSent ? (authMode === 'mock' ? '已发送，24 小时内有效（演示验证码：123456）' : '已发送，24 小时内有效') : resendCountdown > 0 ? `${resendCountdown}s 后可重发` : sendingCode ? '发送中...' : '发送验证码' }}
           </button>
           <template v-if="codeSent">
             <input
@@ -413,7 +460,6 @@ async function handleResolveConflicts() {
             </button>
           </template>
         </div>
-        <p v-if="verifyError" class="mt-2 text-xs text-danger" role="alert">{{ verifyError }}</p>
       </div>
 
       <!-- 同步冲突入口 -->

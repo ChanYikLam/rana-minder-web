@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Mail, Send, RefreshCw, XCircle, CheckCircle2, Plus, Users } from '@lucide/vue'
 
@@ -20,19 +21,19 @@ const state = ref<PageState>('loading')
 const items = ref<InvitationRow[]>([])
 const applications = ref<AppItem[]>([])
 const sendOpen = ref(false)
-const sendForm = ref({ applicantId: '', departmentId: '' })
+const sendForm = ref({ applicantId: '', departmentId: '', expireDays: 7 })
 const departments = ref<{ id: string; name: string }[]>([])
 const actionLoading = ref(false)
-const actionError = ref('')
 
-const clubId = computed(() => (route.params.clubId as string) || 'club-001')
-const actId = computed(() => (route.params.activityId as string) || 'act-001')
+const clubId = computed(() => (route.params.clubId as string) || '')
+const actId = computed(() => (route.params.activityId as string) || '')
 
 const columns = [
   { key: 'applicantName', label: '申请人' },
   { key: 'departmentName', label: '录取方向' },
   { key: 'status', label: '状态' },
   { key: 'expiredAt', label: '截止' },
+  { key: 'actions', label: '操作' },
 ]
 
 async function loadInvitations() {
@@ -58,32 +59,30 @@ async function loadOptions() {
 async function runAction(invitationId: string, action: string) {
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations/${invitationId}/${action}`, {})
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
 async function handleSend() {
   if (!sendForm.value.applicantId || !sendForm.value.departmentId || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations`, {
     applicantId: sendForm.value.applicantId,
     departmentId: sendForm.value.departmentId,
-    expireDays: 7,
+    expireDays: sendForm.value.expireDays,
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
     sendOpen.value = false
-    sendForm.value = { applicantId: '', departmentId: '' }
+    sendForm.value = { applicantId: '', departmentId: '', expireDays: 7 }
     await loadInvitations()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '发送失败'
+    toast.error((result.error as { message?: string }).message || '发送失败')
   }
 }
 
@@ -145,10 +144,20 @@ onMounted(async () => {
               <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
             </select>
           </div>
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">有效期（天）</label>
+            <input
+              v-model.number="sendForm.expireDays"
+              type="number"
+              min="1"
+              max="30"
+              class="w-full h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+            />
+          </div>
           <div class="flex items-end">
             <button
               class="flex items-center gap-1.5 px-4 h-10 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
-              :disabled="actionLoading || !sendForm.applicantId || !sendForm.departmentId"
+              :disabled="actionLoading || !sendForm.applicantId || !sendForm.departmentId || !sendForm.expireDays || sendForm.expireDays < 1 || sendForm.expireDays > 30"
               @click="handleSend"
             >
               <Send :size="15" /> {{ actionLoading ? '发送中...' : '发送' }}
@@ -156,11 +165,11 @@ onMounted(async () => {
           </div>
         </div>
         <p class="text-xs text-text-secondary flex items-center gap-1">
-          <Users :size="13" /> 仅可向已提交申请的申请人发送，有效期默认 7 天
+          <Users :size="13" /> 仅可向已提交申请的申请人发送，有效期默认 7 天（1~30 天可调）
         </p>
       </Card>
 
-      <p v-if="actionError" class="mb-3 text-xs text-destructive">{{ actionError }}</p>
+      <!-- 操作结果反馈统一走 toast -->
 
       <DataTable
         :columns="columns"
@@ -168,39 +177,45 @@ onMounted(async () => {
         :loading="state === 'loading'"
         empty-title="暂无录取邀请"
       >
-        <template #default="{ row }">
-          <td class="px-3 py-2.5 text-sm">{{ (row as InvitationRow).applicantName }}</td>
-          <td class="px-3 py-2.5 text-sm">{{ (row as InvitationRow).departmentName }}</td>
-          <td class="px-3 py-2.5"><StateTag :status="(row as InvitationRow).status" /></td>
-          <td class="px-3 py-2.5 text-sm text-text-secondary">{{ formatTime((row as InvitationRow).expiredAt) }}</td>
-          <td class="px-3 py-2.5">
-            <div class="flex items-center gap-1.5">
-              <button
-                v-if="canWithdraw((row as InvitationRow).status)"
-                class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
-                :disabled="actionLoading"
-                @click="runAction((row as InvitationRow).id, 'withdraw')"
-              >
-                <XCircle :size="12" /> 撤回
-              </button>
-              <button
-                v-if="canReissue((row as InvitationRow).status)"
-                class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
-                :disabled="actionLoading"
-                @click="runAction((row as InvitationRow).id, 'reissue')"
-              >
-                <RefreshCw :size="12" /> 重发
-              </button>
-              <button
-                v-if="canSync((row as InvitationRow).status)"
-                class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
-                :disabled="actionLoading"
-                @click="runAction((row as InvitationRow).id, 'sync')"
-              >
-                <CheckCircle2 :size="12" /> 同步生效
-              </button>
-            </div>
-          </td>
+        <template #cell-applicantName="{ row }">
+          <span class="text-sm">{{ (row as InvitationRow).applicantName }}</span>
+        </template>
+        <template #cell-departmentName="{ row }">
+          <span class="text-sm">{{ (row as InvitationRow).departmentName }}</span>
+        </template>
+        <template #cell-status="{ row }">
+          <StateTag :status="(row as InvitationRow).status" />
+        </template>
+        <template #cell-expiredAt="{ row }">
+          <span class="text-sm text-text-secondary">{{ formatTime((row as InvitationRow).expiredAt) }}</span>
+        </template>
+        <template #cell-actions="{ row }">
+          <div class="flex items-center gap-1.5">
+            <button
+              v-if="canWithdraw((row as InvitationRow).status)"
+              class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction((row as InvitationRow).id, 'withdraw')"
+            >
+              <XCircle :size="12" /> 撤回
+            </button>
+            <button
+              v-if="canReissue((row as InvitationRow).status)"
+              class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction((row as InvitationRow).id, 'reissue')"
+            >
+              <RefreshCw :size="12" /> 重发
+            </button>
+            <button
+              v-if="canSync((row as InvitationRow).status)"
+              class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="runAction((row as InvitationRow).id, 'sync')"
+            >
+              <CheckCircle2 :size="12" /> 同步生效
+            </button>
+          </div>
         </template>
       </DataTable>
 

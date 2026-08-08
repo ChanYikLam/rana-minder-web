@@ -3,6 +3,11 @@ import { ref, computed } from 'vue'
 import type { SessionInfo, User, ProfileGate, WorkspaceInfo } from '@/types/domain'
 import { getSession, logout as logoutAuth } from '@/services/auth'
 
+/** 社团切换后的会话权限集：保留 platform:* 等全局权限，仅以新社团权限覆盖 club:* 域 */
+export function mergeClubPermissions(current: readonly string[], clubPermissions: readonly string[]): string[] {
+  return [...current.filter((p) => !p.startsWith('club:')), ...clubPermissions]
+}
+
 export const useSessionViewStore = defineStore('sessionView', () => {
   const user = ref<User | null>(null)
   const profileGate = ref<ProfileGate>({ complete: false, emailVerified: false })
@@ -13,6 +18,8 @@ export const useSessionViewStore = defineStore('sessionView', () => {
   const workspace = ref<WorkspaceInfo | null>(null)
   const loading = ref(false)
   const lastLoadedAt = ref<number | null>(null)
+  /** 最近一次会话加载的失败信息（登录页据此展示具体原因，如账号禁用） */
+  const lastError = ref<string | null>(null)
 
   /** SRS-FAIL-001 最小白名单窗口：15 分钟 */
   const DEGRADED_WINDOW_MS = 15 * 60 * 1000
@@ -64,6 +71,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
 
   async function loadSession() {
     loading.value = true
+    lastError.value = null
     try {
       const result = await getSession()
 
@@ -83,7 +91,9 @@ export const useSessionViewStore = defineStore('sessionView', () => {
         lastLoadedAt.value = Date.now()
         syncClock()
       } else {
+        // 先清空旧会话，再写入失败原因：clearSession 会重置 lastError，顺序颠倒会使失败提示永远无法暴露
         clearSession()
+        lastError.value = 'error' in result && result.error ? result.error.message : null
       }
     } finally {
       loading.value = false
@@ -98,6 +108,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     permissions.value = []
     workspace.value = null
     lastLoadedAt.value = null
+    lastError.value = null
     stopClock()
   }
 
@@ -107,6 +118,17 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     } finally {
       clearSession()
     }
+  }
+
+  /** 同步当前工作空间（如社团切换后），保持与 workspaceContextStore 单源一致；
+   * 传入信息缺省的可选字段（如 memberId）保留原值，避免自审逻辑（免职/审批/退社自审）失效 */
+  function setWorkspaceInfo(info: WorkspaceInfo) {
+    workspace.value = { ...workspace.value, ...info }
+  }
+
+  /** 同步会话级权限（社团切换后按新社团上下文刷新，避免 session.hasPermission 沿用旧社团权限集） */
+  function setPermissions(next: string[]) {
+    permissions.value = next
   }
 
   function hasPermission(permission: string): boolean {
@@ -122,6 +144,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     workspace,
     loading,
     lastLoadedAt,
+    lastError,
     isAuthenticated,
     isProfileComplete,
     needsProfileGate,
@@ -132,5 +155,7 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     clearSession,
     logout,
     hasPermission,
+    setWorkspaceInfo,
+    setPermissions,
   }
 })

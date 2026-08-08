@@ -5,8 +5,10 @@ import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post, put } from '@/services/client'
+import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
-import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw } from '@lucide/vue'
+import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw, Users } from '@lucide/vue'
 
 interface InterviewRow {
   id: string; activityId: string; roundId: string; roundName: string
@@ -17,12 +19,17 @@ interface InterviewRow {
 interface RoundItem { id: string; name: string; status: string; selectDeadline: string; slots: { id: string; startAt: string; endAt: string; capacity: number; available: number }[]; bookedCount: number }
 interface AppItem { applicantId: string; applicantName: string; status: string }
 
+interface InterviewerTaskItem {
+  id: string; userId: string; userName: string
+  scope: 'activity' | 'round'; roundId: string; roundName: string; status: string
+}
+interface CandidateItem { id: string; name: string; role: string }
+
 const route = useRoute()
 const state = ref<PageState>('loading')
 const items = ref<InterviewRow[]>([])
 const selected = ref<InterviewRow | null>(null)
 const actionLoading = ref(false)
-const actionError = ref('')
 const invalidReason = ref('')
 const bookOpen = ref(false)
 const rounds = ref<RoundItem[]>([])
@@ -42,6 +49,15 @@ const cancelRoundError = ref('')
 
 const clubId = computed(() => (route.params.clubId as string) || '')
 const actId = computed(() => (route.params.activityId as string) || '')
+
+// 临时面试官任务（REC-013/ORG-037）
+const interviewerOpen = ref(false)
+const defaultReviewers = ref<{ id: string; name: string; source: string }[]>([])
+const tasks = ref<InterviewerTaskItem[]>([])
+const candidates = ref<CandidateItem[]>([])
+const taskForm = ref<{ userId: string; scope: 'activity' | 'round'; roundId: string }>({ userId: '', scope: 'activity', roundId: '' })
+const taskError = ref('')
+const revokingTaskId = ref<string | null>(null)
 
 watch([clubId, actId], ([cid, aid]) => {
   if (!cid || !aid) {
@@ -92,7 +108,6 @@ async function loadBookOptions() {
 function handleRowClick(row: unknown) {
   const it = row as InterviewRow
   selected.value = it
-  actionError.value = ''
   invalidReason.value = ''
 }
 
@@ -106,7 +121,6 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   if (!selected.value || actionLoading.value) return
   if (!validateParams()) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(
     `/org/${clubId.value}/recruitment/${actId.value}/interviews/${selected.value.id}/${action}`,
     { ...(input || {}) }
@@ -114,8 +128,10 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadInterviews()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error((result.error as { message?: string }).message || '操作失败')
   }
 }
 
@@ -123,7 +139,6 @@ async function handleBook() {
   if (!validateParams()) return
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviews/book`, {
     applicantId: bookForm.value.applicantId,
     slotId: bookForm.value.slotId,
@@ -134,7 +149,7 @@ async function handleBook() {
     bookForm.value = { applicantId: '', roundId: '', slotId: '' }
     await loadInterviews()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '预约失败'
+    toast.error((result.error as { message?: string }).message || '预约失败')
   }
 }
 
@@ -169,7 +184,7 @@ async function handleCreateRound() {
     roundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    roundError.value = (result.error as { message?: string }).message || '创建轮次失败'
+    toast.error((result.error as { message?: string }).message || '创建轮次失败')
   }
 }
 
@@ -178,7 +193,6 @@ async function handleUpdateRound(roundId: string) {
   if (!newRoundDeadline.value) return
   if (actionLoading.value) return
   actionLoading.value = true
-  actionError.value = ''
   const result = await put(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}`, {
     selectDeadline: newRoundDeadline.value,
   })
@@ -188,7 +202,7 @@ async function handleUpdateRound(roundId: string) {
   if (result.kind === 'completed') {
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    actionError.value = (result.error as { message?: string }).message || '更新失败'
+    toast.error((result.error as { message?: string }).message || '更新失败')
   }
 }
 
@@ -211,7 +225,7 @@ async function handleCancelRound(roundId: string) {
     cancelRoundError.value = ''
     await loadRounds()
   } else if (result.kind === 'rejected' && result.error) {
-    cancelRoundError.value = (result.error as { message?: string }).message || '取消失败'
+    toast.error((result.error as { message?: string }).message || '取消失败')
   }
 }
 
@@ -219,7 +233,64 @@ function openCancelRound(roundId: string) {
   cancelRoundId.value = roundId
   cancelRoundReason.value = ''
   cancelRoundError.value = ''
-  actionError.value = ''
+}
+
+async function loadInterviewers() {
+  if (!validateParams()) return
+  const [t, c] = await Promise.all([
+    get<{ defaultReviewers: { id: string; name: string; source: string }[]; tasks: InterviewerTaskItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers`),
+    get<{ items: CandidateItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/candidates`),
+  ])
+  if (t.kind === 'completed') {
+    // 防御：后端缺省字段时回落空数组，避免模板 .map 崩溃
+    defaultReviewers.value = t.data.defaultReviewers ?? []
+    tasks.value = t.data.tasks ?? []
+  }
+  if (c.kind === 'completed') candidates.value = c.data.items
+}
+
+async function handleAssignTask() {
+  if (!validateParams()) return
+  if (!taskForm.value.userId) {
+    taskError.value = '请选择要指派的成员'
+    return
+  }
+  if (taskForm.value.scope === 'round' && !taskForm.value.roundId) {
+    taskError.value = '轮次级任务必须指定轮次'
+    return
+  }
+  if (actionLoading.value) return
+  actionLoading.value = true
+  taskError.value = ''
+  const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
+  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers`, {
+    userId: taskForm.value.userId,
+    userName: candidate?.name || '',
+    scope: taskForm.value.scope,
+    roundId: taskForm.value.scope === 'round' ? taskForm.value.roundId : undefined,
+  })
+  actionLoading.value = false
+  if (result.kind === 'completed') {
+    taskForm.value = { userId: '', scope: 'activity', roundId: '' }
+    taskError.value = ''
+    await loadInterviewers()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '指派失败')
+  }
+}
+
+async function handleRevokeTask(taskId: string) {
+  if (!validateParams()) return
+  if (actionLoading.value) return
+  actionLoading.value = true
+  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/${taskId}/revoke`, {})
+  actionLoading.value = false
+  revokingTaskId.value = null
+  if (result.kind === 'completed') {
+    await loadInterviewers()
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '撤销失败')
+  }
 }
 
 async function handleSkipRound() {
@@ -246,7 +317,7 @@ async function handleSkipRound() {
     roundError.value = ''
     await Promise.all([loadRounds(), loadInterviews()])
   } else if (result.kind === 'rejected' && result.error) {
-    roundError.value = (result.error as { message?: string }).message || '跳轮失败'
+    toast.error((result.error as { message?: string }).message || '跳轮失败')
   }
 }
 
@@ -261,6 +332,7 @@ const canInvalidate = computed(() => {
 onMounted(async () => {
   await loadInterviews()
   await loadBookOptions()
+  await loadInterviewers()
 })
 
 watch(
@@ -338,6 +410,87 @@ watch(
           {{ actionLoading ? '预约中...' : '确认预约' }}
         </button>
       </Card>
+
+      <!-- 临时面试官任务（REC-013/ORG-037） -->
+      <PermissionGuard permission="club:recruitment:manage">
+        <Card class="mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-medium text-text-primary">面试官与临时任务</h2>
+            <button
+              class="flex items-center gap-1.5 px-3 h-8 rounded-md border border-border text-text-secondary text-xs font-medium hover:border-primary hover:text-primary disabled:opacity-60"
+              :disabled="actionLoading"
+              @click="interviewerOpen = !interviewerOpen"
+            >
+              <Users :size="14" /> {{ interviewerOpen ? '收起' : '指派临时面试官' }}
+            </button>
+          </div>
+
+          <div class="space-y-3 text-sm">
+            <p class="text-xs text-text-secondary">
+              默认面试官：{{ defaultReviewers.map((d) => d.name).join('、') || '无' }}。临时面试官须为本社团当前成员，任务撤销或轮次/活动结束即失效。
+            </p>
+
+            <div v-if="interviewerOpen" class="rounded-lg border border-border p-3 space-y-3">
+              <p class="text-sm font-medium text-text-primary flex items-center gap-1"><Plus :size="14" /> 指派临时面试官</p>
+              <div class="grid sm:grid-cols-3 gap-3">
+                <select v-model="taskForm.userId" class="px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary">
+                  <option value="" disabled>选择成员</option>
+                  <option v-for="c in candidates" :key="c.id" :value="c.id">{{ c.name }}（{{ c.role }}）</option>
+                </select>
+                <select v-model="taskForm.scope" class="px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary">
+                  <option value="activity">活动级（全部轮次）</option>
+                  <option value="round">轮次级（指定轮次）</option>
+                </select>
+                <select
+                  v-if="taskForm.scope === 'round'"
+                  v-model="taskForm.roundId"
+                  class="px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                >
+                  <option value="" disabled>选择轮次</option>
+                  <option v-for="r in rounds" :key="r.id" :value="r.id">{{ r.name }}</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  class="px-4 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading || !taskForm.userId"
+                  @click="handleAssignTask"
+                >
+                  {{ actionLoading ? '指派中...' : '确认指派' }}
+                </button>
+                <p v-if="taskError" class="text-xs text-destructive">{{ taskError }}</p>
+              </div>
+            </div>
+
+            <div v-if="tasks.length" class="space-y-2">
+              <div v-for="t in tasks" :key="t.id" class="flex items-center justify-between rounded-lg border border-border p-3">
+                <div>
+                  <p class="text-sm font-medium text-text-primary">{{ t.userName }}</p>
+                  <p class="text-xs text-text-secondary mt-0.5">
+                    {{ t.scope === 'round' ? `轮次级 · ${t.roundName}` : '活动级 · 全部轮次' }}
+                    <StateTag :status="t.status" />
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <template v-if="revokingTaskId === t.id">
+                    <span class="text-xs text-text-secondary">撤销后立即失效</span>
+                    <button class="px-2 h-8 rounded-md bg-destructive text-text-on-primary text-xs font-medium" :disabled="actionLoading" @click="handleRevokeTask(t.id)">确认</button>
+                    <button class="px-2 h-8 rounded-md border border-border text-xs" @click="revokingTaskId = null">取消</button>
+                  </template>
+                  <button
+                    v-else-if="t.status === 'active'"
+                    class="px-2 h-8 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
+                    :disabled="actionLoading"
+                    @click="revokingTaskId = t.id"
+                  >
+                    <XCircle :size="12" class="inline mr-1" />撤销
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </PermissionGuard>
 
       <!-- 轮次管理 -->
       <PermissionGuard permission="club:recruitment:manage">
@@ -569,7 +722,7 @@ watch(
                 </div>
               </div>
 
-              <p v-if="actionError" class="text-xs text-destructive">{{ actionError }}</p>
+              <!-- 操作结果反馈统一走 toast，页面内联不再承载 -->
             </div>
           </PermissionGuard>
         </Card>

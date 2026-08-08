@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { members } from './db'
+import { listGroups, getGroupDetail, listClubAccesses } from './db-organization'
 
 /**
  * MRM-018 回归：Group 成员外键悬挂。
@@ -10,19 +11,22 @@ import { members } from './db'
  *  - 现象：返回的 members 数组里含有 mem-102
  *  - 期望：mem-102 在 db.members 中查无此人（外键悬挂）
  *
- * 仓库当前分支（fix/MRM-017）状态：
- *  - db-organization.ts 已于 MRM-008（commit dcd3d76）被抽成 db-members 共享模块并删除
- *  - getGroupDetail / grp-002 / mem-102 在本分支的 mock 数据中均不存在
- *  - 当前 db.members 仅有 mem-001 ~ mem-006
+ * 历史核查：db-organization.ts 曾在 MRM-008（dcd3d76）被抽成 db-members
+ * 共享模块（members 数组下沉），但 Group 树与 memberNames 保留在
+ * db-organization.ts。在 dev 最新态下 getGroupDetail('grp-002') 仍返回
+ * ['mem-101','mem-102']，而 mem-102 不在 db-members.ts 中 —— 外键悬挂
+ * 真实存在，已于本分支修复（grp-002.members 移除 mem-102，memberNames
+ * 移除该悬挂条目）。
  *
  * 本测试承担两层职责：
- *  ① 守门：在本分支显式断言「mem-102 不是成员、不会被任何数据引用」，
- *     一旦未来有人把这条悬挂记录粘回来（无论是 db.ts / db-recruitment.ts /
- *     任何新引入的 group 数据），CI 即失败。
- *  ② 通用扫描：对 db / db-recruitment 全部已知"含成员 ID 引用"的字段做一次
- *     「引用必须存在于 db.members」的不变量校验。如果未来引入 Group / 部门
- *     子组 / 班级等结构，只需要在 COLLECTORS 里追加收集器即可，不需要再写
- *     一次 getGroupDetail 兼容逻辑。
+ *  ① 守门：断言「mem-102 不是成员」且「任一已启用社团的 Group 引用的
+ *     mem-* 成员必须全部存在于 db.members」。一旦未来有人把悬挂记录
+ *     粘回来（db.ts / db-recruitment.ts / db-organization.ts / 任何新
+ *     引入的 group 数据），CI 即失败。
+ *  ② 通用扫描：对 db / db-organization（Group 树）全部已知"含成员 ID
+ *     引用"的字段做一次「引用必须存在于 db.members」的不变量校验。
+ *     未来引入新的 Group / 部门子组 / 班级等结构，只需要在 COLLECTORS
+ *     里追加收集器即可。
  */
 
 /** 收集器：每个收集器返回若干形如「来源:ID」的引用字符串。 */
@@ -30,8 +34,7 @@ type Reference = { source: string; id: string; hint?: string }
 type Collector = () => Reference[] | Iterable<Reference>
 
 /**
- * db.ts：member 内部字段（positions[].id 不是外键、跳过；只关心跨表的 member id 字段）。
- * 当前 db.ts 没有自身引用的 group-like 字段；占位收集器保留以便未来扩展。
+ * db.ts：member 自身 id 集合（唯一合法来源）。
  */
 const collectFromDb = (): Reference[] => {
   const out: Reference[] = []
@@ -42,19 +45,30 @@ const collectFromDb = (): Reference[] => {
 }
 
 /**
- * db-recruitment.ts：跨模块对 member id 的引用。
- *  - jointConclusions.applicantId / interview 视角下的 applicantId 在本仓系候选人 id（u-xxx），
- *    与 members.id 不同主键；这里只检查真指向 members 的引用。
- *  - 暂未发现 db-recruitment 直接持有 mem-xxx 的硬引用；保留占位扫描作为防回归。
+ * db-organization.ts：Group 树成员引用。
+ *  - 仅扫描「已启用社团」绑定的 Group：未启用（wizard_pending / suspended /
+ *    sync_abnormal_ro）的社团其 Group 成员是待接入的占位/演示数据，
+ *    不要求在成员表存在（与既有 importMembers 演示语义一致）。
+ *  - getGroupDetail 返回每个成员 id + 展示名，直接作为引用来源。
  */
-const collectFromRecruitment = (): Reference[] => {
-  // 当前数据无此引用；显式返回空数组以保持 COLLECTORS 列表稳定
-  return []
+const collectFromOrgGroups = (): Reference[] => {
+  const enabledClubIds = new Set(
+    listClubAccesses().filter((c) => c.status === 'enabled').map((c) => c.clubId),
+  )
+  const out: Reference[] = []
+  for (const g of listGroups()) {
+    if (!g.boundClubId || !enabledClubIds.has(g.boundClubId)) continue
+    const detail = getGroupDetail(g.id)
+    for (const m of detail?.members ?? []) {
+      out.push({ source: `grp[${g.id}].members`, id: m.id, hint: m.name })
+    }
+  }
+  return out
 }
 
 const COLLECTORS: Array<{ name: string; collect: Collector }> = [
   { name: 'db', collect: collectFromDb },
-  { name: 'db-recruitment', collect: collectFromRecruitment },
+  { name: 'db-organization', collect: collectFromOrgGroups },
 ]
 
 /** 已知合法的 mem-* 集合。 */
@@ -85,7 +99,7 @@ describe('MRM-018 Group 成员外键悬挂（回归）', () => {
     expect(bad, JSON.stringify(bad)).toEqual([])
   })
 
-  it('整库扫描：所有来源的 mem-* 引用必须全部存在于 db.members', () => {
+  it('整库扫描：已启用社团 Group 引用的 mem-* 必须全部存在于 db.members', () => {
     const set = membersIdSet()
     const violations: Array<{ source: string; id: string }> = []
     for (const { name, collect } of COLLECTORS) {
@@ -100,15 +114,12 @@ describe('MRM-018 Group 成员外键悬挂（回归）', () => {
     expect(violations, `发现悬挂外键：${JSON.stringify(violations)}`).toEqual([])
   })
 
-  it('bug 报告场景（getGroupDetail("grp-002") 含 mem-102）：在本分支该函数 / 该 group / 该成员均不存在', () => {
-    // 直接文档化：本分支三条前提（file / function / dangling id）都不存在。
-    // 如果未来重新引入 Group 概念（带回 db-organization.ts 或类似模块），
-    // 这个用例需要改造为「调用 getGroupDetail('grp-002') → 断言其 .members 中
-    // 每个 id 都在 db.members 中查得到」。
+  it('bug 报告场景：getGroupDetail("grp-002") 的成员全部在 db.members 中查得到', () => {
     const set = membersIdSet()
-    expect(set.has('mem-102')).toBe(false)
-    expect(members.find((m) => m.id === 'grp-002')).toBeUndefined()
-    // 工作区里不应再有 "grp-002" / "mem-102" 字符串的硬引用
-    // （我们不强求字符串全字面量扫描，这里只断言 members 表层）
+    const detail = getGroupDetail('grp-002')
+    expect(detail, 'grp-002 应存在于 Group 树').toBeTruthy()
+    for (const m of detail!.members) {
+      expect(set.has(m.id), `grp-002 引用 ${m.id}（${m.name}）应在 db.members 中查得到`).toBe(true)
+    }
   })
 })

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import { useTheme } from '@/composables/useTheme'
+import { useUserMenu } from '@/composables/useUserMenu'
 import { Search, Bell, User, Settings, LogOut, ChevronDown, Menu, Building2, Sun, Moon, ShieldAlert } from '@lucide/vue'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
@@ -20,17 +20,10 @@ const session = useSessionViewStore()
 const workspace = useWorkspaceContextStore()
 const notifications = useNotificationViewStore()
 const { theme, toggleTheme } = useTheme()
-
-const isAdmin = computed(() => session.hasPermission('platform:club:manage'))
+const { canAccessPlatformAdmin, handleLogout } = useUserMenu()
 
 function mainNavActive(prefix: string): boolean {
   return route.path.startsWith(prefix)
-}
-
-async function handleLogout() {
-  await session.logout()
-  workspace.clearWorkspace()
-  await router.push('/login')
 }
 </script>
 
@@ -69,7 +62,7 @@ async function handleLogout() {
           <User :size="16" /> 个人中心
         </router-link>
         <router-link
-          v-if="isAdmin"
+          v-if="canAccessPlatformAdmin"
           to="/admin/clubs"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-primary hover:bg-primary-subtle transition-colors"
           :class="mainNavActive('/admin') ? 'text-primary bg-primary-subtle' : ''"
@@ -125,7 +118,7 @@ async function handleLogout() {
           <DropdownMenuItem @click="router.push('/me/profile')" class="cursor-pointer">
             <User :size="16" class="mr-2" /> 个人资料
           </DropdownMenuItem>
-          <DropdownMenuItem v-if="isAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
+          <DropdownMenuItem v-if="canAccessPlatformAdmin" @click="router.push('/admin/clubs')" class="cursor-pointer">
             <Settings :size="16" class="mr-2" /> 平台管理
           </DropdownMenuItem>
           <DropdownMenuSeparator />

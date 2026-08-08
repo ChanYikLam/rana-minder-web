@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { get } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { Plus, ChevronRight, Calendar, Users } from '@lucide/vue'
@@ -11,8 +13,10 @@ interface Activity { id: string; title: string; status: string; channelStatus: s
 
 const route = useRoute()
 const router = useRouter()
+const workspace = useWorkspaceContextStore()
 const state = ref<PageState>('loading')
 const items = ref<Activity[]>([])
+const canCreate = computed(() => workspace.hasPermission('club:recruitment:manage'))
 
 async function loadData() {
   state.value = 'loading'
@@ -37,12 +41,14 @@ onMounted(loadData)
     <div class="max-w-3xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">招新活动</h1>
-        <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="router.push(`/org/${route.params.clubId}/recruitment/create`)">
-          <Plus :size="16" /> 创建活动
-        </button>
+        <PermissionGuard permission="club:recruitment:manage" scope="workspace">
+          <button class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover" @click="router.push(`/org/${route.params.clubId}/recruitment/create`)">
+            <Plus :size="16" /> 创建活动
+          </button>
+        </PermissionGuard>
       </div>
 
-      <EmptyState v-if="items.length === 0" type="no_data" title="暂无招新活动" action-label="创建活动" @action="router.push(`/org/${route.params.clubId}/recruitment/create`)" />
+      <EmptyState v-if="items.length === 0" type="no_data" title="暂无招新活动" :action-label="canCreate ? '创建活动' : undefined" @action="router.push(`/org/${route.params.clubId}/recruitment/create`)" />
 
       <div v-else class="space-y-3">
         <Card

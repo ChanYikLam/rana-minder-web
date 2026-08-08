@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { Calendar, Mail, Phone, Building2, Clock, AlertTriangle, History, ArrowLeft } from '@lucide/vue'
 
@@ -15,13 +17,17 @@ interface MemberDetail {
   tenures: { id: string; departmentName: string; title: string; startDate: string; endDate: string | null; endReason: string | null }[]
   departmentHistory: { id: string; action: string; departmentName: string; at: string }[]
   anomalies: { id: string; kind: string; message: string; createdAt: string }[]
+  historyMemberships: { id: string; name: string; joinedAt: string; exitedAt: string | null; status: string }[]
 }
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionViewStore()
 const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const member = ref<MemberDetail | null>(null)
+
+const canViewContact = computed(() => session.hasPermission('club:member:manage') || session.hasPermission('club:audit:view'))
 
 async function loadData() {
   state.value = 'loading'
@@ -36,7 +42,9 @@ async function loadData() {
       state.value = 'empty'
     }
   } else if (result.kind === 'accepted') {
-    state.value = 'loading'
+    // P1-1：202/IFC-ERR-014 异步受理（数据生成中）不再永久卡 loading，降级为可重试的 error 态
+    state.value = 'error'
+    pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
   } else {
     const code = result.error.code as ErrorCode
     pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -78,8 +86,8 @@ onMounted(loadData)
         </div>
         <p class="text-xs text-text-secondary mb-3">当前成员关系由 Casdoor Group 权威维护，本页面记录任期、异动与审批历史。</p>
         <div class="grid grid-cols-2 gap-3 text-sm">
-          <div class="flex items-center gap-2 text-text-secondary"><Mail :size="16" /> {{ member.email }}</div>
-          <div class="flex items-center gap-2 text-text-secondary"><Phone :size="16" /> {{ member.phone }}</div>
+          <div v-if="canViewContact && member.email" class="flex items-center gap-2 text-text-secondary"><Mail :size="16" /> {{ member.email }}</div>
+          <div v-if="canViewContact && member.phone" class="flex items-center gap-2 text-text-secondary"><Phone :size="16" /> {{ member.phone }}</div>
           <div class="flex items-center gap-2 text-text-secondary"><Calendar :size="16" /> 加入于 {{ formatDate(member.joinedAt) }}</div>
           <div v-if="member.exitedAt" class="flex items-center gap-2 text-text-secondary"><Clock :size="16" /> 退出于 {{ formatDate(member.exitedAt) }}</div>
         </div>
@@ -115,9 +123,11 @@ onMounted(loadData)
             <p class="text-xs text-text-secondary mt-0.5">发现于 {{ formatDate(an.createdAt) }}</p>
           </div>
         </div>
-        <button class="mt-3 px-3 h-8 rounded-md border border-warning text-warning text-xs hover:bg-warning-subtle" @click="router.push(`/org/${route.params.clubId}/audit/corrections`)">
-          去处理
-        </button>
+        <PermissionGuard permission="club:audit:view" scope="workspace">
+          <button class="mt-3 px-3 h-8 rounded-md border border-warning text-warning text-xs hover:bg-warning-subtle" @click="router.push(`/org/${route.params.clubId}/audit/corrections`)">
+            去处理
+          </button>
+        </PermissionGuard>
       </Card>
 
       <!-- 部门经历 -->
@@ -146,6 +156,22 @@ onMounted(loadData)
               {{ formatDate(tenure.startDate) }} - {{ tenure.endDate ? formatDate(tenure.endDate) : '至今' }}
             </p>
             <p v-if="tenure.endReason" class="text-xs text-text-secondary mt-0.5">原因：{{ tenure.endReason }}</p>
+          </div>
+        </div>
+      </Card>
+
+      <!-- MEM-007: 历史成员分段（同学生账号的过往经历，供重新加入时间线还原） -->
+      <Card v-if="(member.historyMemberships ?? []).length > 0" class="mt-4 border-warning">
+        <h2 class="text-base font-medium text-warning mb-3 flex items-center gap-2">
+          <History :size="16" /> 历史成员身份
+        </h2>
+        <p class="text-xs text-text-secondary mb-3">同学生账号在社团中的历史成员记录（分段存档，不并入当前任期）。</p>
+        <div class="space-y-2">
+          <div v-for="h in member.historyMemberships" :key="h.id" class="flex items-center justify-between rounded-lg border border-border p-3">
+            <div>
+              <p class="text-sm text-text-primary">{{ h.name }} <StateTag :status="h.status" class="ml-2" /></p>
+              <p class="text-xs text-text-secondary mt-0.5">加入于 {{ formatDate(h.joinedAt) }}{{ h.exitedAt ? ` · 退出于 ${formatDate(h.exitedAt)}` : '' }}</p>
+            </div>
           </div>
         </div>
       </Card>

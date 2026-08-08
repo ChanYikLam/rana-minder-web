@@ -4,13 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
 import { Calendar, Clock, ChevronRight, ClipboardList, Hourglass, History, XCircle } from '@lucide/vue'
 
 interface TodoItem { id: string; type: string; title: string; description: string; deadline: string; link: string }
 interface OngoingItem { id: string; type: string; title: string; description: string; submittedAt: string; link: string; activityId?: string; status?: string }
 interface HistoryItem { id: string; type: string; title: string; result: string; completedAt: string }
-interface ScheduleItem { id: string; title: string; activityTitle: string; time: string; location: string; interviewerName: string; status: string }
+interface ScheduleItem { id: string; title: string; activityTitle: string; time: string; location: string; interviewerName: string; status: string; role?: 'applicant' | 'interviewer'; applicantName?: string }
 
 type TabKey = 'todo' | 'ongoing' | 'history' | 'schedule'
 
@@ -33,7 +34,6 @@ const history = ref<HistoryItem[]>([])
 const schedule = ref<ScheduleItem[]>([])
 const confirmingId = ref<string | null>(null)
 const withdrawing = ref(false)
-const withdrawError = ref('')
 
 async function loadData() {
   state.value = 'loading'
@@ -63,7 +63,6 @@ async function handleWithdraw(item: OngoingItem) {
     return
   }
   withdrawing.value = true
-  withdrawError.value = ''
   const result = await post(`/activity/recruitment/${item.activityId}/withdraw`, { confirm: true })
   withdrawing.value = false
   confirmingId.value = null
@@ -71,7 +70,7 @@ async function handleWithdraw(item: OngoingItem) {
     toast.success('已退出招新')
     await loadData()
   } else if (result.kind === 'rejected' && result.error) {
-    withdrawError.value = (result.error as { message?: string }).message || '退出失败'
+    toast.error((result.error as { message?: string }).message || '退出失败')
   }
 }
 
@@ -88,6 +87,10 @@ function switchTab(tab: TabKey) {
 function formatTime(iso: string): string {
   const d = new Date(iso)
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function isOverdue(deadline: string): boolean {
+  return new Date(deadline).getTime() < Date.now()
 }
 
 onMounted(loadData)
@@ -131,13 +134,15 @@ onMounted(loadData)
           description="当有新的邀请、面试确认等待办时会显示在这里"
         />
         <div v-else class="space-y-3">
-          <Card v-for="item in todos" :key="item.id" class="cursor-pointer" @click="router.push(item.link)">
+          <Card v-for="item in todos" :key="item.id" class="cursor-pointer" @click="navigateByLink(item.link)">
             <div class="flex items-center justify-between">
               <div>
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
-                <p class="text-xs text-warning mt-1 flex items-center gap-1">
-                  <Clock :size="12" /> 截止：{{ formatTime(item.deadline) }}
+                <p v-if="item.deadline" class="text-xs mt-1 flex items-center gap-1" :class="isOverdue(item.deadline) ? 'text-danger' : 'text-warning'">
+                  <Clock :size="12" />
+                  <template v-if="isOverdue(item.deadline)">已逾期（截止 {{ formatTime(item.deadline) }}）</template>
+                  <template v-else>截止：{{ formatTime(item.deadline) }}</template>
                 </p>
               </div>
               <ChevronRight :size="18" class="text-muted-foreground" />
@@ -157,7 +162,7 @@ onMounted(loadData)
         <div v-else class="space-y-3">
           <Card v-for="item in ongoing" :key="item.id">
             <div class="flex items-start justify-between">
-              <div class="cursor-pointer" @click="router.push(item.link)">
+              <div class="cursor-pointer" @click="navigateByLink(item.link)">
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary mt-0.5">{{ item.description }}</p>
                 <p class="text-xs text-muted-foreground mt-1">提交于 {{ formatTime(item.submittedAt) }}</p>
@@ -182,7 +187,6 @@ onMounted(loadData)
             </div>
           </Card>
         </div>
-        <p v-if="withdrawError" class="mt-3 text-xs text-danger">{{ withdrawError }}</p>
       </div>
 
       <!-- 历史记录 -->
@@ -229,9 +233,20 @@ onMounted(loadData)
                 <p class="text-sm font-medium text-primary">{{ item.title }}</p>
                 <p class="text-xs text-text-secondary">{{ item.activityTitle }}</p>
                 <p class="text-xs text-text-secondary mt-1">
-                  {{ formatTime(item.time) }} · {{ item.location }} · 面试官：{{ item.interviewerName }}
+                  <template v-if="item.role === 'interviewer'">
+                    {{ formatTime(item.time) }} · 面试对象：{{ item.applicantName }}
+                  </template>
+                  <template v-else>
+                    {{ formatTime(item.time) }} · {{ item.location }} · 面试官：{{ item.interviewerName }}
+                  </template>
                 </p>
               </div>
+              <span
+                v-if="item.role === 'interviewer'"
+                class="ml-auto shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs bg-warning-subtle text-warning"
+              >
+                我的任务
+              </span>
             </div>
           </Card>
         </div>

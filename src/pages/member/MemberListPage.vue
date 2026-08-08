@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
+import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import SyncIndicator from '@/components/common/SyncIndicator.vue'
 import { FilterPanel, type FilterField, type FilterOption } from '@/components/display'
 import { StatChart, type ChartSeries } from '@/components/display'
@@ -13,7 +14,7 @@ import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import type { PageState } from '@/types/machine'
 import {
   UserCircle, ChevronRight, UserPlus, ArrowRightLeft,
-  LogOut, Users, Mail, RefreshCw, Building2,
+  LogOut, Users, Mail, RefreshCw, Building2, CalendarClock,
 } from '@lucide/vue'
 
 interface MemberPosition {
@@ -34,6 +35,9 @@ interface Member {
   status: string
   joinedAt: string
   exitedAt: string | null
+  termEndAt: string | null
+  /** MEM-004：距 termEndAt 的剩余天数（仅进入提醒窗口的在任成员有值） */
+  termDaysLeft: number | null
 }
 interface Stats {
   total: number
@@ -77,7 +81,9 @@ async function loadData() {
     pendingCounts.value = (result as { kind: 'completed'; data: { items: Member[]; stats: Stats; pendingCounts?: PendingCounts } }).data.pendingCounts ?? null
     state.value = 'normal'
   } else if (result.kind === 'accepted') {
-    state.value = 'loading'
+    // P1-1：202/IFC-ERR-014 异步受理（数据生成中）不再永久卡 loading，降级为可重试的 error 态
+    state.value = 'error'
+    pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
   } else {
     const code = result.error.code as ErrorCode
     pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -129,11 +135,10 @@ watch([keyword, deptFilter, titleFilter, statusFilter], () => { page.value = 1 }
 
 const statusOptions: FilterOption[] = [
   { value: 'active', label: '活跃' },
-  { value: 'pending_casdor_sync', label: '关系同步中' },
-  { value: 'suspended', label: '已暂停' },
+  { value: 'pending_casdoor_sync', label: '关系同步中' },
   { value: 'exiting', label: '退出中' },
   { value: 'exited', label: '已退出' },
-  { value: 'removed', label: '已移除' },
+  { value: 'sync_anomaly', label: '同步异常' },
 ]
 
 const filterFields = computed<FilterField[]>(() => {
@@ -173,10 +178,12 @@ onMounted(loadData)
 const deptSeries = computed<ChartSeries[]>(() =>
   (stats.value?.byDepartment ?? []).map((d) => ({ label: d.name, value: d.count })),
 )
+
+const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt).length)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="成员管理" :error="pageError" @retry="loadData">
+  <PageStateBoundary :state="state" :title="canManage ? '成员管理' : '组织成员'" :error="pageError" @retry="loadData">
     <template #loading>
       <div class="max-w-5xl mx-auto space-y-4" role="status" aria-live="polite">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -192,22 +199,29 @@ const deptSeries = computed<ChartSeries[]>(() =>
       <!-- 标题 + 快捷操作 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-text-primary">成员管理</h1>
-          <p class="text-sm text-text-secondary mt-1">当前关系来自 Casdoor Group；本系统记录任期、异动与审批历史。</p>
+          <h1 class="text-2xl font-bold text-text-primary">{{ canManage ? '成员管理' : '组织成员' }}</h1>
+          <p class="text-sm text-text-secondary mt-1">
+            <template v-if="canManage">当前关系来自 Casdoor Group；本系统记录任期、异动与审批历史。</template>
+            <template v-else>本社团成员与在任职位，仅供查看。</template>
+          </p>
         </div>
         <div v-if="canManage" class="flex flex-wrap gap-2">
-          <button
-            class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover"
-            @click="router.push(`/org/${route.params.clubId}/members/appointments`)"
-          >
-            <UserPlus :size="15" /> 任命调岗
-          </button>
-          <button
-            class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
-            @click="router.push(`/org/${route.params.clubId}/members/invite`)"
-          >
-            <Mail :size="15" /> 入社邀请
-          </button>
+          <PermissionGuard permission="club:appointment:manage" scope="workspace">
+            <button
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover"
+              @click="router.push(`/org/${route.params.clubId}/members/appointments`)"
+            >
+              <UserPlus :size="15" /> 任命调岗
+            </button>
+          </PermissionGuard>
+          <PermissionGuard permission="club:invite:manage" scope="workspace">
+            <button
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+              @click="router.push(`/org/${route.params.clubId}/members/invite`)"
+            >
+              <Mail :size="15" /> 入社邀请
+            </button>
+          </PermissionGuard>
           <button
             class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
             @click="router.push(`/org/${route.params.clubId}/members/department-apply`)"
@@ -220,12 +234,14 @@ const deptSeries = computed<ChartSeries[]>(() =>
           >
             <LogOut :size="15" /> 退出移除
           </button>
-          <button
-            class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
-            @click="router.push(`/org/${route.params.clubId}/members/transition`)"
-          >
-            <RefreshCw :size="15" /> 换届管理
-          </button>
+          <PermissionGuard permission="club:transition:manage" scope="workspace">
+            <button
+              class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle"
+              @click="router.push(`/org/${route.params.clubId}/members/transition`)"
+            >
+              <RefreshCw :size="15" /> 换届管理
+            </button>
+          </PermissionGuard>
         </div>
       </div>
 
@@ -289,7 +305,7 @@ const deptSeries = computed<ChartSeries[]>(() =>
           </div>
           <button class="mt-3 w-full h-8 rounded-md border border-border text-xs text-primary hover:bg-primary-subtle" @click.stop="router.push(`/org/${route.params.clubId}/members/department-apply`)">去审批</button>
         </Card>
-        <Card v-if="workspace.hasPermission('club:member:manage')" class="!p-4 cursor-pointer transition-colors hover:border-primary" @click="router.push(`/org/${route.params.clubId}/members/appointments`)">
+        <Card v-if="workspace.hasPermission('club:appointment:manage')" class="!p-4 cursor-pointer transition-colors hover:border-primary" @click="router.push(`/org/${route.params.clubId}/members/appointments`)">
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm text-text-primary">预约管理命令</p>
@@ -324,6 +340,15 @@ const deptSeries = computed<ChartSeries[]>(() =>
         class="flex items-center gap-2 text-xs text-warning mb-4"
       >
         另有 {{ stats.zeroDepartment }} 名成员待分配部门
+      </div>
+
+      <!-- 任期提醒（MEM-004） -->
+      <div
+        v-if="upcomingTermCount > 0"
+        class="flex items-center gap-2 text-xs text-warning mb-4"
+        role="status"
+      >
+        <CalendarClock :size="14" /> {{ upcomingTermCount }} 名成员任期将到期，须在到期日交接或续任安排
       </div>
 
       <!-- 筛选工具栏 -->
@@ -362,6 +387,10 @@ const deptSeries = computed<ChartSeries[]>(() =>
                   <p class="text-sm font-medium text-text-primary">{{ m.name }}</p>
                   <StateTag :status="m.status" />
                   <SyncIndicator v-if="m.status === 'pending_casdoor_sync'" status="syncing" label="关系同步中" />
+                  <span v-if="m.termEndAt" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-warning-subtle text-warning" title="任期将到期">
+                    <CalendarClock :size="11" /> 任期 {{ m.termEndAt.slice(0, 10) }} 到期
+                    <template v-if="m.termDaysLeft !== null && m.termDaysLeft >= 0">· 剩 {{ m.termDaysLeft }} 天</template>
+                  </span>
                 </div>
                 <div class="flex items-center gap-3 mt-0.5">
                   <p class="text-xs text-text-secondary">{{ m.studentId }}</p>
