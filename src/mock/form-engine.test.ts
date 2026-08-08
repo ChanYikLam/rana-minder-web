@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import {
   formDefinitions, formSubmissions, FORM_FIELD_TYPE_LIST,
   listForms, listPlatformForms, getFormDetail, getDesignerState,
-  saveFormDraft, publishForm, deprecateForm, reuseForm, cloneForm, submitFormSubmission,
+  saveFormDraft, publishForm, deprecateForm, reuseForm, cloneForm, submitFormSubmission, saveFormSubmissionDraft,
 } from './db-forms'
 import { resetRecruitmentDB } from './reset'
 
@@ -150,6 +150,52 @@ describe('P0-003 动态表单引擎（SM-FORM-001 / SM-FORM-002）', () => {
     const draft = submitFormSubmission('form-003', { version: 1, formData: {}, idempotencyKey: 'form-003-v1' })
     expect(draft.ok).toBe(false)
     expect(draft.ok || draft.error).toContain('未发布')
+  })
+
+  it('SM-FORM-002 草稿落库（P0-1）：保存用户填写数据，不新建表单定义版本', () => {
+    // form-001 为已发布表单（v1），用户在此版本填写并保存草稿
+    const draft = saveFormSubmissionDraft('form-001', {
+      version: 1,
+      formData: { f1: '热爱编程', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-abc',
+    })
+    expect(draft.ok).toBe(true)
+    expect(draft.ok && draft.data.status).toBe('draft')
+    expect(draft.ok && draft.data.data).toEqual({ f1: '热爱编程', f2: '技术部' })
+    // 关键：不产生新的表单定义版本（不再 version+1 新建空版本）
+    const detail = getFormDetail('form-001')
+    expect(detail.ok && detail.data.versions.map((v) => v.version)).toEqual([1])
+    expect(detail.ok && detail.data.versions[0].status).toBe('published')
+
+    // 再次保存同一草稿：更新既有草稿，不重复落库
+    const draft2 = saveFormSubmissionDraft('form-001', {
+      version: 1,
+      formData: { f1: '热爱编程（更新）', f2: '技术部' },
+      idempotencyKey: 'form-001-v1-hash-abc',
+    })
+    expect(draft2.ok).toBe(true)
+    expect(draft2.ok && draft2.data.id).toBe(draft.ok ? draft.data.id : '')
+    expect(formSubmissions.filter((s) => s.formId === 'form-001')).toHaveLength(1)
+    expect(formSubmissions[0].data.f1).toBe('热爱编程（更新）')
+  })
+
+  it('SM-FORM-002 草稿落库：未发布版本不可保存；已提交记录不可被草稿覆盖', () => {
+    const onDraftForm = saveFormSubmissionDraft('form-003', {
+      version: 1,
+      formData: { f1: 'x' },
+      idempotencyKey: 'form-003-v1',
+    })
+    expect(onDraftForm.ok).toBe(false)
+    expect(onDraftForm.ok || onDraftForm.error).toContain('未发布')
+
+    // 先正式提交 v1，再尝试以草稿覆盖 → 拒绝
+    submitFormSubmission('form-001', { version: 1, formData: {}, idempotencyKey: 'form-001-v1-submit' })
+    const overwriteSubmitted = saveFormSubmissionDraft('form-001', {
+      version: 1,
+      formData: { f1: '覆盖' },
+      idempotencyKey: 'form-001-v1-submit',
+    })
+    expect(overwriteSubmitted.ok).toBe(false)
   })
 
   it('设计器字段类型与 FormFieldType 全量对齐（12 种，含 datetime/select/checkbox/array）', () => {

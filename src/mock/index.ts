@@ -4019,6 +4019,21 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
+  // 平台表单版本草稿保存（SM-FORM-002：仅落库 draft，保存用户填写数据，不推进状态机）
+  {
+    url: '/api/admin/forms/versions/:formId/draft',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
+      const result = formdb.saveFormSubmissionDraft(query.formId, {
+        version: Number(input.version) || 1,
+        formData: (input.formData || {}) as Record<string, unknown>,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+      })
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
+    },
+  },
   // 平台表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/admin/forms/versions/:formId/submit',
@@ -4172,6 +4187,21 @@ response: ({ url }: { url: string }) => {
     response: ({ url }: { url: string }) => {
       if (!isPlatformAdmin(url)) return forbidden()
       return { code: 0, data: { items: Object.values(notificationTemplates) } }
+    },
+  },
+  // 工作空间：表单版本草稿保存（SM-FORM-002：仅落库 draft，保存用户填写数据，不推进状态机）
+  {
+    url: '/api/org/:clubId/forms/versions/:formId/draft',
+    method: 'post',
+    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+      const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
+      const result = formdb.saveFormSubmissionDraft(query.formId, {
+        version: Number(input.version) || 1,
+        formData: (input.formData || {}) as Record<string, unknown>,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+      })
+      if (!result.ok) return businessError(result.error)
+      return { code: 0, data: result.data }
     },
   },
   // 工作空间：表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）

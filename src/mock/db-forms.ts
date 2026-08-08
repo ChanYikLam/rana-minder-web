@@ -340,6 +340,61 @@ export function cloneForm(formId: string, title?: string): Result<{ id: string; 
 }
 
 /**
+ * SM-FORM-002 草稿落库：仅保存/更新 draft 状态的提交记录（不推进状态机）。
+ * 与设计器保存草稿（SM-FORM-001，保存表单定义）语义不同：此处保存的是用户填写的表单数据。
+ * 同一表单同一版本最多保留一份草稿：重复保存更新既有草稿而非新建；
+ * 相同 idempotencyKey 幂等更新；已提交记录不可再被草稿覆盖。
+ */
+export function saveFormSubmissionDraft(
+  formId: string,
+  input: { version: number; formData: Record<string, unknown>; idempotencyKey: string }
+): Result<FormSubmission> {
+  const found = findForm(formId)
+  if (!found.ok) return found
+  const f = found.data
+
+  const v = versionOf(f, input.version)
+  if (!v) return err('表单版本不存在')
+  if (v.status !== 'published') return err('当前版本未发布，不可保存草稿')
+
+  // 幂等：相同 idempotencyKey 的既有记录直接更新
+  const byKey = formSubmissions.find(
+    (s) => s.formId === formId && s.idempotencyKey === input.idempotencyKey,
+  )
+  if (byKey) {
+    if (byKey.status !== 'draft') return err('该草稿已提交，不可再保存')
+    byKey.fields = structuredClone(v.fields)
+    byKey.data = structuredClone(input.formData)
+    byKey.version = input.version
+    return ok(byKey)
+  }
+
+  // 同一表单同一版本最多一份草稿：更新既有草稿而非新建
+  const sameVersionDraft = formSubmissions.find(
+    (s) => s.formId === formId && s.version === input.version && s.status === 'draft',
+  )
+  if (sameVersionDraft) {
+    sameVersionDraft.fields = structuredClone(v.fields)
+    sameVersionDraft.data = structuredClone(input.formData)
+    sameVersionDraft.idempotencyKey = input.idempotencyKey
+    return ok(sameVersionDraft)
+  }
+
+  const submission: FormSubmission = {
+    id: `sub-${Date.now().toString(36)}-${formSubmissions.length + 1}`,
+    formId,
+    version: input.version,
+    idempotencyKey: input.idempotencyKey,
+    fields: structuredClone(v.fields),
+    data: structuredClone(input.formData),
+    status: 'draft',
+    submittedAt: now(),
+  }
+  formSubmissions.push(submission)
+  return ok(submission)
+}
+
+/**
  * SM-FORM-002 提交链路：draft --submit_request--> checking --all_pass--> submitted。
  * 仅允许提交已发布版本；提交内容按该版本字段快照留存（旧提交按原版本还原）；
  * 相同 idempotencyKey 幂等返回既有提交。

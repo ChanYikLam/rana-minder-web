@@ -45,4 +45,30 @@ describe('FormVersionPage 表单版本', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('招新报名表')
   })
+
+  it('P0-1 保存草稿：提交用户填写的 formData（非表单定义 fields），不新建版本', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: {
+        id: 'form-1', title: '招新报名表',
+        versions: [{ version: 2, status: 'published', publishedAt: '2026-08-01T00:00:00Z', fields: [{ id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null }] }],
+      },
+    })
+    mockPost.mockResolvedValue({ kind: 'completed', data: { status: 'draft', savedAt: '2026-08-08T00:00:00Z' } })
+    const wrapper = mount(FormVersionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 填写表单
+    const input = wrapper.find('input[type="text"]')
+    await input.setValue('张三')
+    // 点击保存草稿
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+
+    const [path, body] = mockPost.mock.calls[0]
+    expect(path).toBe('/org/club-001/forms/versions/form-1/draft')
+    expect((body as { formData: unknown }).formData).toEqual({ f1: '张三' })
+    expect((body as { version: number }).version).toBe(2)
+    expect((body as { idempotencyKey: string }).idempotencyKey).toBeTruthy()
+  })
 })

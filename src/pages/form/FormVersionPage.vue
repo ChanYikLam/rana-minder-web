@@ -45,25 +45,20 @@ async function handleSaveDraft() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
 
-  if (currentVersion.value?.status === 'published') {
-    toast.error('已发布版本不可覆盖，请修改后创建新草稿')
-    saving.value = false
-    return
-  }
+  const version = currentVersion.value?.version || 1
+  // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键，避免重复提交
+  const dataFingerprint = stableHash(JSON.stringify(formData.value))
+  const idempotencyKey = `${formId}-v${version}-${dataFingerprint}`
 
-  const nextVersion = (currentVersion.value?.version || 1) + 1
-  const result = await post(`${apiScope.prefix}/forms/designer/${formId}/save`, {
-    fields: currentVersion.value?.fields || [],
-    version: nextVersion,
-    expectedVersion: currentVersion.value?.version || 1,
+  const result = await post(`${apiScope.prefix}/forms/versions/${formId}/draft`, {
+    formData: formData.value,
+    version,
+    idempotencyKey,
   })
   saving.value = false
   if (result.kind === 'completed') {
-    const data = result.data as { version?: number }
-    toast.success(`草稿已保存（v${data?.version ?? nextVersion}）`)
-  } else if (result.kind === 'concurrency_conflict') {
-    // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
-    toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
+    const data = result.data as { status?: string; savedAt?: string }
+    toast.success(data?.savedAt ? `草稿已保存（${new Date(data.savedAt).toLocaleString()}）` : '草稿已保存')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
   } else {
