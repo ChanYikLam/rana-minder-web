@@ -108,6 +108,42 @@ describe('ExportPage 任务列表与轮询', () => {
     wrapper.unmount()
   })
 
+  it('MRM-009：任务被 GC 后状态接口 404——轮询立刻停止，不形成无主定时器', async () => {
+    vi.useFakeTimers()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [generatingTask] } })
+    // 第二次轮询：任务已被 GC，状态接口返回业务 404
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '导出任务不存在' } })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await nextTick()
+
+    // 错误分支统一 stopPolling：不再发起状态请求
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(mockGet).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('MRM-009：状态接口网络错误——轮询停止，不无限重试', async () => {
+    vi.useFakeTimers()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [generatingTask] } })
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'NET-001', message: '网络错误' } })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await nextTick()
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await nextTick()
+
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(mockGet).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
   it('无任务：展示空态', async () => {
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
 

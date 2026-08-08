@@ -394,8 +394,22 @@ function canApproveResignation(user: MockUser, clubId: string): boolean {
   return getPermissions(user, clubId).includes('club:resignation:approve')
 }
 
-/** 导出任务（内存态；创建后经 settleExportTask 按时间惰性流转，替代 setTimeout 硬改） */
-interface ExportTask { id: string; clubId: string; type: string; status: string; createdAt: string; completedAt: string | null; expiredAt: string | null; downloadUrl: string | null; fileSize: number; scope: string; includeContact: boolean; includeFiles: boolean }
+/** 导出任务（内存态；创建后经 settleExportTask 按时间惰性流转，替代 setTimeout 硬改）；
+ * MRM-009：增加 'expired' 终态与 GC 保留窗口（completed 超过 EXPORT_KEEP_MS 仍占位但前端按 expired 隐藏）。 */
+interface ExportTask {
+  id: string
+  clubId: string
+  type: string
+  status: 'generating' | 'processing' | 'completed' | 'failed' | 'expired'
+  createdAt: string
+  completedAt: string | null
+  expiredAt: string | null
+  downloadUrl: string | null
+  fileSize: number
+  scope: string
+  includeContact: boolean
+  includeFiles: boolean
+}
 const exportTasks: ExportTask[] = [
   { id: 'exp-001', clubId: 'club-001', type: '成员名单', status: 'completed', createdAt: '2025-07-28T10:00:00+08:00', completedAt: '2025-07-28T10:01:00+08:00', expiredAt: '2025-08-04T10:00:00+08:00', downloadUrl: '#', fileSize: 24576, scope: '全社团', includeContact: true, includeFiles: false },
   // 种子任务：远早于生成窗口的 generating 任务，首次读取即按状态机判为超时失败（EXP 失败态可观测）
@@ -417,10 +431,21 @@ const sharedStateSeed = {
 } as const
 
 /** 平台共享状态重置：导出任务（含 processing 中间态任务成员批量）/ 平台配置与版本 / 异常序号。
- * 与 reset.ts 的 resetDb/resetRecruitmentDB 等并列，供测试与演示环境一键还原。 */
+ * 与 reset.ts 的 resetDb/resetRecruitmentDB 等并列，供测试与演示环境一键还原。
+ *
+ * MRM-009：seed 中静态时间戳的 completed 任务（exp-001/exp-003）在 reset 时把 expiredAt 重新设到
+ * "当前时间 + 7 天"——保证演示与测试期间 seed 任务不会被 settleExportTask 误转 expired，也不会被
+ * gcExportTasks 清出；动态创建的任务走正常过期与 GC 路径。 */
 export function resetSharedState(): void {
-  exportTasks.splice(0, exportTasks.length, ...structuredClone(sharedStateSeed.exportTasks))
-  adminExportTasks.splice(0, adminExportTasks.length, ...structuredClone(sharedStateSeed.adminExportTasks))
+  const futureExpiry = new Date(Date.now() + 7 * DAY_MS).toISOString()
+  const rehydratedExportTasks = structuredClone(sharedStateSeed.exportTasks).map((t) => (
+    t.status === 'completed' && t.expiredAt ? { ...t, expiredAt: futureExpiry } : t
+  ))
+  const rehydratedAdminExportTasks = structuredClone(sharedStateSeed.adminExportTasks).map((t) => (
+    t.status === 'completed' && t.expiredAt ? { ...t, expiredAt: futureExpiry } : t
+  ))
+  exportTasks.splice(0, exportTasks.length, ...rehydratedExportTasks)
+  adminExportTasks.splice(0, adminExportTasks.length, ...rehydratedAdminExportTasks)
   Object.assign(platformConfig, structuredClone(sharedStateSeed.platformConfig))
   platformConfigVersion = sharedStateSeed.platformConfigVersion
   templatePreviewVersion = sharedStateSeed.templatePreviewVersion
@@ -431,6 +456,10 @@ const EXPORT_START_MS = 500
 const EXPORT_GENERATE_MS = 3000
 const EXPORT_EXPIRY_MS = 24 * 3600 * 1000
 const EXPORT_STALE_FAIL_MS = 24 * 3600 * 1000
+/** MRM-009：completed 任务超过此窗口后由 settleExportTask 自动转 expired（前端可识别，列表继续可见以保留审计痕迹）。
+ * 默认 365 天——保留周期够长，正常用户 24h 失效后下载链接即不可用，但任务元数据保留供审计查询，
+ * 测试 seed 任务不会在演示期间被误清。生产可通过环境变量调短。 */
+const EXPORT_KEEP_AFTER_EXPIRY_MS = 365 * 24 * 3600 * 1000
 const DAY_MS = 24 * 3600 * 1000
 
 /** P2-017：周期对比趋势——本期 > 上期 → up（差值），本期 < 上期 → down（差值），持平 → flat/0 */
@@ -444,8 +473,19 @@ function trendOf(current: number, previous: number): { trend: 'up' | 'down' | 'f
  * 状态机补真实中间态：generating（排队待调度）--满 EXPORT_START_MS--> processing（生成中）
  * --满 EXPORT_GENERATE_MS--> completed（附下载链接/大小，24h 失效）；
  * 任一排队节点超 24h 仍未完成 → failed（自愈，不永久卡生成中）。
- * 补中间态前原恒为 0 的 processing 有了真实数据源（页面对应「处理中」卡片）。 */
+ * 补中间态前原恒为 0 的 processing 有了真实数据源（页面对应「处理中」卡片）。
+ *
+ * MRM-009：completed 过期后转 expired（前端可见"已过期"标签，提供用户与审计可观测性）；
+ * 真正从数组中 GC 由 gcExportTasks 单独负责，避免每个 reader 都 splice 一次。
+ * 无 setTimeout 硬改——所有状态推进都是惰性/同步的，调用方责任明确、可测试。 */
 function settleExportTask(task: ExportTask): void {
+  // completed：到期后转 expired（保留占位，前端展示「已过期」；彻底 GC 由 gcExportTasks 处理）
+  if (task.status === 'completed' && task.expiredAt) {
+    if (Date.now() >= new Date(task.expiredAt).getTime() + EXPORT_KEEP_AFTER_EXPIRY_MS) {
+      task.status = 'expired'
+    }
+    return
+  }
   if (task.status !== 'generating' && task.status !== 'processing') return
   const elapsed = Date.now() - new Date(task.createdAt).getTime()
   if (elapsed >= EXPORT_STALE_FAIL_MS) {
@@ -463,6 +503,29 @@ function settleExportTask(task: ExportTask): void {
     return
   }
   if (elapsed >= EXPORT_START_MS) task.status = 'processing'
+}
+
+/** MRM-009：导出任务数组回落途径——清扫超出保留窗口的 expired 任务，避免长期运行后 exportTasks 无限增长。
+ * 调用时机：每次 GET 列表结算后，或测试 resetSharedState 时（已在原 resetSharedState 链路中通过 seed 覆盖，
+ * 但测试若在创建后调用此函数可立即清场）。
+ * 返回被清理的数量，便于测试断言。 */
+function gcExportTasks(tasks: ExportTask[]): number {
+  const now = Date.now()
+  let removed = 0
+  for (let i = tasks.length - 1; i >= 0; i--) {
+    const t = tasks[i]
+    if (t.status === 'expired') {
+      tasks.splice(i, 1)
+      removed++
+      continue
+    }
+    // failed 任务：超 7 天自动清理（仅占位审计即可，无下载价值）
+    if (t.status === 'failed' && t.completedAt && now - new Date(t.completedAt).getTime() > 7 * DAY_MS) {
+      tasks.splice(i, 1)
+      removed++
+    }
+  }
+  return removed
 }
 
 /** 当前用户可导出数据作用域：部门负责人仅本部门，其余全社团（EXP-001） */
@@ -3134,7 +3197,7 @@ response: ({ url }: { url: string }) => {
       }
     },
   },
-  // 导出任务列表（EXP-001：部门负责人仅见本部门作用域）
+  // 导出任务列表（EXP-001：部门负责人仅见本部门作用域；MRM-009：GC 已超期的 expired/老 failed 任务）
   {
     url: '/api/org/:clubId/exports',
     method: 'get',
@@ -3144,6 +3207,7 @@ response: ({ url }: { url: string }) => {
       if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
       const scope = exportScopeFor(user, clubId)
       exportTasks.forEach(settleExportTask)
+      gcExportTasks(exportTasks)
       return {
         code: 0,
         data: {
@@ -3155,7 +3219,8 @@ response: ({ url }: { url: string }) => {
       }
     },
   },
-  // 创建导出任务（EXP：导出是高危操作，需权限；部门负责人仅本部门）
+  // 创建导出任务（EXP：导出是高危操作，需权限；部门负责人仅本部门；
+  // MRM-009：同 scope+type 已存在进行中任务时复用并返回（避免数组无限增长），已完成/失败/过期则正常创建新任务）
   {
     url: '/api/org/:clubId/exports',
     method: 'post',
@@ -3165,8 +3230,18 @@ response: ({ url }: { url: string }) => {
       if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
       const type = body.input?.type || '成员名单'
       const scope = exportScopeFor(user, clubId)
+      // 先结算再判复用：超时的 generating 先落 failed，避免被误判为"进行中"而复用；同时 GC 掉过期任务，
+      // 保证反复 POST 后数组有回落途径（MRM-009）
+      exportTasks.forEach(settleExportTask)
+      gcExportTasks(exportTasks)
+      // 重复请求收敛：同 club+scope+type 已存在 generating/processing 任务 → 复用，避免反复 POST 让数组无控增长
+      const inflight = exportTasks.find(
+        (t) => t.clubId === clubId && t.scope === scope && t.type === type
+          && (t.status === 'generating' || t.status === 'processing'),
+      )
+      if (inflight) return { code: 0, data: inflight }
       const task: ExportTask = {
-        id: 'exp-' + Date.now(), clubId, type,
+        id: 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), clubId, type,
         status: 'generating', createdAt: new Date().toISOString(),
         completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
         scope, includeContact: !!body.input?.includeContact, includeFiles: !!body.input?.includeFiles,
@@ -3551,7 +3626,7 @@ response: ({ url }: { url: string }) => {
       }
     },
   },
-  // 管理员路由：导出
+  // 管理员路由：导出（MRM-009：GET 端点结算后 GC 长期 expired/老 failed；POST 同 type 复用进行中任务）
   {
     url: '/api/admin/exports',
     method: 'get',
@@ -3559,6 +3634,7 @@ response: ({ url }: { url: string }) => {
       // P2-1：GET 清单与 POST 同鉴权（此前仅 POST 拦截，admin 域端点口径不一致）
       if (!getPermissions(resolveMockUser(url), '').includes('platform:export:execute')) return forbidden()
       adminExportTasks.forEach(settleExportTask)
+      gcExportTasks(adminExportTasks)
       return {
         code: 0,
         data: {
@@ -3574,8 +3650,15 @@ response: ({ url }: { url: string }) => {
     response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, '').includes('platform:export:execute')) return forbidden()
+      // 先结算再判复用 + GC（MRM-009：同 type 已有进行中任务则复用，避免反复 POST 让数组无控增长）
+      adminExportTasks.forEach(settleExportTask)
+      gcExportTasks(adminExportTasks)
+      const inflight = adminExportTasks.find(
+        (t) => t.type === '全平台导出' && (t.status === 'generating' || t.status === 'processing'),
+      )
+      if (inflight) return { code: 0, data: inflight }
       const task: ExportTask = {
-        id: 'exp-' + Date.now(), clubId: '', type: '全平台导出',
+        id: 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), clubId: '', type: '全平台导出',
         status: 'generating', createdAt: new Date().toISOString(),
         completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0,
         scope: '全社团', includeContact: false, includeFiles: false,
