@@ -600,6 +600,14 @@ const TRANSITIONS_CONST = {
   'SM-EXP-001': {
     pending: { start: 'generating', lose_rights: 'denied', expire: 'expired', delete: 'deleted' },
     generating: {
+      // 排队待调度 → 生成中（Mock settleExportTask 按时间惰性流转，P2-5 补真实中间态）
+      start_processing: 'processing',
+      success: 'completed',
+      fail: 'failed',
+      lose_rights: 'denied',
+      expire: 'expired',
+    },
+    processing: {
       success: 'completed',
       fail: 'failed',
       lose_rights: 'denied',
