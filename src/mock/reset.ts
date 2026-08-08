@@ -1,8 +1,9 @@
 import { recruitmentActivities, recruitmentApplications, recruitmentInterviews, recruitmentReviews, recruitmentInvitations, jointActivities, jointApplications, jointInterviews, jointConclusions, jointInvitations, jointSlots, jointReviewExtras, APPLICANT_PROFILES } from './db-recruitment'
-import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, exitRequests, transitionState } from './db'
+import { departments, candidates, members, departmentApplications, membershipInvitations, appointmentCommands, resignationRequests, exitRequests, transitionState, SEED_RELATIVE_OFFSETS } from './db'
 import { sysNotifications, setNotificationSeq, notificationSeqBase, notificationKillSwitch, killSwitchInitial, setNotificationKillSwitch, resetNotificationDedup, resetNotificationPreferences, resetEmailOutbox, resetEmailConfigs, resetClubKillSwitches } from './notifications'
 import { correctionsDb } from './db-corrections'
 import { auditLogsDb, setAuditLogSeq, type AuditLogEntry } from './db-audit'
+import { resetGovernanceState } from './governance'
 export { resetOrgDb } from './db-organization'
 import { resetForms } from './db-forms'
 // P2-017：平台共享状态（导出任务含 processing / platformConfig 版本 / 异常序号）纳入统一重置；
@@ -55,6 +56,28 @@ export function resetRecruitmentDB(): void {
   resetForms()
 }
 
+/** 按当前时钟重算种子相对时间字段（#78 遗留：避免绝对时间固化导致跨天/跨周 overdue 漂移）。
+ * 在 resetDb() splice 恢复 live 数组后调用，直接作用于 live 数据（而非 seed 快照），
+ * 保证恢复后的数据携带当前时钟。将 daysFromNow(days) 的语义一致化：正数=未来、负数=已过期。 */
+function reseedRelativeTimes(): void {
+  const dayMs = 24 * 60 * 60 * 1000
+  const apply = (target: { id: string }, field: string, days: number) => {
+    const iso = new Date(Date.now() + days * dayMs).toISOString()
+    ;(target as unknown as Record<string, unknown>)[field] = iso
+  }
+  const targets: { id: string }[] = [
+    ...departmentApplications,
+    ...membershipInvitations,
+    ...appointmentCommands,
+    ...resignationRequests,
+    ...exitRequests,
+  ]
+  for (const [id, meta] of Object.entries(SEED_RELATIVE_OFFSETS)) {
+    const target = targets.find((t) => t.id === id)
+    if (target) apply(target, meta.field, meta.days)
+  }
+}
+
 export function resetDb(): void {
   departments.splice(0, departments.length, ...structuredClone(seed.departments))
   candidates.splice(0, candidates.length, ...structuredClone(seed.candidates))
@@ -65,6 +88,8 @@ export function resetDb(): void {
   resignationRequests.splice(0, resignationRequests.length, ...structuredClone(seed.resignationRequests))
   exitRequests.splice(0, exitRequests.length, ...structuredClone(seed.exitRequests))
   Object.assign(transitionState, structuredClone(seed.transitionState))
+  // 相对时间字段按当前时钟重算，保证 overdue 等派生语义稳定（跨天/跨周运行不漂移）
+  reseedRelativeTimes()
 }
 
 export function resetNotifications(): void {
@@ -87,4 +112,9 @@ export function resetCorrections(): void {
 export function resetAuditLogs(): void {
   auditLogsDb.splice(0, auditLogsDb.length, ...structuredClone(seed.auditLogsDb))
   setAuditLogSeq(1000)
+}
+
+/** P1-011：复位治理安全状态（异常访问事件/告警、真实数据开关、高风险命令 enforced 标志） */
+export function resetGovernance(): void {
+  resetGovernanceState()
 }

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { Card } from '@/components/common'
+import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { BatchActionBar, type BatchItem } from '@/components/operation'
 import { PartialSuccess, type PartialResult } from '@/components/operation'
@@ -24,13 +25,17 @@ const step = ref<'select' | 'preview' | 'execute' | 'result'>('select')
 const selectedType = ref<BatchType | null>(null)
 const selectedItems = ref<string[]>([])
 const executing = ref(false)
-const retrying = ref(false)
 const candidates = ref<BatchCandidate[]>([])
 const loadingCandidates = ref(false)
 const loadFailed = ref(false)
 const candidatesError = ref(false)
 const interviewers = ref<{ id: string; name: string }[]>([])
 const interviewerId = ref('')
+const confirmOpen = ref(false)
+const confirmError = ref('')
+const confirmReason = ref('')
+// 重试失败项时选中的目标（非空表示当前为重试模式，仅重跑失败项）
+const retryingIds = ref<string[]>([])
 
 const batchTypes: { type: BatchType; label: string; desc: string }[] = [
   { type: 'assign_interviewer', label: '批量分配面试官', desc: '为多个申请人分配同一面试官' },
@@ -112,7 +117,7 @@ function applyResults(list: { memberId: string; success: boolean; message: strin
   }
 }
 
-async function runBatch(memberIds: string[]) {
+async function runBatch(memberIds: string[], reason: string, proof?: string) {
   if (!clubId.value) {
     toast.error('工作空间参数无效')
     return false
@@ -121,6 +126,8 @@ async function runBatch(memberIds: string[]) {
     action: selectedType.value,
     memberIds,
     interviewerId: selectedType.value === 'assign_interviewer' ? interviewerId.value : undefined,
+    reason: reason || undefined,
+    reauthProof: proof,
   })
   if (result.kind === 'completed') {
     applyResults(result.data.results)
@@ -132,20 +139,42 @@ async function runBatch(memberIds: string[]) {
 }
 
 async function execute() {
+  confirmError.value = ''
+  retryingIds.value = []
+  if (!confirmReason.value.trim() || confirmReason.value.trim().length < 5) {
+    confirmError.value = '请填写批量执行原因（至少 5 字）'
+  }
+  confirmOpen.value = true
+}
+
+async function confirmExecute(proof?: string) {
+  const reason = confirmReason.value.trim()
+  if (!reason || reason.length < 5) {
+    confirmError.value = '请填写批量执行原因（至少 5 字）'
+    return
+  }
+  confirmOpen.value = false
   step.value = 'execute'
   executing.value = true
   results.value = []
-  const ok = await runBatch(selectedItems.value)
+  // 重试模式仅重跑失败项；普通执行跑全量选中项
+  const targets = retryingIds.value.length ? retryingIds.value : selectedItems.value
+  const ok = await runBatch(targets, reason, proof)
   executing.value = false
+  retryingIds.value = []
   if (ok) step.value = 'result'
   else step.value = 'preview'
 }
 
-async function retryFailed() {
-  retrying.value = true
-  const failed = results.value.filter((r) => !r.success).map((r) => r.id)
-  await runBatch(failed)
-  retrying.value = false
+// 重试失败项：proof 为一次性凭证，旧 proof 已被首次执行消费，必须重新走重认证确认流程
+function retryFailed() {
+  retryingIds.value = results.value.filter((r) => !r.success).map((r) => r.id)
+  confirmError.value = ''
+  confirmOpen.value = true
+}
+
+function cancelConfirm() {
+  confirmError.value = ''
 }
 
 function reset() {
@@ -162,9 +191,22 @@ const batchSelected = computed<BatchItem[]>(() =>
   }),
 )
 
+// 确认弹窗影响范围：重试模式展示失败项，普通执行展示全量选中项
+const confirmTargets = computed<BatchItem[]>(() =>
+  retryingIds.value.length
+    ? retryingIds.value.map((id) => {
+        const c = candidates.value.find((a) => a.id === id)
+        return { id, label: c ? `${c.name}（${c.studentId}）` : id }
+      })
+    : batchSelected.value,
+)
+
 const batchResults = computed<PartialResult[]>(() =>
   results.value.map((r) => ({ id: r.id, label: r.name, success: r.success, message: r.message })),
 )
+
+// 本次执行的目标总数（重试模式为失败项数，普通执行为全量选中数），用于进度展示
+const executingTotal = computed(() => (retryingIds.value.length ? retryingIds.value.length : selectedItems.value.length))
 </script>
 
 <template>
@@ -286,14 +328,13 @@ const batchResults = computed<PartialResult[]>(() =>
     <!-- Step 3: 执行中 -->
     <div v-else-if="step === 'execute'" class="text-center py-12">
       <div class="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-      <p class="text-sm text-text-secondary">正在逐项执行...（{{ results.length }}/{{ selectedItems.length }}）</p>
+      <p class="text-sm text-text-secondary">正在逐项执行...（{{ results.length }}/{{ executingTotal }}）</p>
     </div>
 
     <!-- Step 4: 结果 -->
     <div v-else-if="step === 'result'">
       <PartialSuccess
         :results="batchResults"
-        :retrying="retrying"
         class="mb-4"
         @retry="retryFailed"
       />
@@ -307,5 +348,28 @@ const batchResults = computed<PartialResult[]>(() =>
         </button>
       </div>
     </div>
+
+    <HighRiskConfirm
+      v-model:open="confirmOpen"
+      :title="`批量${batchTypes.find((b) => b.type === selectedType)?.label || '执行'}${retryingIds.length ? '（重试失败项）' : ''}`"
+      :description="retryingIds.length ? `将重试 ${retryingIds.length} 个失败项，请重新完成身份验证后提交。` : `将对 ${selectedItems.length} 名对象执行批量操作，提交后请勿关闭页面。`"
+      :targets="confirmTargets"
+      impact-summary="批量执行会立即影响所选对象，触发状态变更与通知；执行后可在结果页查看失败项并单独重试。"
+      confirm-label="确认执行"
+      reauth-required
+      :executing="executing"
+      :error-message="confirmError"
+      @confirm="confirmExecute"
+      @cancel="cancelConfirm"
+    >
+      <template #extra>
+        <label class="block text-sm font-medium text-text-primary mb-1.5">执行原因（必填，至少 5 字，用于审计）</label>
+        <input
+          v-model="confirmReason"
+          class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+          placeholder="执行原因：例如社团开放日集中发送邀请"
+        />
+      </template>
+    </HighRiskConfirm>
   </div>
 </template>

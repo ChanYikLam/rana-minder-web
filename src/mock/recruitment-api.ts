@@ -12,6 +12,8 @@ type RawReq = any
 type RawRes = any
 import { resolveMockUser, getPermissions, getWorkspace, USER_APPLICANT_MAP, mockUsers, type MockUser } from './auth'
 import { pushNotification, userIdOfApplicant, userIdOfMember, userIdOfName } from './notifications'
+import { writeAuditLog } from './db-audit'
+import { assertHighRisk, trackAccessEvent } from './governance'
 import * as rdb from './db-recruitment'
 import * as db from './db'
 import * as formdb from './db-forms'
@@ -108,8 +110,19 @@ function businessError(message: string) {
   }
 }
 
-/** 无权限（HTTP 403 + IFC-ERR-003） */
-function forbidden() {
+/** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
+function forbidden(url?: string, method: string = 'post') {
+  if (url) {
+    const user = resolveMockUser(url)
+    trackAccessEvent({
+      actorId: user.id,
+      actorName: user.name,
+      method,
+      path: (url.split('?')[0] || url),
+      outcome: 'forbidden',
+      at: Date.now(),
+    })
+  }
   return {
     statusCode: 403,
     body: { code: 'IFC-ERR-003', message: '您没有执行此操作的权限', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
@@ -127,12 +140,23 @@ function notFound(message = '请求的内容不存在或已被移除') {
 const ok = (data: unknown) => ({ code: 0, data })
 
 /** 申请人身份解析：USER_APPLICANT_MAP 命中直接用；其余已登录用户按学号复用/注册申请人档案，
- * 使其可报名其他社团招新与联合活动（Issue-4.0-2：不再排除管理角色，干事/负责人/人事/面试官同为在校学生）
- * 本社报名本社的拦截由 apply 端点按目标社团成员关系校验（isExistingMember → 422），双端语义一致 */
-function actorApplicantId(user: MockUser): string | null {
+ * 使其可报名其他社团招新与联合活动（Issue-4.0-2：不再排除管理角色，干事/负责人/人事/面试官同为在校学生）。
+ * 管理角色（super_admin/club_leader/hr/department_leader/interviewer）在报名端点携带目标社团上下文
+ * （opts.clubId，普通招新）或宽松模式（opts.allowAnyRole，联合活动）时放行，
+ * 由端点层 per-club 成员判断兜底（本社团成员 → 422；跨社团 → 200 动态注册 u-auto-* 档案）。
+ * 本社报名本社的拦截由 apply 端点按目标社团成员关系校验（isExistingMember → 422），双端语义一致。
+ * 不传 opts 时回退「全局首个角色」，旧调用点（面试/候选人查询等）行为不变。 */
+function actorApplicantId(
+  user: MockUser,
+  opts?: { clubId?: string; allowAnyRole?: boolean },
+): string | null {
   const mapped = USER_APPLICANT_MAP[user.id]
   if (mapped) return mapped
   if (!user.studentId) return null
+  if (!opts?.clubId && !opts?.allowAnyRole) {
+    const primaryRole = user.roles[0]?.role
+    if (primaryRole !== 'member' && primaryRole !== 'applicant') return null
+  }
   return rdb.ensureApplicantProfile(user.studentId, user.name || '')
 }
 
@@ -200,8 +224,8 @@ function result(r: { ok: boolean; error?: string; data?: unknown }) {
 }
 
 /** 查询候选人所用 applicantId */
-function applicantIdOf(url: string): string | null {
-  return actorApplicantId(resolveMockUser(url))
+function applicantIdOf(url: string, opts?: { clubId?: string; allowAnyRole?: boolean }): string | null {
+  return actorApplicantId(resolveMockUser(url), opts)
 }
 
 /** 当前操作者成员信息（用于评价人、确认人等署名）；
@@ -487,15 +511,27 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
       return result(rdb.cancelActivity(query.activityId, input.reason, !!input.confirmAcceptedSync))
     },
   },
-  // 强制结束（平台）
+  // 强制结束（平台；P1-011 高风险命令 recruitment_force_complete：重认证 + 原因 + 审计）
   {
     url: '/api/admin/recruitment/:activityId/force-complete',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const input = unwrap(body) as { reason?: string }
-      if (!input.reason?.trim()) return businessError('强制结束必须填写原因')
-      return result(rdb.forceCompleteActivity(query.activityId, input.reason))
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const input = unwrap(body) as { reason?: string; reauthProof?: string }
+      const gate = assertHighRisk('recruitment_force_complete', input, resolveMockUser(url)?.id)
+      if (gate) return gate
+      const r = rdb.forceCompleteActivity(query.activityId, input.reason!)
+      if (r.ok) {
+        writeAuditLog({
+          actorName: resolveMockUser(url).name,
+          action: '强制结束招新活动',
+          targetType: '招新活动',
+          targetId: query.activityId,
+          detail: `强制结束：${input.reason?.trim()}`,
+          scope: 'platform',
+        })
+      }
+      return result(r)
     },
   },
   // 报名通道操作（open/close/pause/resume/reopen）
@@ -650,10 +686,10 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     url: '/api/activity/recruitment/:activityId/apply',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      const applicantId = applicantIdOf(url)
-      if (!applicantId) return forbidden()
       const act = rdb.findAnyActivity(query.activityId)
       if (!act) return notFound('活动不存在')
+      const applicantId = applicantIdOf(url, { clubId: act.clubId })
+      if (!applicantId) return forbidden()
       const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
       const isExistingMember = db.members.some(
         (m) => m.clubId === act.clubId
@@ -678,8 +714,17 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     url: '/api/activity/recruitment/:activityId/draft',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      const applicantId = applicantIdOf(url)
+      const act = rdb.findAnyActivity(query.activityId)
+      if (!act) return notFound('活动不存在')
+      const applicantId = applicantIdOf(url, { clubId: act.clubId })
       if (!applicantId) return forbidden()
+      const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
+      const isExistingMember = db.members.some(
+        (m) => m.clubId === act.clubId
+          && m.studentId === studentId
+          && (m.status === 'active' || m.status === 'pending_effective'),
+      )
+      if (isExistingMember) return businessError('本社团成员无需报名本社团招新')
       const input = unwrap(body) as { answers?: Record<string, unknown>; formData?: Record<string, unknown>; formAnswers?: Record<string, unknown> }
       const r = rdb.saveApplicationDraft(query.activityId, applicantId, { answers: input.answers ?? input.formData ?? input.formAnswers })
       if (!r.ok) return businessError(r.error || '保存失败')
@@ -692,7 +737,9 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     url: '/api/activity/recruitment/:activityId/apply/withdraw',
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      const applicantId = applicantIdOf(url)
+      const act = rdb.findAnyActivity(query.activityId)
+      if (!act) return notFound('活动不存在')
+      const applicantId = applicantIdOf(url, { clubId: act.clubId })
       if (!applicantId) return forbidden()
       const r = rdb.withdrawApplicationSubmission(query.activityId, applicantId)
       return result(r)
@@ -703,7 +750,9 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     url: '/api/activity/recruitment/:activityId/apply',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      const applicantId = applicantIdOf(url)
+      const act = rdb.findAnyActivity(query.activityId)
+      if (!act) return notFound('活动不存在')
+      const applicantId = applicantIdOf(url, { clubId: act.clubId })
       if (!applicantId) return forbidden()
       rdb.applyAdjustmentTimeouts(query.activityId)
       const app = rdb.findApplication(query.activityId, applicantId)
@@ -724,7 +773,9 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     url: '/api/activity/recruitment/:activityId/withdraw',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      const applicantId = applicantIdOf(url)
+      const act = rdb.findAnyActivity(query.activityId)
+      if (!act) return notFound('活动不存在')
+      const applicantId = applicantIdOf(url, { clubId: act.clubId })
       if (!applicantId) return forbidden()
       const input = unwrap(body) as { confirm?: boolean }
       return result(rdb.withdrawApplication(query.activityId, applicantId, !!input.confirm))
@@ -1213,11 +1264,20 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
           if (anyPublished) status = 'published'
           else if (shown) status = 'concluded'
           else if (anyEvaluating) status = 'evaluating'
+          // Issue-4.0-1: 展示轮次/面试时间上下文（最近一场未取消面试）
+          const interviews = rdb.recruitmentInterviews
+            .filter((i) => i.activityId === query.activityId && i.applicantId === app.applicantId && i.status !== 'cancelled')
+            .sort((x, y) => ((x.startAt || '').localeCompare(y.startAt || '')))
+          const lastInterview = interviews[interviews.length - 1]
+          const roundName = act?.rounds.find((r) => r.id === lastInterview?.roundId)?.name || ''
           return {
             id: app.id, applicantId: app.applicantId, applicantName: app.applicantName,
             departmentName: app.preferences[0]?.departmentName || '', status,
             rating: shown?.rating ?? null, comment: shown?.comment || '',
             concludedAt: shown?.updatedAt || null, concludedBy: shown?.authorName || null,
+            // Issue-4.0-1: 返回真实评价主键（rev-xxx）供 conclude 提交；id 保持申请 ID 兼容既有前端
+            reviewId: shown?.id ?? null,
+            roundName, interviewAt: lastInterview?.startAt ?? null,
             peerViewLocked,
             reviews: peerViewLocked ? [] : sorted.map((r) => ({
               authorName: r.authorName, authorRole: r.authorRole, comment: r.comment,
@@ -1237,9 +1297,15 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
       if (!canManageRec(url, query.clubId) && !canInterview(url, query.clubId)) return forbidden()
       const input = unwrap(body) as { rating?: number; comment?: string }
-      // reviewId 对应 recruitmentReviews.id（如 rev-001），需先定位到 applicantId
+      // reviewId 优先按 recruitmentReviews.id（rev-xxx）定位；兼容按申请 ID（app-xxx）定位（Issue-4.0-1 契约对齐）
       const review = rdb.recruitmentReviews.find((r) => r.id === query.reviewId && r.activityId === query.activityId)
-      const applicantId = review?.applicantId
+      let applicantId = review?.applicantId
+      if (!applicantId) {
+        const appByApplicationId = rdb.recruitmentApplications.find(
+          (a) => a.id === query.reviewId && a.activityId === query.activityId,
+        )
+        applicantId = appByApplicationId?.applicantId
+      }
       const app = applicantId
         ? rdb.recruitmentApplications.find((a) => a.applicantId === applicantId && a.activityId === query.activityId)
         : undefined
@@ -1696,15 +1762,27 @@ const jointHandlers: MockMethod[] = [
       return result(rdb.submitJointEndConfirm(query.jointId, query._mock_club || query.clubId, resolveMockUser(url).name))
     },
   },
-  // 平台强制关闭
+  // 平台强制关闭（P1-011 高风险命令 joint_force_close：重认证 + 原因 + 审计）
   {
     url: '/api/admin/joint/:jointId/force-close',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      if (!isPlatformAdmin(url)) return forbidden()
-      const input = unwrap(body) as { reason?: string }
-      if (!input.reason?.trim()) return businessError('强制关闭必须填写原因')
-      return result(rdb.forceCloseJointActivity(query.jointId, input.reason))
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const input = unwrap(body) as { reason?: string; reauthProof?: string }
+      const gate = assertHighRisk('joint_force_close', input, resolveMockUser(url)?.id)
+      if (gate) return gate
+      const r = rdb.forceCloseJointActivity(query.jointId, input.reason!)
+      if (r.ok) {
+        writeAuditLog({
+          actorName: resolveMockUser(url).name,
+          action: '强制关闭联合活动',
+          targetType: '联合活动',
+          targetId: query.jointId,
+          detail: `强制关闭：${input.reason?.trim()}`,
+          scope: 'platform',
+        })
+      }
+      return result(r)
     },
   },
   // 平台强制停用社团
@@ -1767,10 +1845,25 @@ const jointHandlers: MockMethod[] = [
     url: '/api/activity/joint/:jointId/apply',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      const applicantId = applicantIdOf(url)
+      const applicantId = applicantIdOf(url, { allowAnyRole: true })
       if (!applicantId) return forbidden()
       rdb.autoAdvanceJointDeadlines(query.jointId)
       const input = unwrap(body) as { consented: boolean; allowJointAdjustment: boolean; volunteerClubIds?: string[]; answers?: Record<string, unknown>; preferences?: { departmentId: string; departmentName: string }[] }
+      const studentId = rdb.applicantStudentIdOf(applicantId) || resolveMockUser(url).studentId || ''
+      // 按「最终生效的志愿社团集合」校验：显式传入时用传入值；未传时与 submitJointApplication 语义一致，默认志愿全部参与社团，
+      // 避免不传 volunteerClubIds 时绕过「已是该社团成员」校验把本社团志愿进去
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      const effectiveVolunteerClubIds = input.volunteerClubIds !== undefined
+        ? input.volunteerClubIds
+        : ja.clubs.map((c) => c.clubId)
+      const blocked = effectiveVolunteerClubIds.find((vid) =>
+        db.members.some(
+          (m) => m.clubId === vid && m.studentId === studentId
+            && (m.status === 'active' || m.status === 'pending_effective'),
+        ),
+      )
+      if (blocked) return businessError('您已是该社团成员，无需再次志愿')
       const r = rdb.submitJointApplication(query.jointId, applicantId, input)
       return result(r)
     },
@@ -1780,11 +1873,21 @@ const jointHandlers: MockMethod[] = [
     url: '/api/activity/joint/:jointId/draft',
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: unknown }) => {
-      const applicantId = applicantIdOf(url)
+      const applicantId = applicantIdOf(url, { allowAnyRole: true })
       if (!applicantId) return forbidden()
       rdb.autoAdvanceJointDeadlines(query.jointId)
       const me = resolveMockUser(url)
       const input = unwrap(body) as { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[] }
+      if (input.volunteerClubIds !== undefined) {
+        const studentId = rdb.applicantStudentIdOf(applicantId) || me.studentId || ''
+        const blocked = input.volunteerClubIds.find((vid) =>
+          db.members.some(
+            (m) => m.clubId === vid && m.studentId === studentId
+              && (m.status === 'active' || m.status === 'pending_effective'),
+          ),
+        )
+        if (blocked) return businessError('您已是该社团成员，无需再次志愿')
+      }
       const r = rdb.saveJointApplicationDraft(query.jointId, applicantId, me.name, me.studentId, {
         answers: input.answers, volunteerClubIds: input.volunteerClubIds,
         allowJointAdjustment: input.allowJointAdjustment, consented: input.consented, preferences: input.preferences,
@@ -1797,7 +1900,7 @@ const jointHandlers: MockMethod[] = [
     url: '/api/activity/joint/:jointId/apply',
     method: 'get',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      const applicantId = applicantIdOf(url)
+      const applicantId = applicantIdOf(url, { allowAnyRole: true })
       if (!applicantId) return forbidden()
       rdb.autoAdvanceJointDeadlines(query.jointId)
       const app = rdb.findJointApplication(query.jointId, applicantId)
@@ -1810,7 +1913,7 @@ const jointHandlers: MockMethod[] = [
     url: '/api/activity/joint/:jointId/withdraw',
     method: 'post',
     response: ({ url, query }: { url: string; query: Record<string, string> }) => {
-      const applicantId = applicantIdOf(url)
+      const applicantId = applicantIdOf(url, { allowAnyRole: true })
       if (!applicantId) return forbidden()
       const r = rdb.withdrawJointApplication(query.jointId, applicantId)
       return result(r)

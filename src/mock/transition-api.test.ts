@@ -5,8 +5,14 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import * as db from './db'
-import { resetDb } from './reset'
+import { resetDb, resetGovernance } from './reset'
 import { getGroupDetail, clubAccesses } from './db-organization'
+
+/** 通过 /api/auth/reauth 获取当前 mock 用户的重认证 proof（P1-011 高风险命令门禁） */
+function reauthAs(user: string): string {
+  const out = invoke('/api/auth/reauth', 'post', `/api/auth/reauth?_mock_user=${user}`, {})
+  return (out.data as unknown as { proof: string }).proof
+}
 
 /** 走 mock 真实分发路径（mergePathParams 已并入路径参数） */
 function invoke(urlPattern: string, method: string, reqUrl: string, body: unknown = {}): {
@@ -32,13 +38,16 @@ function plan(candidates?: { memberId: string; name: string; currentTitle: strin
 describe('换届执行：职位 Group 成员同步（ORG-001/017，API 层）', () => {
   beforeEach(() => {
     resetDb()
+    resetGovernance()
   })
 
   it('无负责人候选人：leaderCandidate 为空态分支生效——负责人资格与 Group 保持不变', () => {
     const saved = plan([{ memberId: 'mem-002', name: '王浩然', currentTitle: '副部长', proposedTitle: '部长', department: '技术部' }])
     expect(saved.code).toBe(0)
 
-    const out = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {})
+    const out = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {
+      input: { reason: '换届交接处理中', reauthProof: reauthAs('leader') },
+    })
     expect(out.code).toBe(0)
     expect(out.data?.results).toHaveLength(1)
     expect(out.data?.results?.[0]).toMatchObject({ memberId: 'mem-002', targetTitle: '部长', success: true })
@@ -55,7 +64,9 @@ describe('换届执行：职位 Group 成员同步（ORG-001/017，API 层）', 
     const saved = plan([{ memberId: 'mem-005', name: '刘子豪', currentTitle: '干事', proposedTitle: '负责人', department: '技术部' }])
     expect(saved.code).toBe(0)
 
-    const out = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {})
+    const out = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {
+      input: { reason: '换届交接处理中', reauthProof: reauthAs('leader') },
+    })
     expect(out.code).toBe(0)
     expect(out.data?.results?.[0]).toMatchObject({ memberId: 'mem-005', targetTitle: '负责人', success: true })
 
@@ -68,8 +79,10 @@ describe('换届执行：职位 Group 成员同步（ORG-001/017，API 层）', 
     expect(getGroupDetail('grp-lead-001')!.members.map((m) => m.id)).toContain('mem-005')
     expect(db.transitionState.currentLeader).toMatchObject({ id: 'mem-005', title: '负责人' })
 
-    // 重复执行：已执行不可再来
-    const again = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {})
+    // 重复执行：已执行不可再来（仍须带 proof，门禁先于业务校验通过，再被业务拒绝）
+    const again = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {
+      input: { reason: '换届交接处理中', reauthProof: reauthAs('leader') },
+    })
     expect(again.statusCode).toBe(422)
     expect(again.body?.message).toContain('换届已执行')
   })
@@ -90,7 +103,9 @@ describe('换届执行：职位 Group 成员同步（ORG-001/017，API 层）', 
       const saved = plan([{ memberId: 'mem-005', name: '刘子豪', currentTitle: '干事', proposedTitle: '负责人', department: '技术部' }])
       expect(saved.code).toBe(0)
 
-      const out = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {})
+      const out = invoke('/api/org/:clubId/members/transition', 'post', '/api/org/club-001/members/transition?_mock_user=leader', {
+        input: { reason: '换届交接处理中', reauthProof: reauthAs('leader') },
+      })
       expect(out.code).toBe(0)
       // 旧任移出与新任加入均遇悬空 → 两项留痕；结果本身仍按宽容语义推进
       expect(out.data?.syncFailures).toEqual(expect.arrayContaining([

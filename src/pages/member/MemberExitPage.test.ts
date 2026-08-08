@@ -21,7 +21,7 @@ import MemberExitPage from './MemberExitPage.vue'
 
 const exitData = {
   items: [{ id: 'mem-001', name: '陈雨桐', departmentName: '技术部', title: '干事', status: 'active' }],
-  resignations: [{ id: 'res-1', memberName: '王浩然', departmentName: '技术部', title: '副部长', reason: '学业', status: 'under_review' }],
+  resignations: [{ id: 'res-1', memberName: '王浩然', departmentName: '技术部', title: '副部长', reason: '学业', status: 'under_review', withdrawAvailable: true }],
   exitRequestsWithFlags: [
     { id: 'ex-1', memberId: 'mem-002', memberName: '赵子墨', reason: '毕业', status: 'under_review', submittedAt: '2026-01-01T00:00:00.000Z', decidedAt: null, decidedBy: null, confirmedAt: null, dueAt: '2026-01-04', canWithdraw: true },
     { id: 'ex-2', memberId: 'mem-001', memberName: '陈雨桐', reason: '转学', status: 'approved', submittedAt: '2026-01-01T00:00:00.000Z', decidedAt: '2026-01-02T00:00:00.000Z', decidedBy: '李四', confirmedAt: null, dueAt: '2026-01-04', canConfirm: true },
@@ -178,6 +178,41 @@ describe('MemberExitPage 成员退出与移除', () => {
 
     expect(wrapper.text()).toContain('赵子墨')
     expect(wrapper.findAll('button').some((b) => b.text().includes('批准'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('本人（非审批人）可撤回自己的辞职申请（MEM-002）', async () => {
+    // 普通成员无 club:resignation:approve → 展示「我的辞职申请」并可撤回
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'member', ['club:member:view-self'], 'u-member')
+    mockGet.mockResolvedValue({ kind: 'completed', data: exitData })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('我的辞职申请')
+    expect(wrapper.text()).toContain('王浩然')
+    // 作用域限定在「我的辞职申请」卡片内（页面另有退出申请的撤回按钮）
+    const resignCard = wrapper.findAll('.card').find((c) => c.text().includes('王浩然'))!
+    await resignCard.findAll('button').find((b) => b.text().includes('撤回申请'))!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/members/resignation/res-1/withdraw')
+    expect(toast.success).toHaveBeenCalledWith('已撤回辞职申请')
+    wrapper.unmount()
+  })
+
+  it('审批人视角展示辞职撤回按钮（withdrawAvailable）', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'hr', ['club:member:manage', 'club:resignation:approve'], 'u-hr')
+    mockGet.mockResolvedValue({ kind: 'completed', data: exitData })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(MemberExitPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('辞职申请审批')
+    const resignCard = wrapper.findAll('.card').find((c) => c.text().includes('王浩然'))!
+    expect(resignCard.findAll('button').some((b) => b.text().includes('撤回申请'))).toBe(true)
     wrapper.unmount()
   })
 })

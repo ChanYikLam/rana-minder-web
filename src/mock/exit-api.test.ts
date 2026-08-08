@@ -8,7 +8,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import { resolveMockUser, clearMockSession } from './auth'
-import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb } from './reset'
+import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb, resetGovernance } from './reset'
 import * as db from './db'
 import { sysNotifications } from './notifications'
 
@@ -59,6 +59,14 @@ function pushActiveMember(id: string, name: string): string {
   return id
 }
 
+/** 通过 /api/auth/reauth 获取当前 mock 用户的重认证 proof（P1-011 高风险命令门禁） */
+async function reauthAs(user: string): Promise<string> {
+  resolveMockUser('/api/auth/session?_mock_user=' + user)
+  const out = await invokeHandler('/api/auth/reauth', 'post', '/api/auth/reauth?_mock_user=' + user, {})
+  expect(out.statusCode).toBe(200)
+  return (out.body.data as unknown as { proof: string }).proof
+}
+
 describe('成员退出/移除 API（action 分支 + 权限口径）', () => {
   beforeEach(() => {
     clearMockSession()
@@ -67,6 +75,7 @@ describe('成员退出/移除 API（action 分支 + 权限口径）', () => {
     resetCorrections()
     resetDb()
     resetOrgDb()
+    resetGovernance()
   })
 
   it('mark_exit：软退出——仅记 exitedAt，保留职位档案，不产生「被移出」通知', async () => {
@@ -88,12 +97,19 @@ describe('成员退出/移除 API（action 分支 + 权限口径）', () => {
     expect(sysNotifications.filter((n) => n.body.includes('被移出'))).toHaveLength(0)
   })
 
-  it('remove：硬移除——结束职位 + 通知「被移出」', async () => {
+  it('remove：硬移除——P1-011 缺 proof 被 401；带 proof + 原因 → 结束职位 + 通知「被移出」', async () => {
     // mem-002 映射到 user-interviewer-001，可收到站内通知；leader 有移除权限
     resolveMockUser('/api/auth/session?_mock_user=leader')
+    // 缺 proof → 401（member_remove 高风险命令门禁）
+    const noProof = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit', {
+      input: { memberId: 'mem-002', action: 'remove', reason: '违规移除该成员' },
+    })
+    expect(noProof.statusCode).toBe(401)
+
     const before = sysNotifications.length
+    const proof = await reauthAs('leader')
     const out = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit', {
-      input: { memberId: 'mem-002', action: 'remove', reason: '违规' },
+      input: { memberId: 'mem-002', action: 'remove', reason: '违规移除该成员', reauthProof: proof },
     })
     expect(out.statusCode).toBe(200)
     const member = db.findMember('club-001', 'mem-002')!
@@ -101,6 +117,18 @@ describe('成员退出/移除 API（action 分支 + 权限口径）', () => {
     expect(member.positions.every((p) => p.status !== 'active')).toBe(true)
     expect(sysNotifications.length).toBeGreaterThan(before)
     expect(sysNotifications.some((n) => n.body.includes('被移出'))).toBe(true)
+  })
+
+  it('mark_exit：软退出免重认证门禁（非高风险），无 proof 亦成功', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const out = await invokeHandler('/api/org/:clubId/members/exit', 'post', '/api/org/club-001/members/exit', {
+      input: { memberId: 'mem-002', action: 'mark_exit', reason: '主动退出' },
+    })
+    expect(out.statusCode).toBe(200)
+    const data = out.body.data as { memberId: string; action: string; status: string }
+    expect(data).toMatchObject({ memberId: 'mem-002', action: 'mark_exit' })
+    const member = db.findMember('club-001', 'mem-002')!
+    expect(member.status).toBe('exited')
   })
 
   it('普通成员（view-self）可访问成员退出 GET，且 canWithdraw 仅 under_review', async () => {

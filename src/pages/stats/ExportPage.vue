@@ -22,6 +22,11 @@ const confirmOpen = ref(false)
 const executing = ref(false)
 const succeeded = ref(false)
 const errorMessage = ref('')
+const downloadConfirmOpen = ref(false)
+const downloadTarget = ref<ExportTask | null>(null)
+const downloadReason = ref('')
+const downloadError = ref('')
+const downloading = ref(false)
 const pollingTimers = new Map<string, ReturnType<typeof setInterval>>()
 
 function resetConfirmState() {
@@ -111,25 +116,47 @@ function openCreateConfirm() {
   confirmOpen.value = true
 }
 
-async function handleDownload(task: ExportTask) {
+function openDownloadConfirm(task: ExportTask) {
   if (task.status !== 'completed' || !task.downloadUrl) {
     toast.info('导出尚未完成，请稍候')
     return
   }
-  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/exports/${task.id}/download`, {})
+  downloadTarget.value = task
+  downloadReason.value = ''
+  downloadError.value = ''
+  downloadConfirmOpen.value = true
+}
+
+async function confirmDownload(proof?: string) {
+  const task = downloadTarget.value
+  if (!task || downloading.value) return
+  const reason = downloadReason.value.trim()
+  if (!reason || reason.length < 5) {
+    downloadError.value = '请填写下载原因（至少 5 字）'
+    return
+  }
+  downloading.value = true
+  downloadError.value = ''
+  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/exports/${task.id}/download`, {
+    reason,
+    reauthProof: proof,
+  })
+  downloading.value = false
   if (result.kind === 'completed') {
     if (openAuthorizedDownload(result.data.downloadUrl)) {
       toast.success('已开始下载')
+      downloadConfirmOpen.value = false
+      downloadTarget.value = null
       return
     }
-    toast.error('下载地址无效，请重新获取')
+    downloadError.value = '下载地址无效，请重新获取'
     return
   }
   if (result.kind === 'accepted') {
-    toast.info('导出正在生成中，请稍后重试')
+    downloadError.value = '导出正在生成中，请稍后重试'
     return
   }
-  toast.error('下载失败，请稍后重试')
+  downloadError.value = '下载失败，请稍后重试'
 }
 
 const apiScope = ref<string | null>(null)
@@ -204,7 +231,7 @@ onBeforeUnmount(stopAllPolling)
             <button
               v-if="task.status === 'completed' && task.downloadUrl"
               class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover"
-              @click="handleDownload(task)"
+              @click="openDownloadConfirm(task)"
             >
               <Download :size="14" /> 下载
             </button>
@@ -227,5 +254,27 @@ onBeforeUnmount(stopAllPolling)
       @confirm="handleCreate"
       @cancel="resetConfirmState"
     />
+
+    <HighRiskConfirm
+      v-model:open="downloadConfirmOpen"
+      :title="`下载导出文件：${downloadTarget?.type ?? ''}`"
+      description="下载会校验当前权限与作用域，每次下载会写入审计日志。"
+      :targets="downloadTarget ? [{ id: downloadTarget.id, label: downloadTarget.type, detail: `${formatSize(downloadTarget.fileSize)} · ${downloadTarget.downloadUrl}` }] : []"
+      impact-summary="下载属于高风险命令：含敏感字段或大量成员信息时会触发重认证；请填写下载原因用于审计。"
+      confirm-label="确认下载"
+      reauth-required
+      :executing="downloading"
+      :error-message="downloadError"
+      @confirm="confirmDownload"
+    >
+      <template #extra>
+        <label class="block text-sm font-medium text-text-primary mb-1.5">下载原因（必填，至少 5 字，用于审计）</label>
+        <input
+          v-model="downloadReason"
+          class="w-full px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+          placeholder="下载原因：例如学期末名单归档"
+        />
+      </template>
+    </HighRiskConfirm>
   </PageStateBoundary>
 </template>

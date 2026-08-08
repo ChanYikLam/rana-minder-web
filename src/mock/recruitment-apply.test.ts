@@ -92,6 +92,15 @@ describe('成员提交报名权限链路（member 身份）', () => {
     expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
   })
 
+  it('member 对本社团招新保存草稿同样被拒绝（422，与 apply 语义一致）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    const out = await invokeHandler('/api/activity/recruitment/:activityId/draft', ownClubUrl, {
+      formData: { f1: '草稿内容' },
+    })
+    expect(out.statusCode).toBe(422)
+    expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
+  })
+
   it('member 报名成功推送通知到其账号（user-member-001）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(applyUrl, otherClubUrl, {
@@ -110,7 +119,7 @@ describe('成员提交报名权限链路（member 身份）', () => {
     const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001', 'club-002'],
+      volunteerClubIds: ['club-002'],
       answers: {},
     })
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
@@ -140,23 +149,114 @@ describe('成员提交报名权限链路（member 身份）', () => {
     })
     expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
     const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === '20210003')
-    expect(app, 'hr 申请未落库').toBeTruthy()
+    expect(app, 'hr 报名别的社团未落库').toBeTruthy()
     expect(app!.applicantId.startsWith('u-auto-')).toBe(true)
     expect(app!.applicantName).toBe('李思颖')
   })
 
-  it('管理角色（leader）报名所在社团招新仍被业务规则拒绝（422，非 403）', async () => {
+  it('管理角色（hr）报名自己任职社团被业务规则拒绝（422，非 403）', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    const out = await invokeHandler(applyUrl, ownClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-001' }],
+      allowAdjustment: true,
+    })
+    expect(out.statusCode).toBe(422)
+    expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
+  })
+
+  it('管理角色（hr）对自己任职社团保存草稿同样被拒绝（422，与 apply 语义一致）', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    const out = await invokeHandler('/api/activity/recruitment/:activityId/draft', ownClubUrl, {
+      formData: { f1: '草稿内容' },
+    })
+    expect(out.statusCode).toBe(422)
+    expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
+  })
+
+  it('面试官（interviewer）报名别的社团招新成功（200），动态注册申请人档案并落库', async () => {
+    const INTERVIEWER_KEY = mockUserKeyOf('user-interviewer-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${INTERVIEWER_KEY}`)
+    const out = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002' && a.studentId === '20210004')
+    expect(app, 'interviewer 报名别的社团未落库').toBeTruthy()
+    expect(app!.applicantId.startsWith('u-auto-')).toBe(true)
+  })
+
+  it('多社团管理用户（user-leader-001，club-001 社长 + club-002 hr）报名任一任职社团均被业务规则拒绝（422）', async () => {
     const LEADER_KEY = mockUserKeyOf('user-leader-001')
     resolveMockUser(`/api/auth/session?_mock_user=${LEADER_KEY}`)
-    for (const url of [ownClubUrl, otherClubUrl]) {
-      const out = await invokeHandler(applyUrl, url, {
-        formData: {},
-        preferences: [{ departmentId: 'dept-001' }],
-        allowAdjustment: true,
-      })
-      expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
-      expect(String(out.body.message)).toContain('本社团成员无需报名本社团招新')
-    }
+    // club-001：roles[0] 为 club_leader（管理角色）→ 按目标社团判断后走 per-club 成员兜底 → 422
+    const own = await invokeHandler(applyUrl, ownClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-001' }],
+      allowAdjustment: true,
+    })
+    expect(own.statusCode, JSON.stringify(own.body)).toBe(422)
+    expect(String(own.body.message)).toContain('本社团成员无需报名本社团招新')
+    // club-002：roles[1] 为 hr（管理角色）→ 按目标社团判断后走 per-club 成员兜底 → 422
+    const other = await invokeHandler(applyUrl, otherClubUrl, {
+      formData: {},
+      preferences: [{ departmentId: 'dept-101' }],
+      allowAdjustment: true,
+    })
+    expect(other.statusCode, JSON.stringify(other.body)).toBe(422)
+    expect(String(other.body.message)).toContain('本社团成员无需报名本社团招新')
+  })
+
+  it('管理角色（hr）联合报名：志愿自己任职社团被业务规则拒绝（422），仅志愿其他社团成功（200）', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft')
+    // 志愿含自己社团（club-001，hr 任职且为成员）→ 422
+    const blocked = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-001', 'club-002'],
+      answers: {},
+    })
+    expect(blocked.statusCode, JSON.stringify(blocked.body)).toBe(422)
+    expect(String(blocked.body.message)).toContain('您已是该社团成员，无需再次志愿')
+    // 仅志愿其他社团（club-002）→ 200
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-002'],
+      answers: {},
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210003')
+    expect(app, 'hr 联合申请未落库').toBeTruthy()
+    expect(app!.volunteerClubIds).toEqual(['club-002'])
+  })
+
+  it('管理角色（hr）联合报名不传 volunteerClubIds 时按最终生效志愿集合拦截本社团（422，防绕过）', async () => {
+    const HR_KEY = mockUserKeyOf('user-hr-001')
+    resolveMockUser(`/api/auth/session?_mock_user=${HR_KEY}`)
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft')
+    // 不传 volunteerClubIds：submitJointApplication 会默认志愿全部参与社团（含 club-001）→ 按最终生效集合校验应被拦截
+    const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      answers: {},
+    })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
+    expect(String(out.body.message)).toContain('您已是该社团成员，无需再次志愿')
+    // 显式仅志愿其他社团（club-002）仍放行（200）
+    const okOut = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
+      consented: true,
+      allowJointAdjustment: true,
+      volunteerClubIds: ['club-002'],
+      answers: {},
+    })
+    expect(okOut.statusCode, JSON.stringify(okOut.body)).toBe(200)
   })
 
   it('平台管理员（super_admin）作为在校学生亦可报名其他社团招新（200）', async () => {
@@ -200,17 +300,17 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     const first = await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
       answers: { f1: '自我介绍初稿', f2: '计算机协会' },
-      volunteerClubIds: ['club-001'],
-      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+      volunteerClubIds: ['club-002'],
+      preferences: [{ departmentId: 'dept-101', departmentName: '嵌入式组' }],
       allowJointAdjustment: true,
       consented: true,
     })
     expect(first.statusCode, JSON.stringify(first.body)).toBe(200)
     const second = await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
       answers: { f1: '自我介绍修改稿', f2: '计算机协会', f3: '经历补充' },
-      volunteerClubIds: ['club-001', 'club-002'],
+      volunteerClubIds: ['club-002'],
       preferences: [
-        { departmentId: 'dept-002', departmentName: '运营部' },
+        { departmentId: 'dept-102', departmentName: '硬件组' },
         { departmentId: 'dept-101', departmentName: '嵌入式组' },
       ],
       allowJointAdjustment: false,
@@ -221,9 +321,9 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     const app = drafts[0]
     expect(app.status).toBe('draft')
     expect(app.answers).toEqual({ f1: '自我介绍修改稿', f2: '计算机协会', f3: '经历补充' })
-    expect(app.volunteerClubIds).toEqual(['club-001', 'club-002'])
+    expect(app.volunteerClubIds).toEqual(['club-002'])
     expect(app.preferences).toEqual([
-      { departmentId: 'dept-002', departmentName: '运营部' },
+      { departmentId: 'dept-102', departmentName: '硬件组' },
       { departmentId: 'dept-101', departmentName: '嵌入式组' },
     ])
     expect(app.allowJointAdjustment).toBe(false)
@@ -267,10 +367,10 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     const out = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       preferences: [
-        { departmentId: 'dept-001', departmentName: '技术部' },
-        { departmentId: 'dept-002', departmentName: '运营部' },
+        { departmentId: 'dept-101', departmentName: '嵌入式组' },
+        { departmentId: 'dept-102', departmentName: '硬件组' },
       ],
       answers: { f1: '最终自我介绍', f2: '计算机协会' },
     })
@@ -278,8 +378,8 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
     const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
     expect(app!.answers).toEqual({ f1: '最终自我介绍', f2: '计算机协会' })
     expect(app!.preferences).toEqual([
-      { departmentId: 'dept-001', departmentName: '技术部' },
-      { departmentId: 'dept-002', departmentName: '运营部' },
+      { departmentId: 'dept-101', departmentName: '嵌入式组' },
+      { departmentId: 'dept-102', departmentName: '硬件组' },
     ])
   })
 
@@ -305,14 +405,14 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
   it('显式提交空意向社团时清空部门意向（区分 undefined 与空数组）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
-      volunteerClubIds: ['club-001'],
-      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+      volunteerClubIds: ['club-002'],
+      preferences: [{ departmentId: 'dept-101', departmentName: '嵌入式组' }],
     })
     const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
-    expect(app!.preferences).toEqual([{ departmentId: 'dept-001', departmentName: '技术部' }])
+    expect(app!.preferences).toEqual([{ departmentId: 'dept-101', departmentName: '嵌入式组' }])
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
       volunteerClubIds: [],
-      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+      preferences: [{ departmentId: 'dept-101', departmentName: '嵌入式组' }],
     })
     expect(app!.volunteerClubIds, '空数组应清空意向社团而非回退全部').toEqual([])
     expect(app!.preferences, '空意向社团时部门意向应被清空').toEqual([])
@@ -321,8 +421,8 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
   it('草稿清空意向社团后提交仍保持为空（submit 层与 draft 层同语义）', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
-      volunteerClubIds: ['club-001'],
-      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+      volunteerClubIds: ['club-002'],
+      preferences: [{ departmentId: 'dept-101', departmentName: '嵌入式组' }],
     })
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
       volunteerClubIds: [],
@@ -361,17 +461,17 @@ describe('联合报名草稿可修改与共享报名表（bugC4）', () => {
   it('部门名称以服务端权威数据为准并按 departmentId 去重', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       preferences: [
-        { departmentId: 'dept-001', departmentName: '伪造部门名' },
-        { departmentId: 'dept-001', departmentName: '再次伪造' },
-        { departmentId: 'dept-002', departmentName: '运营部' },
+        { departmentId: 'dept-101', departmentName: '伪造部门名' },
+        { departmentId: 'dept-101', departmentName: '再次伪造' },
+        { departmentId: 'dept-102', departmentName: '硬件组' },
       ],
     })
     const app = rdb.jointApplications.find((a) => a.jointId === 'jnt-001' && a.studentId === '20210005')
     expect(app!.preferences, '伪造名称应归一化为权威名称且去重').toEqual([
-      { departmentId: 'dept-001', departmentName: '技术部' },
-      { departmentId: 'dept-002', departmentName: '运营部' },
+      { departmentId: 'dept-101', departmentName: '嵌入式组' },
+      { departmentId: 'dept-102', departmentName: '硬件组' },
     ])
   })
 
@@ -433,16 +533,16 @@ describe('联合报名撤销提交', () => {
   it('撤销成功：回到草稿、清空提交时间、清理未排期面试与待审结论，可修改后重新提交', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
     await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', {
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       answers: { f1: '初版自我介绍', f3: '初版经历' },
     })
     const memberId = memberJointApp().applicantId
     const submit = await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       answers: { f1: '初版自我介绍', f3: '初版经历' },
-      preferences: [{ departmentId: 'dept-001', departmentName: '技术部' }],
+      preferences: [{ departmentId: 'dept-101', departmentName: '嵌入式组' }],
     })
     expect(submit.statusCode, JSON.stringify(submit.body)).toBe(200)
     expect(rdb.jointInterviews.some((i) => i.jointId === 'jnt-001' && i.applicantId === memberId)).toBe(true)
@@ -476,18 +576,18 @@ describe('联合报名撤销提交', () => {
 
   it('草稿态不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
-    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-002'] })
     const out = await invokeHandler(withdrawUrl, '/api/activity/joint/jnt-001/withdraw', {})
     expect(out.statusCode, JSON.stringify(out.body)).toBe(422)
   })
 
   it('报名通道关闭时不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
-    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-002'] })
     await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       answers: { f1: '自我介绍' },
     })
     const ja = rdb.jointActivities.find((a) => a.id === 'jnt-001')!
@@ -499,11 +599,11 @@ describe('联合报名撤销提交', () => {
 
   it('撤销时作废未关联结论的待处理邀请', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
-    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-002'] })
     await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       answers: { f1: '自我介绍' },
     })
     const applicantId = memberJointApp().applicantId
@@ -523,11 +623,11 @@ describe('联合报名撤销提交', () => {
 
   it('已安排面试时不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
-    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-002'] })
     await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       answers: { f1: '自我介绍' },
     })
     const interview = rdb.jointInterviews.find((i) => i.jointId === 'jnt-001' && i.applicantId === memberJointApp().applicantId)!
@@ -539,11 +639,11 @@ describe('联合报名撤销提交', () => {
 
   it('活动已结束（closed/cancelled/force_closed）时不可撤销', async () => {
     resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
-    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-001'] })
+    await invokeHandler(jointDraftUrl, '/api/activity/joint/jnt-001/draft', { volunteerClubIds: ['club-002'] })
     await invokeHandler(jointApplyUrl, '/api/activity/joint/jnt-001/apply', {
       consented: true,
       allowJointAdjustment: true,
-      volunteerClubIds: ['club-001'],
+      volunteerClubIds: ['club-002'],
       answers: { f1: '自我介绍' },
     })
     const ja = rdb.jointActivities.find((a) => a.id === 'jnt-001')!
