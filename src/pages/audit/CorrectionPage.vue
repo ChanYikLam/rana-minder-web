@@ -158,7 +158,7 @@ onMounted(loadData)
             撤回人：{{ item.withdrawnBy }} · {{ formatDate(item.withdrawnAt) }}
           </p>
 
-          <div v-if="view !== 'self' && item.status === 'submitted'" class="mt-3 flex gap-2">
+          <div v-if="view !== 'self' && (item.status === 'submitted' || item.status === 'overdue')" class="mt-3 flex gap-2">
             <button
               class="px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60"
               :disabled="actingId !== null"
@@ -174,7 +174,7 @@ onMounted(loadData)
               {{ actingId === item.id ? '处理中...' : '拒绝' }}
             </button>
           </div>
-          <div v-if="view === 'self' && item.status === 'submitted'" class="mt-3">
+          <div v-if="view === 'self' && (item.status === 'submitted' || item.status === 'overdue')" class="mt-3">
             <button
               class="text-xs text-danger hover:underline disabled:opacity-60"
               :disabled="actingId !== null"

@@ -4,8 +4,9 @@ import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
 const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
+const routeState = vi.hoisted(() => ({ value: { path: '/me/corrections', meta: { view: 'self' } } }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ path: '/me/corrections', meta: { view: 'self' } }),
+  useRoute: () => routeState.value,
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
@@ -91,6 +92,25 @@ describe('CorrectionPage 事实纠错', () => {
       targetType: '成员信息', targetId: 'mem-001', reason: '手机号有误', evidence: '截图',
     })
     expect(mockToastSuccess).toHaveBeenCalledWith('纠错申请已提交，等待审核')
+    wrapper.unmount()
+  })
+
+  it('overdue 状态：审批视角显示批准/拒绝按钮（SM-AUD-001 允许 overdue -> approve/reject）', async () => {
+    routeState.value = { path: '/org/club-001/corrections', meta: { view: 'manage' }, params: { clubId: 'club-001' } }
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ ...correction, status: 'overdue' }] } })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('批准'))).toBe(true)
+    expect(wrapper.findAll('button').some((b) => b.text().includes('拒绝'))).toBe(true)
+    wrapper.unmount()
+    routeState.value = { path: '/me/corrections', meta: { view: 'self' } }
+  })
+
+  it('overdue 状态：本人视角显示撤回按钮（SM-AUD-001 允许 overdue -> withdraw）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ ...correction, status: 'overdue' }] } })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('撤回申请'))).toBe(true)
     wrapper.unmount()
   })
 })
