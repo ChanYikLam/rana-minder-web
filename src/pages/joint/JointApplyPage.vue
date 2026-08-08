@@ -45,6 +45,7 @@ interface MyApplication {
   allowJointAdjustment?: boolean
   consented?: boolean
   submittedAt?: string | null
+  withdrawBlockedReason?: string | null
 }
 
 const CHANNEL_STATUS_TONE_CLASS: Record<string, string> = {
@@ -425,12 +426,13 @@ async function handleWithdraw() {
           type="button"
           class="mt-4 w-full h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2 disabled:opacity-60"
           :class="confirmWithdraw ? 'text-danger border-danger' : ''"
-          :disabled="withdrawing"
+          :disabled="withdrawing || !!myApplication?.withdrawBlockedReason"
           @click="requestWithdrawConfirm"
         >
           {{ withdrawing ? '撤销中...' : confirmWithdraw ? '再次点击确认撤销' : '撤销提交' }}
         </button>
-        <p class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后在报名通道关闭前重新提交。</p>
+        <p v-if="myApplication?.withdrawBlockedReason" class="text-xs text-danger mt-2">{{ myApplication.withdrawBlockedReason }}</p>
+        <p v-else class="text-xs text-text-secondary mt-2">撤销后报名内容将保留为草稿，可修改后在报名通道关闭前重新提交。</p>
       </Card>
 
       <Card v-else-if="hasArchived && !applyDenied" class="mb-4">

@@ -1233,6 +1233,30 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
 }
 
 /**
+ * 撤销报名提交的预判原因（只读，不执行变更）：与 withdrawApplicationSubmission 同源校验，
+ * 供「我的申请」详情返回 withdrawBlockedReason，前端据此禁用撤销按钮并内联展示原因。
+ */
+export function withdrawApplicationBlockedReason(activityId: string, applicantId: string): string | null {
+  const a = findAnyActivity(activityId)
+  if (!a) return '活动不存在'
+  if (a.status !== 'in_progress') return '活动当前不在报名期，无法撤销提交'
+  if (a.channelStatus !== 'open') return '报名通道已关闭，无法撤销提交'
+  if (new Date(a.deadline).getTime() < Date.now()) return '报名已截止，无法撤销提交'
+  const app = findApplication(activityId, applicantId)
+  if (!app) return '申请不存在'
+  const t = assertTransition('SM-REC-003', app.status, 'draft', 'withdraw_submission')
+  if (!t.ok) return t.reason || '仅已提交的申请可撤销'
+  // 同一活动+申请人可跨多轮存多条面试记录，须全量校验：任一非 pending_selection/cancelled 即视为已排期/已产生结果
+  const committedInterview = recruitmentInterviews.some(
+    (i) => i.activityId === activityId && i.applicantId === applicantId && i.status !== 'pending_selection' && i.status !== 'cancelled',
+  )
+  if (committedInterview) return '已安排面试，无法撤销提交'
+  const activePath = Object.values(app.paths).find((p) => p.status !== 'evaluating')
+  if (activePath) return '已有审核结论，无法撤销提交'
+  return null
+}
+
+/**
  * 撤销报名提交（普通招新专用，与联合版 withdrawJointApplication 同规范）：
  * 仅通道开放且未截止时可撤销；已有排期/进行中/已完结面试（多轮面试全量校验）或形成审核结论时拒绝；
  * 撤销时清理全部轮次的未排期面试记录、作废待处理录取邀请、清空未形成结论的部门路径，
@@ -1893,6 +1917,27 @@ export function submitJointApplication(jointId: string, applicantId: string, inp
     }
   }
   return ok(app)
+}
+
+/**
+ * 撤销联合报名提交的预判原因（只读，不执行变更）：与 withdrawJointApplication 同源校验，
+ * 供「我的联合申请」详情返回 withdrawBlockedReason。
+ */
+export function withdrawJointApplicationBlockedReason(jointId: string, applicantId: string): string | null {
+  const ja = findJoint(jointId)
+  if (!ja) return '联合活动不存在'
+  if (['closed', 'cancelled', 'force_closed'].includes(ja.status)) return '联合活动已结束，无法撤销提交'
+  if (ja.channelStatus !== 'open') return '联合报名通道已关闭，无法撤销提交'
+  if (new Date(ja.deadline).getTime() < Date.now()) return '联合报名已截止，无法撤销提交'
+  const app = findJointApplication(jointId, applicantId)
+  if (!app) return '联合申请不存在'
+  const t = assertTransition('SM-JNT-003', app.status, 'draft', 'withdraw')
+  if (!t.ok) return t.reason || '仅已提交的联合申请可撤销'
+  const interview = jointInterviews.find((i) => i.jointId === jointId && i.applicantId === applicantId)
+  if (interview && interview.status !== 'pending_selection') return '已安排面试，无法撤销提交'
+  const activeConclusion = jointConclusions.find((c) => c.jointId === jointId && c.applicantId === applicantId && c.status !== 'pending')
+  if (activeConclusion) return '已有审核结论，无法撤销提交'
+  return null
 }
 
 /**

@@ -205,7 +205,7 @@ async function handleSubmitReview() {
     toast.success('评价已提交')
     await loadReviews()
   } else {
-    const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请稍后重试'
+    const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
     toast.error(message)
   }
 }

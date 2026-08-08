@@ -154,7 +154,7 @@ describe('ReviewPage 评审页', () => {
       rating: 4,
       comment: '',
     })
-    // 失败不再静默：仅 toast 提示（操作结果反馈走独立反馈层，页面内联不再承载）
+    // 失败不再静默：操作结果走向独立 Toast 层（不内联进评价正文）
     expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
     expect(wrapper.text()).not.toContain('申请人不存在')
   })

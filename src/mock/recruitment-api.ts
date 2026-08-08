@@ -778,6 +778,7 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
         adjustmentReason: app.adjustmentReason, notQualifiedReason: app.notQualifiedReason,
         eligibilitySnapshot: app.eligibilitySnapshot,
         paths: app.paths, version: app.version,
+        withdrawBlockedReason: rdb.withdrawApplicationBlockedReason(query.activityId, applicantId),
       })
     },
   },
@@ -1922,7 +1923,7 @@ const jointHandlers: MockMethod[] = [
       rdb.autoAdvanceJointDeadlines(query.jointId)
       const app = rdb.findJointApplication(query.jointId, applicantId)
       if (!app) return notFound('尚未提交联合申请')
-      return ok(app)
+      return ok({ ...app, withdrawBlockedReason: rdb.withdrawJointApplicationBlockedReason(query.jointId, applicantId) })
     },
   },
   // 撤销联合报名提交（回到草稿，通道开放且未安排面试/审核时可用）
