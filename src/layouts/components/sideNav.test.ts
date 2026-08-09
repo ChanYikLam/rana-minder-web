@@ -55,6 +55,20 @@ describe('buildClubGroups 权限过滤导航树', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0].label).toBe('社团配置')
   })
+
+  it('普通成员（仅 club:member:view-self）：成员与组织组仅保留只读成员列表与个人退出入口，管理项被过滤', () => {
+    const can = (p?: string, permissionAny?: string[]) =>
+      p === 'club:member:view-self' || (permissionAny?.includes('club:member:view-self') ?? false)
+
+    const groups = buildClubGroups('c1', can)
+
+    const memberGroup = groups.find((g) => g.label === '成员与组织')!
+    expect(memberGroup).toBeTruthy()
+    expect(memberGroup.items.map((i) => i.path)).toEqual([
+      '/org/c1/members',
+      '/org/c1/members/exit',
+    ])
+  })
 })
 
 describe('ADMIN_NAV 平台导航结构', () => {

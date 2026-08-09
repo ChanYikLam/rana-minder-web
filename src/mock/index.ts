@@ -154,6 +154,11 @@ function canManageMembers(user: MockUser, clubId: string): boolean {
   return getPermissions(user, clubId).includes('club:member:manage')
 }
 
+/** 成员列表/详情可见性：本社团成员（含普通 member）可查看；平台管理员跨社团可查看 */
+function canViewClubMembers(user: MockUser, clubId: string): boolean {
+  return actorMemberId(user, clubId) !== null || getPermissions(user, '').includes('platform:club:manage')
+}
+
 /** 部门负责人的数据范围：其当前任职部门名；其余角色返回 null（全社团） */
 function departmentScopeFor(user: MockUser, clubId: string): string | null {
   if (user.roles.find((r) => r.clubId === clubId)?.role !== 'department_leader') return null
@@ -1461,6 +1466,9 @@ const memberHandlers: MockMethod[] = [
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      // 仅本社团成员可查看成员列表（普通成员多社团时按目标社团判定；非本社团成员 403）
+      if (!canViewClubMembers(user, query.clubId)) return forbidden()
+      const isManager = canManageMembers(user, query.clubId)
       const scope = departmentScopeFor(user, query.clubId)
       // MEM-004：任期到期提醒（派生投递，interval 桶去重——模拟时钟驱动，管理端拉取时交付）
       deliverTermEndReminders(query.clubId)
@@ -1488,11 +1496,12 @@ const memberHandlers: MockMethod[] = [
         count: activeMembers.filter((m) => m.positions.some((p) => p.departmentId === d.id && p.status === 'active')).length,
       }))
       const zeroDeptCount = activeMembers.filter((m) => !m.positions.some((p) => p.status === 'active')).length
-      const pendingCounts = {
+      // 管理待办仅管理角色可见；普通成员只读列表不暴露管理数据
+      const pendingCounts = isManager ? {
         departmentApply: db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review' && (!scope || a.targetDeptName === scope)).length,
         appointments: db.appointmentCommands.filter((c) => c.clubId === query.clubId && (c.status === 'pending_exec' || c.status === 'initiator_lost_rights' || c.status === 'reconfirmed') && (!scope || c.departmentName === scope)).length,
         transition: !scope && db.transitionState.candidates.length + db.transitionState.appointments.length > 0 && db.transitionState.executedAt === null ? 1 : 0,
-      }
+      } : null
       return {
         code: 0,
         data: {
@@ -1500,7 +1509,9 @@ const memberHandlers: MockMethod[] = [
             const activePositions = m.positions.filter((p) => p.status === 'active')
             return {
               id: m.id, name: m.name, studentId: m.studentId,
-              email: m.email, phone: m.phone,
+              // 普通成员只读：不返回联系方式
+              email: isManager ? m.email : null,
+              phone: isManager ? m.phone : null,
               positions: activePositions.map((p) => ({
                 departmentId: p.departmentId,
                 departmentName: p.departmentName,
@@ -2274,17 +2285,23 @@ if (!r.ok) return businessError(r.error || '操作失败')
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      // 仅本社团成员可查看成员详情（普通成员多社团时按目标社团判定；非本社团成员 403）
+      if (!canViewClubMembers(user, query.clubId)) return forbidden()
       const member = db.getMemberProfile(query.clubId, query.memberId)
       if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       }
+      const isManager = canManageMembers(user, query.clubId)
       return {
         code: 0,
         data: {
           id: member.id, clubId: member.clubId, studentId: member.studentId,
-          name: member.name, email: member.email, phone: member.phone,
+          name: member.name,
+          // 普通成员只读：不返回联系方式
+          email: isManager ? member.email : null,
+          phone: isManager ? member.phone : null,
           status: member.status, joinedAt: member.joinedAt, exitedAt: member.exitedAt,
           positions: member.positions,
           tenures: member.tenures,

@@ -5,6 +5,7 @@ import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/compo
 import { get, post } from '@/services/client'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { ArrowLeft, Save, Send, FileWarning, CheckCircle2, AlertTriangle, Archive, FileText } from '@lucide/vue'
 import { applicationStatusLabel, isEditableStatus, terminalStatusHint } from '@/lib/recruitment-status'
 import DynamicForm from '@/components/form/DynamicForm.vue'
@@ -137,6 +138,8 @@ async function handleWithdraw() {
     if (result.kind === 'completed') {
       toast.success('已撤销提交，可修改后重新提交')
       await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('撤销已受理，正在后台处理')
     } else if (result.kind === 'rejected' && result.error) {
       toast.error((result.error as { message?: string }).message || '撤销失败，请稍后重试')
     } else {
@@ -249,6 +252,8 @@ async function handleSaveDraft() {
   if (result.kind === 'completed') {
     const savedAt = (result.data as { savedAt?: string }).savedAt
     toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('草稿已受理保存，正在后台处理')
   } else {
     toast.error((result as { error?: { message?: string } }).error?.message || '草稿保存失败，请稍后重试')
   }
@@ -292,6 +297,8 @@ async function handleSubmit() {
 
   if (result.kind === 'completed') {
     router.push('/me/ongoing')
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('申请已受理，正在后台处理，请稍后刷新查看结果')
   } else if (result.kind === 'rejected') {
     toast.error(result.error.message)
   } else {

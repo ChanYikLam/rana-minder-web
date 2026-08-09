@@ -108,4 +108,20 @@ describe('JointManagePage 联合活动管理', () => {
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('操作失败'))
     wrapper.unmount()
   })
+
+  it('draft 状态不显示“发布活动”按钮（SM-JNT-001 需先 confirm_all -> confirmed）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { ...detail, status: 'draft' } })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('发布活动'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('confirmed 状态显示“发布活动”按钮（可 first_publish）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { ...detail, status: 'confirmed' } })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('发布活动'))).toBe(true)
+    wrapper.unmount()
+  })
 })

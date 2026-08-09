@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
+import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { Calendar, Mail, Phone, Building2, Clock, AlertTriangle, History, ArrowLeft } from '@lucide/vue'
 
@@ -21,9 +22,12 @@ interface MemberDetail {
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionViewStore()
 const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const member = ref<MemberDetail | null>(null)
+
+const canViewContact = computed(() => session.hasPermission('club:member:manage') || session.hasPermission('club:audit:view'))
 
 async function loadData() {
   state.value = 'loading'
@@ -38,7 +42,9 @@ async function loadData() {
       state.value = 'empty'
     }
   } else if (result.kind === 'accepted') {
-    state.value = 'loading'
+    // P1-1：202/IFC-ERR-014 异步受理（数据生成中）不再永久卡 loading，降级为可重试的 error 态
+    state.value = 'error'
+    pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
   } else {
     const code = result.error.code as ErrorCode
     pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -80,8 +86,8 @@ onMounted(loadData)
         </div>
         <p class="text-xs text-text-secondary mb-3">当前成员关系由 Casdoor Group 权威维护，本页面记录任期、异动与审批历史。</p>
         <div class="grid grid-cols-2 gap-3 text-sm">
-          <div class="flex items-center gap-2 text-text-secondary"><Mail :size="16" /> {{ member.email }}</div>
-          <div class="flex items-center gap-2 text-text-secondary"><Phone :size="16" /> {{ member.phone }}</div>
+          <div v-if="canViewContact && member.email" class="flex items-center gap-2 text-text-secondary"><Mail :size="16" /> {{ member.email }}</div>
+          <div v-if="canViewContact && member.phone" class="flex items-center gap-2 text-text-secondary"><Phone :size="16" /> {{ member.phone }}</div>
           <div class="flex items-center gap-2 text-text-secondary"><Calendar :size="16" /> 加入于 {{ formatDate(member.joinedAt) }}</div>
           <div v-if="member.exitedAt" class="flex items-center gap-2 text-text-secondary"><Clock :size="16" /> 退出于 {{ formatDate(member.exitedAt) }}</div>
         </div>
