@@ -4,7 +4,11 @@ import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
 const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
-const routeState = vi.hoisted(() => ({ value: { path: '/me/corrections', meta: { view: 'self' }, params: {} } }))
+// routeState 须在 hoisted 内定义，否则 vi.mock 提升时访问不到默认值
+const { routeState, defaultRouteState } = vi.hoisted(() => {
+  const defaultRouteState = { path: '/me/corrections', meta: { view: 'self' }, params: {} }
+  return { routeState: { value: { ...defaultRouteState } }, defaultRouteState }
+})
 vi.mock('vue-router', () => ({
   useRoute: () => routeState.value,
 }))
@@ -34,7 +38,11 @@ describe('CorrectionPage 事实纠错', () => {
     mockToastError.mockReset()
     vi.clearAllMocks()
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    // P3：统一复位 routeState，避免新增用例遗漏复位导致视角串扰
+    routeState.value = { ...defaultRouteState }
+  })
 
   it('个人视图：加载纠错列表', async () => {
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [correction] } })
@@ -103,7 +111,6 @@ describe('CorrectionPage 事实纠错', () => {
     expect(wrapper.findAll('button').some((b) => b.text().includes('批准'))).toBe(true)
     expect(wrapper.findAll('button').some((b) => b.text().includes('拒绝'))).toBe(true)
     wrapper.unmount()
-    routeState.value = { path: '/me/corrections', meta: { view: 'self' }, params: {} }
   })
 
   it('overdue 状态：本人视角显示撤回按钮（SM-AUD-001 允许 overdue -> withdraw）', async () => {
@@ -111,6 +118,19 @@ describe('CorrectionPage 事实纠错', () => {
     const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.findAll('button').some((b) => b.text().includes('撤回申请'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('审计轨迹：withdrawn 状态展示“已撤回”而非“已拒绝”（P2-2）', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { items: [{ ...correction, status: 'withdrawn', decidedBy: '张明远', decidedAt: '2026-08-02T04:00:00Z', withdrawnBy: '张三', withdrawnAt: '2026-08-03T04:00:00Z' }] },
+    })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('审批人：张明远')
+    expect(wrapper.text()).toContain('已撤回')
+    expect(wrapper.text()).not.toContain('已拒绝')
     wrapper.unmount()
   })
 })
