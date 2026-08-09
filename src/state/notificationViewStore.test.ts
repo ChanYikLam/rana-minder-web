@@ -153,11 +153,26 @@ describe('notificationViewStore 已读操作', () => {
     expect(store.unreadCount).toBe(1)
   })
 
-  it('markRead 失败：显式抛出', async () => {
+  it('markRead 失败：返回错误码且不抛异常', async () => {
     const store = useNotificationViewStore()
     mocks.markRead.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
 
-    await expect(store.markRead('n-1')).rejects.toThrow('mark read failed')
+    const code = await store.markRead('n-1')
+
+    expect(code).toBe('IFC-ERR-016')
+  })
+
+  it('markRead 失败（forbidden）：返回错误码且不改变已读状态', async () => {
+    const store = useNotificationViewStore()
+    store.items = [makeItem('n-1', false)]
+    store.unreadCount = 1
+    mocks.markRead.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+
+    const code = await store.markRead('n-1')
+
+    expect(code).toBe('IFC-ERR-003')
+    expect(store.items[0].read).toBe(false)
+    expect(store.unreadCount).toBe(1)
   })
 
   it('markAllRead：全部置读并清零未读数', async () => {

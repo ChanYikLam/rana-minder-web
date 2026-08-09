@@ -37,7 +37,8 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     }
   }
 
-  async function markRead(id: string) {
+  /** 返回 null 表示成功；失败时返回错误码（不抛异常，避免 openDetail 等调用方产生 unhandled rejection） */
+  async function markRead(id: string): Promise<ErrorCode | null> {
     const result = await notificationApi.markRead(id)
     if (result.kind === 'completed') {
       const item = items.value.find((n) => n.id === id)
@@ -45,9 +46,9 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
         item.read = true
         unreadCount.value = Math.max(0, unreadCount.value - 1)
       }
-    } else {
-      throw new Error('mark read failed')
+      return null
     }
+    return errorCodeOf(result)
   }
 
   /** 写操作失败语义固定为 error（不区分 forbidden），返回错误码仅供调用方日志/提示使用 */

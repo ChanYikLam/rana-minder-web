@@ -65,7 +65,12 @@ const selected = computed<NotificationDetailData | null>(() => {
 function openDetail(id: string) {
   const item = notifStore.items.find((n) => n.id === id)
   if (!item) return
-  if (!item.read) notifStore.markRead(id)
+  if (!item.read) {
+    // 标记已读失败仅记录日志，不打断查看详情（避免 unhandled rejection）
+    void notifStore.markRead(id).then((code) => {
+      if (code) console.error('标记已读失败:', code)
+    })
+  }
   selectedId.value = id
 }
 

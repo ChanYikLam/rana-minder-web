@@ -104,4 +104,29 @@ describe('NotificationCenterPage 通知中心', () => {
     await flushPromises()
     expect(wrapper.find('.psb').attributes('data-state')).toBe('error')
   })
+
+  it('markRead 失败：不打断查看详情且无 unhandled rejection（openDetail 不依赖 throw）', async () => {
+    mocks.list.mockResolvedValue({
+      kind: 'completed',
+      data: { items: [{ id: 'n1', type: 'application', title: '报名状态更新', body: '你的报名已通过', read: false, createdAt: '2026-08-01T04:00:00Z', link: null, clubName: '计算机协会' }], nextCursor: null },
+    })
+    mocks.getUnreadCount.mockResolvedValue({ kind: 'completed', data: { count: 1 } })
+    mocks.markRead.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    const wrapper = mount(NotificationCenterPage, {
+      global: {
+        stubs: {
+          ...pageStubs,
+          // 转发 Card 点击以触发 openDetail；NotificationDetail 透出标题以验证详情已打开
+          Card: { template: '<div class="card" @click="$emit(\'click\')"><slot /></div>' },
+          NotificationDetail: { template: '<div class="ntf-detail">{{ notification?.title }}</div>', props: ['notification'] },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('报名状态更新')
+    await wrapper.find('.card').trigger('click')
+    await flushPromises()
+    // 打开详情后页面仍处于 normal 态，未被错误打断
+    expect(wrapper.find('.ntf-detail').text()).toContain('报名状态更新')
+  })
 })
