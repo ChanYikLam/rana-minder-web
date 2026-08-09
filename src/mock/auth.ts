@@ -95,7 +95,7 @@ const seedMockUsers: Record<string, MockUser> = {
       },
       {
         clubId: 'club-002',
-        clubName: '网络协会',
+        clubName: '电子设计协会',
         role: 'hr',
         permissions: [
           'club:dashboard:view',
@@ -273,7 +273,7 @@ const seedMockUsers: Record<string, MockUser> = {
   applicant2: {
     id: 'user-applicant-002',
     studentId: '20240002',
-    name: '陈雨桐',
+    name: '陈雨彤',
     email: 'applicant2@example.edu.cn',
     phone: '13800000002',
     avatar: null,

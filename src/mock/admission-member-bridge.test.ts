@@ -27,7 +27,7 @@ describe('P0-002 录取接受后成员创建桥（SM-MEM 关系模型）', () =>
 
     const member = listMembers('club-001').find((m) => m.studentId === '20240002')
     expect(member, '接受录取后必须产生成员记录').toBeTruthy()
-    expect(member!.name).toBe('陈雨桐')
+    expect(member!.name).toBe('陈雨彤')
     expect(member!.status).toBe('active')
     expect(member!.joinedAt).toBe(inv.acceptedAt)
     expect(member!.positions.map((p) => p.departmentName)).toContain('技术部')
@@ -121,7 +121,7 @@ describe('P0-002 录取接受后成员创建桥（SM-MEM 关系模型）', () =>
     expect(inv.casdoorSync).toBe('processing')
 
     // 模拟成员创建失败（学号缺失）
-    APPLICANT_PROFILES['u-002'] = { name: '陈雨桐', studentId: '' }
+    APPLICANT_PROFILES['u-002'] = { name: '陈雨彤', studentId: '' }
     const failed = confirmRecInvitationSync('rinv-001')
     expect(failed.ok).toBe(false)
     expect(inv.casdoorSync).toBe('processing')
@@ -129,7 +129,7 @@ describe('P0-002 录取接受后成员创建桥（SM-MEM 关系模型）', () =>
     expect(listMembers('club-001').some((m) => m.studentId === '20240002')).toBe(false)
 
     // 恢复后重试成功
-    APPLICANT_PROFILES['u-002'] = { name: '陈雨桐', studentId: '20240002' }
+    APPLICANT_PROFILES['u-002'] = { name: '陈雨彤', studentId: '20240002' }
     const retried = confirmRecInvitationSync('rinv-001')
     expect(retried.ok).toBe(true)
     expect(inv.casdoorSync).toBe('confirmed')
