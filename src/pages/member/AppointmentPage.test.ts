@@ -57,4 +57,15 @@ describe('AppointmentPage 任命调岗免职', () => {
     expect(wrapper.findAll('button').some((b) => b.text().includes('重新确认'))).toBe(true)
     wrapper.unmount()
   })
+
+  it('reconfirmed 状态：不显示取消按钮（SM-ORG-003 无 cancel 事件，P1-4）', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { ...appointData, commands: [{ id: 'apc-3', memberName: '王浩然', action: 'appoint', status: 'reconfirmed', scheduledAt: null }] },
+    })
+    const wrapper = mount(AppointmentPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('取消'))).toBe(false)
+    wrapper.unmount()
+  })
 })
