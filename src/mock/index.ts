@@ -3038,6 +3038,10 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string; reauthProof?: string; previewVersion?: number } } }) => {
       if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      if (query._mock_error === 'IFC-ERR-014') {
+        // P3-2：可注入的异步受理模拟（202/accepted），供联调与页面 accepted 分支验证
+        return { statusCode: 202, body: { code: 'IFC-ERR-014', message: '操作正在处理中，请勿重复提交', data: { taskId: 'mock-task-' + Date.now(), status: 'processing' } } }
+      }
       if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
@@ -3370,6 +3374,10 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reauthProof?: string; previewVersion?: number; reason?: string } } }) => {
       if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      if (query._mock_error === 'IFC-ERR-014') {
+        // P3-2：可注入的异步受理模拟（202/accepted），供联调与页面 accepted 分支验证
+        return { statusCode: 202, body: { code: 'IFC-ERR-014', message: '操作正在处理中，请勿重复提交', data: { taskId: 'mock-task-' + Date.now(), status: 'processing' } } }
+      }
       if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
