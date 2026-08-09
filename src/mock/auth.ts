@@ -48,6 +48,7 @@ const seedMockUsers: Record<string, MockUser> = {
         permissions: [
           'platform:club:manage',
           'platform:form:design',
+          'platform:form:fill',
           'platform:config:manage',
           'platform:audit:view',
           'platform:delete:execute',

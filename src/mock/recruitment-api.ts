@@ -1526,19 +1526,28 @@ if (a.status !== 'in_progress' && a.status !== 'paused') return notFound('活动
     },
   },
   // 表单提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
+  // 统一走新契约（formData + ownerId + IFC-ERR-009 幂等冲突），与
+  // /forms/versions/:formId/submit 同一 db 函数、同一字段命名，避免双契约漂移（P3-4）。
   {
     url: '/api/org/:clubId/forms/:formId/submissions',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: unknown }) => {
-      const input = unwrap(body) as { version?: number; answers?: Record<string, unknown>; idempotencyKey?: string }
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: unknown }) => {
+      const input = unwrap(body) as { version?: number; answers?: Record<string, unknown>; formData?: Record<string, unknown>; idempotencyKey?: string }
+      const formData = input.formData ?? input.answers
       if (!input.version) return businessError('必须指定表单版本')
-      if (!input.answers || typeof input.answers !== 'object') return businessError('answers 不能为空')
+      if (!formData || typeof formData !== 'object') return businessError('formData 不能为空')
       const result = formdb.submitFormSubmission(query.formId, {
         version: input.version,
-        formData: input.answers,
+        formData,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
-      if (!result.ok) return businessError(result.error)
+      if (!result.ok) {
+        if (result.error && result.error.includes('相同操作标识')) {
+          return { statusCode: 409, body: { code: 'IFC-ERR-009', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+        }
+        return businessError(result.error)
+      }
       return ok({
         id: result.data.id,
         formId: query.formId,
