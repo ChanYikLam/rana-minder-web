@@ -37,7 +37,8 @@ export const WORKSPACE_PERMISSIONS: Record<string, string | string[]> = {
 export const ADMIN_PERMISSIONS: Record<string, string> = {
   'P-FORM-admin-list': 'platform:form:design',
   'P-FORM-01-admin': 'platform:form:design',
-  'P-FORM-02-admin': 'platform:form:design',
+  // 填写页使用「可填写」权限而非「设计」权限（P2-2），与表单填写语义一致
+  'P-FORM-02-admin': 'platform:form:fill',
   'P-JNT-admin-list': 'platform:club:manage',
   'P-JNT-05-admin': 'platform:club:manage',
   'P-REC-admin-list': 'platform:club:manage',

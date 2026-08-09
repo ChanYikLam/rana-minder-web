@@ -16,6 +16,18 @@ vi.mock('vue-sonner', () => ({
 
 import FormVersionPage from './FormVersionPage.vue'
 
+const formVersions = [{ version: 2, status: 'published', publishedAt: '2026-08-01T00:00:00Z', fields: [{ id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null }] }]
+
+function setupFormLoad() {
+  mockGet.mockImplementation((path: string) => {
+    if (path === '/org/club-001/forms/form-1') {
+      return Promise.resolve({ kind: 'completed', data: { id: 'form-1', title: '招新报名表', versions: formVersions } })
+    }
+    // my-draft 默认无记录
+    return Promise.resolve({ kind: 'completed', data: null })
+  })
+}
+
 describe('FormVersionPage 表单版本', () => {
   beforeEach(() => {
     mockGet.mockReset()
@@ -25,13 +37,7 @@ describe('FormVersionPage 表单版本', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('加载成功：渲染最新版本表单', async () => {
-    mockGet.mockResolvedValue({
-      kind: 'completed',
-      data: {
-        id: 'form-1', title: '招新报名表',
-        versions: [{ version: 2, status: 'published', publishedAt: '2026-08-01T00:00:00Z', fields: [{ id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null }] }],
-      },
-    })
+    setupFormLoad()
     const wrapper = mount(FormVersionPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(mockGet).toHaveBeenCalledWith('/org/club-001/forms/form-1')
@@ -47,13 +53,7 @@ describe('FormVersionPage 表单版本', () => {
   })
 
   it('P0-1 保存草稿：提交用户填写的 formData（非表单定义 fields），不新建版本', async () => {
-    mockGet.mockResolvedValue({
-      kind: 'completed',
-      data: {
-        id: 'form-1', title: '招新报名表',
-        versions: [{ version: 2, status: 'published', publishedAt: '2026-08-01T00:00:00Z', fields: [{ id: 'f1', type: 'text', label: '姓名', required: true, readonly: false, permission: 'read_write', options: null, description: null, conditionalFieldId: null, conditionalValue: null, arrayFieldTemplateId: null }] }],
-      },
-    })
+    setupFormLoad()
     mockPost.mockResolvedValue({ kind: 'completed', data: { status: 'draft', savedAt: '2026-08-08T00:00:00Z' } })
     const wrapper = mount(FormVersionPage, { global: { stubs: pageStubs } })
     await flushPromises()
@@ -70,5 +70,32 @@ describe('FormVersionPage 表单版本', () => {
     expect((body as { formData: unknown }).formData).toEqual({ f1: '张三' })
     expect((body as { version: number }).version).toBe(2)
     expect((body as { idempotencyKey: string }).idempotencyKey).toBeTruthy()
+  })
+
+  it('P2-1 草稿恢复：加载页面时读取 my-draft 并回填已填内容', async () => {
+    mockGet.mockImplementation((path: string) => {
+      if (path === '/org/club-001/forms/form-1') {
+        return Promise.resolve({ kind: 'completed', data: { id: 'form-1', title: '招新报名表', versions: formVersions } })
+      }
+      return Promise.resolve({ kind: 'completed', data: { id: 'sub-1', version: 2, status: 'draft', data: { f1: '已填草稿' }, submittedAt: '2026-08-08T00:00:00Z' } })
+    })
+    const wrapper = mount(FormVersionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/forms/versions/form-1/my-draft', { version: 2 })
+    const input = wrapper.find('input[type="text"]').element as HTMLInputElement
+    expect(input.value).toBe('已填草稿')
+  })
+
+  it('P1-2 必填校验：必填项为空时提交被拦截，不发起提交请求', async () => {
+    setupFormLoad()
+    const wrapper = mount(FormVersionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 不填必填字段直接提交
+    await wrapper.findAll('button')[1].trigger('click')
+    await flushPromises()
+
+    expect(mockPost).not.toHaveBeenCalled()
   })
 })

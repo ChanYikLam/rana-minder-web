@@ -32,11 +32,26 @@ export interface FormSubmission {
   formId: string
   version: number
   idempotencyKey: string
+  /** 提交人标识（mock 层为当前登录用户 id）：草稿查重与提交升级均按 (formId, version, ownerId) 隔离 */
+  ownerId: string
   /** 提交时版本字段快照：旧提交按原版本还原 */
   fields: FormField[]
   data: Record<string, unknown>
   status: FormSubmissionStatus
   submittedAt: string
+}
+
+/** 稳定序列化：按对象键递归排序后 JSON.stringify，保证相同内容（键序无关）得到相同指纹（P3-1） */
+export function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`
+  }
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    const keys = Object.keys(obj).sort()
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
 }
 
 const now = () => new Date().toISOString()
@@ -342,12 +357,14 @@ export function cloneForm(formId: string, title?: string): Result<{ id: string; 
 /**
  * SM-FORM-002 草稿落库：仅保存/更新 draft 状态的提交记录（不推进状态机）。
  * 与设计器保存草稿（SM-FORM-001，保存表单定义）语义不同：此处保存的是用户填写的表单数据。
- * 同一表单同一版本最多保留一份草稿：重复保存更新既有草稿而非新建；
+ * 草稿按 (formId, version, ownerId) 隔离：同一用户同一表单同一版本最多保留一份草稿，
+ * 重复保存更新既有草稿而非新建；不同用户互不覆盖（P1-1）。
  * 相同 idempotencyKey 幂等更新；已提交记录不可再被草稿覆盖。
+ * 同键不同内容返回 IFC-ERR-009 语义错误（P3-1）。
  */
 export function saveFormSubmissionDraft(
   formId: string,
-  input: { version: number; formData: Record<string, unknown>; idempotencyKey: string }
+  input: { version: number; formData: Record<string, unknown>; idempotencyKey: string; ownerId: string }
 ): Result<FormSubmission> {
   const found = findForm(formId)
   if (!found.ok) return found
@@ -357,21 +374,24 @@ export function saveFormSubmissionDraft(
   if (!v) return err('表单版本不存在')
   if (v.status !== 'published') return err('当前版本未发布，不可保存草稿')
 
-  // 幂等：相同 idempotencyKey 的既有记录直接更新
+  // 幂等：相同 idempotencyKey（含用户维度）的既有记录直接更新
   const byKey = formSubmissions.find(
-    (s) => s.formId === formId && s.idempotencyKey === input.idempotencyKey,
+    (s) => s.formId === formId && s.ownerId === input.ownerId && s.idempotencyKey === input.idempotencyKey,
   )
   if (byKey) {
     if (byKey.status !== 'draft') return err('该草稿已提交，不可再保存')
+    if (stableStringify(byKey.data) !== stableStringify(input.formData)) {
+      return err('相同操作标识对应了不同内容，请刷新后重试')
+    }
     byKey.fields = structuredClone(v.fields)
     byKey.data = structuredClone(input.formData)
     byKey.version = input.version
     return ok(byKey)
   }
 
-  // 同一表单同一版本最多一份草稿：更新既有草稿而非新建
+  // 同一用户同一表单同一版本最多一份草稿：更新既有草稿而非新建（不同用户不互相覆盖）
   const sameVersionDraft = formSubmissions.find(
-    (s) => s.formId === formId && s.version === input.version && s.status === 'draft',
+    (s) => s.formId === formId && s.ownerId === input.ownerId && s.version === input.version && s.status === 'draft',
   )
   if (sameVersionDraft) {
     sameVersionDraft.fields = structuredClone(v.fields)
@@ -385,6 +405,7 @@ export function saveFormSubmissionDraft(
     formId,
     version: input.version,
     idempotencyKey: input.idempotencyKey,
+    ownerId: input.ownerId,
     fields: structuredClone(v.fields),
     data: structuredClone(input.formData),
     status: 'draft',
@@ -394,34 +415,58 @@ export function saveFormSubmissionDraft(
   return ok(submission)
 }
 
+/** 读取当前用户在当前表单版本的草稿/已提交记录（用于刷新后回填，P2-1）；不存在返回 null */
+export function getMyFormSubmission(
+  formId: string,
+  ownerId: string,
+  version: number,
+): Result<{ id: string; version: number; status: FormSubmissionStatus; data: Record<string, unknown>; submittedAt: string } | null> {
+  const found = findForm(formId)
+  if (!found.ok) return found
+  const v = versionOf(found.data, version)
+  if (!v) return err('表单版本不存在')
+  const mine = formSubmissions.find(
+    (s) => s.formId === formId && s.ownerId === ownerId && s.version === version,
+  )
+  if (!mine) return ok(null)
+  return ok({ id: mine.id, version: mine.version, status: mine.status, data: structuredClone(mine.data), submittedAt: mine.submittedAt })
+}
+
 /**
  * SM-FORM-002 提交链路：draft --submit_request--> checking --all_pass--> submitted。
  * 仅允许提交已发布版本；提交内容按该版本字段快照留存（旧提交按原版本还原）；
- * 相同 idempotencyKey 幂等返回既有提交。
+ * 相同 idempotencyKey（含用户维度）幂等返回既有提交。
+ * 同键不同内容返回 IFC-ERR-009 语义错误（P3-1）；草稿升级按 (formId, version, ownerId) 隔离（P1-1）。
  */
 export function submitFormSubmission(
   formId: string,
-  input: { version: number; formData: Record<string, unknown>; idempotencyKey: string }
+  input: { version: number; formData: Record<string, unknown>; idempotencyKey: string; ownerId: string }
 ): Result<FormSubmission> {
   const found = findForm(formId)
   if (!found.ok) return found
   const f = found.data
 
-  // 幂等：相同 idempotencyKey 且非草稿的既有提交直接返回（草稿记录不参与幂等命中，
+  // 幂等：相同 idempotencyKey（含用户维度）且非草稿的既有提交直接返回（草稿记录不参与幂等命中，
   // 否则「先存草稿再提交相同内容」会被草稿“吞掉”，正式提交静默失败、状态仍为 draft）
   const existing = formSubmissions.find(
-    (s) => s.idempotencyKey === input.idempotencyKey && s.status !== 'draft',
+    (s) => s.ownerId === input.ownerId && s.idempotencyKey === input.idempotencyKey && s.status !== 'draft',
   )
-  if (existing) return ok(existing)
+  if (existing) {
+    // 同键不同内容：拒绝幂等返回，按 IFC-ERR-009 语义拦截（相同操作标识对应不同内容）
+    if (stableStringify(existing.data) !== stableStringify(input.formData)) {
+      return err('相同操作标识对应了不同内容，请勿重复提交')
+    }
+    return ok(existing)
+  }
 
   const v = versionOf(f, input.version)
   if (!v) return err('表单版本不存在')
   if (v.status !== 'published') return err('当前版本未发布，不可提交')
 
-  // 同表单同版本的既有草稿：就地升级为正式提交（复用记录，不重复落库），
-  // 避免同一用户「保存草稿后直接提交」产生两条记录
+  // 同一用户同表单同版本的既有草稿：就地升级为正式提交（复用记录，不重复落库），
+  // 避免同一用户「保存草稿后直接提交」产生两条记录；不覆盖其他用户的草稿
   const sameVersionDraft = formSubmissions.find(
-    (s) => s.formId === formId && s.version === input.version && s.status === 'draft',
+    (s) => s.formId === formId && s.ownerId === input.ownerId && s.version === input.version && s.status === 'draft',
   )
   if (sameVersionDraft) {
     sameVersionDraft.data = structuredClone(input.formData)
@@ -439,6 +484,7 @@ export function submitFormSubmission(
     formId,
     version: input.version,
     idempotencyKey: input.idempotencyKey,
+    ownerId: input.ownerId,
     fields: structuredClone(v.fields),
     data: structuredClone(input.formData),
     status: 'draft',

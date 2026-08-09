@@ -102,6 +102,20 @@ function businessError(message: string) {
   }
 }
 
+/** 表单提交/草稿结果统一响应：
+ * - IFC-ERR-009（相同操作标识对应不同内容）→ 409，与 error-map 幂等冲突语义对齐（P3-1）
+ * - 其余错误 → 422 业务拒绝 */
+function formResult(result: { ok: boolean; error?: string; data?: unknown }) {
+  if (result.ok) return { code: 0, data: result.data }
+  if (result.error && result.error.includes('相同操作标识')) {
+    return {
+      statusCode: 409,
+      body: { code: 'IFC-ERR-009', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+    }
+  }
+  return businessError(result.error || '操作不符合业务规则')
+}
+
 /** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
 function forbidden(url?: string, method: string = 'post') {
   if (url) {
@@ -4013,7 +4027,8 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/forms/:formId',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
       const result = formdb.getFormDetail(query.formId)
       if (!result.ok) return businessError(result.error)
       return { code: 0, data: result.data }
@@ -4023,28 +4038,41 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/forms/versions/:formId/draft',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
       const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
       const result = formdb.saveFormSubmissionDraft(query.formId, {
         version: Number(input.version) || 1,
         formData: (input.formData || {}) as Record<string, unknown>,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
-      if (!result.ok) return businessError(result.error)
-      return { code: 0, data: result.data }
+      return formResult(result)
     },
   },
   // 平台表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/admin/forms/versions/:formId/submit',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
       const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
       const result = formdb.submitFormSubmission(query.formId, {
         version: Number(input.version) || 1,
         formData: (input.formData || {}) as Record<string, unknown>,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
+      return formResult(result)
+    },
+  },
+  // 平台表单版本：读取当前用户的草稿/已提交记录（P2-1 草稿恢复）
+  {
+    url: '/api/admin/forms/versions/:formId/my-draft',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const result = formdb.getMyFormSubmission(query.formId, resolveMockUser(url).id, Number(query.version) || 1)
       if (!result.ok) return businessError(result.error)
       return { code: 0, data: result.data }
     },
@@ -4193,28 +4221,38 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/org/:clubId/forms/versions/:formId/draft',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
       const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
       const result = formdb.saveFormSubmissionDraft(query.formId, {
         version: Number(input.version) || 1,
         formData: (input.formData || {}) as Record<string, unknown>,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
-      if (!result.ok) return businessError(result.error)
-      return { code: 0, data: result.data }
+      return formResult(result)
     },
   },
   // 工作空间：表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/org/:clubId/forms/versions/:formId/submit',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
       const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
       const result = formdb.submitFormSubmission(query.formId, {
         version: Number(input.version) || 1,
         formData: (input.formData || {}) as Record<string, unknown>,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
+      return formResult(result)
+    },
+  },
+  // 工作空间：表单版本读取当前用户的草稿/已提交记录（P2-1 草稿恢复）
+  {
+    url: '/api/org/:clubId/forms/versions/:formId/my-draft',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const result = formdb.getMyFormSubmission(query.formId, resolveMockUser(url).id, Number(query.version) || 1)
       if (!result.ok) return businessError(result.error)
       return { code: 0, data: result.data }
     },
