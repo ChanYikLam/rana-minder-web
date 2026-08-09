@@ -7,7 +7,7 @@ import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
-import { Mail, Send, RefreshCw, XCircle, Plus, Users } from '@lucide/vue'
+import { Mail, Send, RefreshCw, XCircle, CheckCircle2, Plus, Users } from '@lucide/vue'
 
 interface InvitationRow {
   id: string; applicantId: string; applicantName: string

@@ -16,6 +16,7 @@ import MembershipInvitePage from './MembershipInvitePage.vue'
 
 describe('MembershipInvitePage 常规入社邀请', () => {
   beforeEach(() => {
+    routeState.value = { params: { clubId: 'club-001' }, meta: { view: 'manage' } }
     mockGet.mockReset()
     mockPost.mockReset()
     vi.clearAllMocks()
@@ -51,6 +52,5 @@ describe('MembershipInvitePage 常规入社邀请', () => {
     expect(wrapper.findAll('button').some((b) => b.text().includes('确认生效'))).toBe(true)
     expect(wrapper.text()).toContain('同步失败')
     wrapper.unmount()
-    routeState.value = { params: { clubId: 'club-001' }, meta: { view: 'manage' } }
   })
 })

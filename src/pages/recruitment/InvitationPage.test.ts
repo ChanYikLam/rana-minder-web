@@ -78,11 +78,16 @@ describe('InvitationPage 招新邀请', () => {
   })
 
   // 新-2：已接受且同步中展示「确认生效」按钮，点击后调用申请人侧 sync-confirm
-  it('已接受同步中：展示确认生效按钮并调用 sync-confirm', async () => {
+  it('已接受同步中：展示确认生效按钮并调用 sync-confirm，成功后刷新为已生效', async () => {
     const detail = makeDetail()
     detail.status = 'accepted'
     detail.casdoorSync = 'processing'
-    mockGet.mockResolvedValue({ kind: 'completed', data: detail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: detail })
+    // 确认成功后 handleSyncConfirm 重新拉取详情 → 返回已确认状态
+    const confirmed = makeDetail()
+    confirmed.status = 'accepted'
+    confirmed.casdoorSync = 'confirmed'
+    mockGet.mockResolvedValue({ kind: 'completed', data: confirmed })
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })
     const wrapper = mount(InvitationPage, { global: { stubs: pageStubs } })
     await flushPromises()
@@ -92,6 +97,29 @@ describe('InvitationPage 招新邀请', () => {
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/me/invitations/recruitment/inv-1/sync-confirm')
     expect(wrapper.text()).toContain('已生效，欢迎加入')
+  })
+
+  it('sync_failed 状态：展示重试确认按钮并调用 sync-confirm，成功后刷新为已生效（P2-3 申请人侧重试）', async () => {
+    const detail = makeDetail()
+    detail.status = 'sync_failed'
+    detail.casdoorSync = 'failed'
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: detail })
+    // 重试成功后 handleSyncConfirm 重新拉取详情 → 已确认
+    const confirmed = makeDetail()
+    confirmed.status = 'accepted'
+    confirmed.casdoorSync = 'confirmed'
+    mockGet.mockResolvedValue({ kind: 'completed', data: confirmed })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(InvitationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('确认生效'))
+    expect(confirmBtn, 'sync_failed 应渲染重试确认按钮').toBeTruthy()
+    expect(wrapper.text()).toContain('同步失败')
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/me/invitations/recruitment/inv-1/sync-confirm')
+    expect(wrapper.text()).toContain('已生效，欢迎加入')
+    wrapper.unmount()
   })
 
   it('已确认生效：不再渲染确认生效按钮', async () => {
