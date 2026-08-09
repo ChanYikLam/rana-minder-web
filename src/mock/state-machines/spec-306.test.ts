@@ -83,9 +83,12 @@ describe('状态机 spec-306 精确转换表', () => {
   it('SM-EXP-001 包含 processing 中间态（P2-5 词表对齐）', () => {
     // 实现层 settleExportTask/ExportPage 使用 processing 生成中间态，转换表必须包含
     expect(statesOf('SM-EXP-001')).toContain('processing')
-    expect(isValidTransition('SM-EXP-001', 'generating', 'processing')).toBe(true)
+    // 真实可达路径：pending --start--> generating --start_processing--> processing --success--> completed
+    expect(assertTransition('SM-EXP-001', 'pending', 'generating', 'start').ok).toBe(true)
     expect(assertTransition('SM-EXP-001', 'generating', 'processing', 'start_processing').ok).toBe(true)
     expect(assertTransition('SM-EXP-001', 'processing', 'completed', 'success').ok).toBe(true)
+    // processing 无直达入边：必须经 generating 中间态（防退化为直跳语义）
+    expect(isValidTransition('SM-EXP-001', 'pending', 'processing')).toBe(false)
   })
 
   it('STATE_MACHINES 兼容导出与元数据一致', () => {
