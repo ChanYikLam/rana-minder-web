@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { ArrowLeft, Plus, X, Save, FileText, Copy } from '@lucide/vue'
 
 const route = useRoute()
@@ -77,6 +78,8 @@ async function handlePublish() {
   if (result.kind === 'completed') {
     toast.success('招新活动已创建并发布')
     router.push(`/org/${clubId}/recruitment/${(result.data as { id: string }).id}`)
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('发布已受理，正在后台处理')
   } else {
     toast.error('发布失败，请稍后重试')
   }
