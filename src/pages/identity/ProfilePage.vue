@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
@@ -44,6 +44,8 @@ const state = ref<PageState>('loading')
 const error = ref<{ code: string; message: string } | null>(null)
 const profile = ref<Profile | null>(null)
 const version = ref(0)
+// 错误态提示文案：按失败来源区分「资料加载失败」与「冲突加载失败」（审计 P3）
+const pageErrorMsg = ref('资料加载失败')
 
 const editing = ref(false)
 const formEmail = ref('')
@@ -103,6 +105,10 @@ async function loadProfile() {
 
 // 统一入口：按模式分派加载逻辑（正常模式加载资料，sync-conflict 模式先拉资料再拉冲突清单）
 async function loadPage() {
+  // 重置冲突页遗留状态（审计 P2-1：组件实例被路由复用/onMounted 不重新触发时，防止旧冲突数据残留）
+  resetConflictState()
+  // 默认错误文案为「资料加载失败」，sync-conflict 分支若冲突清单加载失败会覆盖为「冲突清单加载失败」（审计 P3）
+  pageErrorMsg.value = '资料加载失败'
   if (!isSyncConflict.value) {
     await loadProfile()
     return
@@ -223,6 +229,13 @@ const conflictFields = ref<ConflictField[]>([])
 const conflictSubmitting = ref(false)
 const conflictLoading = ref(false)
 
+/** 重置冲突页状态（进入/重试 sync-conflict 模式时调用，避免旧状态残留） */
+function resetConflictState() {
+  conflictFields.value = []
+  conflictSubmitting.value = false
+  conflictLoading.value = false
+}
+
 async function loadConflicts() {
   conflictLoading.value = true
   const result = await get<{ conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> }>('/auth/profile/sync-conflicts')
@@ -237,9 +250,12 @@ async function loadConflicts() {
   } else if (result.kind === 'rejected' && result.error) {
     state.value = 'error'
     error.value = result.error
+    // 冲突清单加载失败：区分错误文案，便于用户判断重试对象（审计 P3）
+    pageErrorMsg.value = '冲突清单加载失败'
   } else {
     state.value = 'error'
     error.value = { code: 'IFC-ERR-016', message: '冲突加载失败' }
+    pageErrorMsg.value = '冲突清单加载失败'
   }
 }
 
@@ -270,6 +286,19 @@ async function handleResolveConflicts() {
 onMounted(async () => {
   await loadPage()
 })
+
+// 审计 P2-1：ProfilePage 被 /me/profile、/me/profile/edit、/me/profile/sync-conflict 三个路由共用，
+// vue-router 复用组件实例时 onMounted 不会重新触发。监听路由模式变化，
+// 在切入 sync-conflict 模式时强制重置状态并重新加载，避免旧 profile/conflictFields 残留导致静默失效。
+watch(
+  () => route.meta.mode,
+  async (mode, prevMode) => {
+    if (mode === 'sync-conflict' && mode !== prevMode) {
+      await loadPage()
+    }
+  },
+  { immediate: false }
+)
 </script>
 
 <template>
@@ -277,7 +306,7 @@ onMounted(async () => {
     :state="state"
     title="个人资料"
     :error="error"
-    error-message="资料加载失败"
+    :error-message="pageErrorMsg"
     @retry="loadPage"
   >
     <div class="max-w-2xl mx-auto" v-if="profile">

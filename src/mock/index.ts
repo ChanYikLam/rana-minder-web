@@ -904,7 +904,18 @@ const identityHandlers: MockMethod[] = [
       // 空值或与本地当前值相同的提交不产生实际变更，直接返回当前资料
       const user = resolveMockUser(url)
       const typedField = field as 'name' | 'email' | 'phone' | 'studentId'
-      const currentValue = String(user[typedField] ?? '')
+      // 防御性判断：目标字段不存在时拒绝写回，避免 String(undefined ?? '') 产生 'undefined' 字面量（审计 P3）
+      if (user[typedField] === undefined) {
+        return {
+          statusCode: 422,
+          body: {
+            code: 'IFC-ERR-006',
+            message: '不支持的冲突字段',
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          },
+        }
+      }
+      const currentValue = String(user[typedField])
       if (typeof chosenValue !== 'string' || chosenValue === '' || chosenValue === currentValue) {
         return {
           code: 0,

@@ -401,17 +401,23 @@ const seedSchoolProfiles: Record<string, SchoolProfile> = {
   // 其余用户学校侧与本地一致（默认无冲突）
 }
 
-/** 获取某用户的学校侧权威资料（未配置时回退到当前本地值，避免凭空制造冲突） */
+/**
+ * 获取某用户的学校侧权威资料（Casdoor 权威侧快照）。
+ *
+ * 权威侧必须是**不可变快照**：以 seedMockUsers 种子为准，叠加 seedSchoolProfiles 登记差异。
+ * 绝不回退到运行期 mockUsers 当前值，否则冲突解决写回本地后，权威侧随本地漂移，
+ * 该字段将永远不再产生冲突（审计 P2-2：mock 权威侧被本地写回污染）。
+ */
 export function getSchoolProfile(userId: string): SchoolProfile {
   const key = Object.keys(mockUsers).find((k) => mockUsers[k].id === userId) ?? 'leader'
-  const user = mockUsers[key]
+  const seed = seedMockUsers[key]
   const override = seedSchoolProfiles[key]
-  if (!user) return { studentId: '', name: '', email: '', phone: '' }
+  if (!seed) return { studentId: '', name: '', email: '', phone: '' }
   return {
-    studentId: override?.studentId ?? user.studentId,
-    name: override?.name ?? user.name,
-    email: override?.email ?? user.email,
-    phone: override?.phone ?? user.phone,
+    studentId: override?.studentId ?? seed.studentId,
+    name: override?.name ?? seed.name,
+    email: override?.email ?? seed.email,
+    phone: override?.phone ?? seed.phone,
   }
 }
 

@@ -99,4 +99,35 @@ describe('P0-3 同步冲突（sync-conflict）：真实冲突清单与写回', (
     expect(mockUsers.leader.email).toBe('leader@example.edu.cn')
     expect(mockUsers.leader.phone).toBe('13800000002')
   })
+
+  it('审计 P2-2：写回本地后学校侧权威值不随本地漂移，冲突可持续复现', () => {
+    // 首次：leader 姓名冲突，选择学校侧值写回
+    resolveMockUser('/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const first = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'name', chosenValue: '张铭远' },
+    })
+    expect(first.code).toBe(0)
+    expect(mockUsers.leader.name).toBe('张铭远')
+    // 再次请求冲突清单：学校侧仍是种子权威值「张铭远」，本地已同步为「张铭远」→ 不再产生 name 冲突
+    const after = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const fieldsAfter = after.data?.conflicts?.map((c) => c.field)
+    expect(fieldsAfter).not.toContain('name')
+
+    // 重置本地为种子值后，学校侧仍为固定权威值（不随运行期 mockUsers 漂移）
+    mockUsers.leader.name = '张明远'
+    const again = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const nameConflict = again.data?.conflicts?.find((c) => c.field === 'name')
+    expect(nameConflict?.localValue).toBe('张明远')
+    expect(nameConflict?.remoteValue).toBe('张铭远')
+  })
+
+  it('审计 P2-2：写回 email 后权威侧 email 不随本地变化，冲突仍可复现', () => {
+    // 为 member 配置学校侧 email 差异（模拟登记变更），写回本地后权威侧不被污染
+    mockUsers.member.email = 'member-new@example.edu.cn'
+    const out = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=member')
+    // member 学校侧无 override，回退到 seedMockUsers 种子 email（member@example.edu.cn），与本地新值不一致 → 产生冲突
+    const emailConflict = out.data?.conflicts?.find((c) => c.field === 'email')
+    expect(emailConflict?.localValue).toBe('member-new@example.edu.cn')
+    expect(emailConflict?.remoteValue).toBe('member@example.edu.cn')
+  })
 })
