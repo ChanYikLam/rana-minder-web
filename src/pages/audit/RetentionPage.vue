@@ -173,6 +173,10 @@ async function handleExecute(proof?: string) {
     const data = result.data as { totalExecuted: number }
     toast.success(`保留策略执行完成，共处置 ${data.totalExecuted} 条数据`)
     await loadData()
+  } else if (result.kind === 'accepted') {
+    // P1：#10 服务端 202/IFC-ERR-013/014 异步受理执行：统一提示已受理，避免误报"执行失败"
+    toastAcceptedAction('保留策略执行已受理，正在后台处理')
+    executeOpen.value = false
   } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
     toast.error('身份验证已失效，请重新认证后重试')
     executeOpen.value = false

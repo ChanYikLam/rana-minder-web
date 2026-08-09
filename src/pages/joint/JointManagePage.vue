@@ -38,6 +38,13 @@ const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 const riskSucceeded = ref(false)
 
+/** 打开取消确认弹窗前重置 succeeded/error，避免上次成功后残留导致重开直接跳 done */
+function openCancelRisk() {
+  riskSucceeded.value = false
+  riskError.value = ''
+  riskOpen.value = true
+}
+
 async function loadDetail() {
   if (isCreate.value) { state.value = 'normal'; return }
   state.value = 'loading'
@@ -53,6 +60,9 @@ async function loadDetail() {
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
+  // P3：每次执行前重置 succeeded/error，避免上次取消成功后残留导致重开直接跳 done
+  riskSucceeded.value = false
+  riskError.value = ''
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/${action}`, { ...(input || {}) })
   actionLoading.value = false
@@ -71,6 +81,10 @@ async function runAction(action: string, input?: Record<string, unknown>) {
     }
   } else if (result.kind === 'rejected' && result.error) {
     riskError.value = (result.error as { message?: string }).message || '操作失败'
+    toast.error(riskError.value)
+  } else {
+    // P3：并发冲突/依赖不可用/外部不确定等其余分支统一兜底，避免静默无反馈
+    riskError.value = '操作失败，请稍后重试'
     toast.error(riskError.value)
   }
 }
@@ -286,7 +300,7 @@ onMounted(loadDetail)
               v-if="!['cancelled', 'force_closed', 'closed'].includes(detail.status)"
               class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-destructive text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
               :disabled="actionLoading"
-              @click="riskOpen = true"
+              @click="openCancelRisk"
             >
               <XCircle :size="15" /> 取消活动
             </button>

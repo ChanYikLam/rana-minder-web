@@ -7,6 +7,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { Crown, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Users, Plus, Trash2, RefreshCw } from '@lucide/vue'
 
@@ -135,6 +136,12 @@ async function handleExecute(proof?: string) {
     executeSucceeded.value = true
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
     showExecuteConfirm.value = false
+    executeReason.value = ''
+  } else if (r.kind === 'accepted') {
+    // P1：#8 服务端 202/IFC-ERR-013/014 异步受理换届：统一提示已受理，避免误报"执行失败"
+    toastAcceptedAction('换届执行已受理，正在后台处理')
+    showExecuteConfirm.value = false
+    executeReason.value = ''
   } else {
     // P1：#8 执行失败时把错误传给 HighRiskConfirm，避免弹窗永久卡“正在执行...”
     executeError.value = (r as { error?: { message?: string } }).error?.message || '换届执行失败，请重试'
@@ -325,7 +332,9 @@ onMounted(async () => {
         :executing="executing"
         :succeeded="executeSucceeded"
         :error-message="executeError || undefined"
-        @confirm="showExecuteConfirm = false; handleExecute($event)"
+        @confirm="handleExecute($event)"
+        @retry="executeError = ''"
+        @update:errorMessage="(v) => executeError = v"
         @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = '' } }"
       >
         <template #extra>
