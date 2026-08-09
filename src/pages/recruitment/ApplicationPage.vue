@@ -59,7 +59,10 @@ async function loadData() {
     formFields.value = versions[0]?.fields || []
     await loadMyApplication()
     state.value = 'normal'
-  } else { state.value = errorToPageState(errorCodeOf(actRes.kind === 'completed' ? formRes : actRes)) }
+  } else {
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败）
+    state.value = errorToPageState(errorCodeOf(actRes.kind === 'completed' ? formRes : actRes))
+  }
 }
 
 const myApplication = ref<MyApplication | null>(null)

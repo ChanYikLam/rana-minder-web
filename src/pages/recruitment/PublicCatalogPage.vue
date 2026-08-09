@@ -78,6 +78,7 @@ const { seq, schedule, cancel } = useDebouncedSearch({
       activities.value = []
       historyActivities.value = []
       // P2-7：失败按错误码映射，forbidden 走权限错误页
+      // P3-3：取首个失败请求的错误码（任一失败即整页失败）
       const failed = clubsRes.kind === 'completed' ? actRes : clubsRes
       state.value = errorToPageState(errorCodeOf(failed))
     }

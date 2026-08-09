@@ -1,14 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { notificationApi } from '@/services'
-import { errorCodeOf } from '@/services/error-map'
+import { errorCodeOf, type ErrorCode } from '@/services/error-map'
 
 export const useNotificationViewStore = defineStore('notificationView', () => {
   const unreadCount = ref(0)
   const items = ref<{ id: string; type: string; title: string; body: string; read: boolean; createdAt: string; link: string | null; clubName: string | null }[]>([])
   const loading = ref(false)
-  /** 最近一次加载/写操作失败的错误码（供页面 errorToPageState 区分 forbidden/error） */
-  let lastError: string | null = null
 
   const hasUnread = computed(() => unreadCount.value > 0)
 
@@ -19,7 +17,8 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     }
   }
 
-  async function loadNotifications(cursor?: string) {
+  /** 返回 null 表示成功；失败时返回错误码，供页面 errorToPageState 区分 forbidden/error（P1-1：避免 Store 级可变状态竞态） */
+  async function loadNotifications(cursor?: string): Promise<ErrorCode | null> {
     loading.value = true
     try {
       const result = await notificationApi.list({ cursor })
@@ -30,12 +29,9 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
         } else {
           items.value = data.items
         }
-        lastError = null
-      } else {
-        // 失败时记录错误并显式抛出，让上层 try/catch 能感知到错误
-        lastError = errorCodeOf(result)
-        throw new Error('load notifications failed')
+        return null
       }
+      return errorCodeOf(result)
     } finally {
       loading.value = false
     }
@@ -54,19 +50,15 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     }
   }
 
-  async function markAllRead() {
+  /** 写操作失败语义固定为 error（不区分 forbidden），返回错误码仅供调用方日志/提示使用 */
+  async function markAllRead(): Promise<ErrorCode | null> {
     const result = await notificationApi.markAllRead()
     if (result.kind === 'completed') {
       items.value.forEach((n) => { n.read = true })
       unreadCount.value = 0
-    } else {
-      lastError = errorCodeOf(result)
-      throw new Error('mark all read failed')
+      return null
     }
-  }
-
-  function getLastError() {
-    return lastError
+    return errorCodeOf(result)
   }
 
   return {
@@ -78,6 +70,5 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     loadNotifications,
     markRead,
     markAllRead,
-    getLastError,
   }
 })

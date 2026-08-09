@@ -53,6 +53,7 @@ async function loadData() {
     schedule.value = (scheduleRes as { kind: 'completed'; data: { items: ScheduleItem[] } }).data.items
     state.value = 'normal'
   } else {
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败，任一失败结果都能代表本次失败）
     const failed = [todoRes, ongoingRes, historyRes, scheduleRes].find((r) => r.kind !== 'completed')!
     state.value = errorToPageState(errorCodeOf(failed))
   }

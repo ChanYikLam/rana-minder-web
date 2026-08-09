@@ -4,7 +4,7 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { NotificationBadge } from '@/components/feedback'
 import { NotificationDetail, type NotificationDetailData } from '@/components/feedback'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
-import { errorToPageState, type ErrorCode } from '@/services/error-map'
+import { errorToPageState } from '@/services/error-map'
 import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
 import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
@@ -77,25 +77,25 @@ function onDetailAction(key: string) {
 
 async function loadNotifications() {
   state.value = 'loading'
-  try {
-    await notifStore.loadNotifications()
+  // P1-1：loadNotifications 直接返回错误码（null=成功），不再依赖 Store 内部可变 lastError，避免竞态导致错误码错配
+  const code = await notifStore.loadNotifications()
+  if (code) {
+    state.value = errorToPageState(code)
+    console.error('加载通知失败:', code)
+  } else {
     state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
-  } catch (error) {
-    // P2-7：加载失败按错误码映射（forbidden 区分权限错误），而非一律 error
-    const err = notifStore.getLastError()
-    state.value = errorToPageState((err as ErrorCode) || 'IFC-ERR-016')
-    console.error('加载通知失败:', error)
   }
 }
 
 async function handleMarkAllRead() {
   state.value = 'loading'
-  try {
-    await notifStore.markAllRead()
-    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
-  } catch (error) {
+  // P2-1：写操作失败语义固定为 error（不区分 forbidden），返回错误码仅用于日志
+  const code = await notifStore.markAllRead()
+  if (code) {
     state.value = 'error'
-    console.error('标记已读失败:', error)
+    console.error('标记已读失败:', code)
+  } else {
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
   }
 }
 

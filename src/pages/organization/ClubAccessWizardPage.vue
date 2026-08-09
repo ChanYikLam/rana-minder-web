@@ -93,7 +93,10 @@ async function loadInitial() {
     existingClubs.value = (clubs as { kind: 'completed'; data: { items: ClubAccessItem[] } }).data.items
     schedule('')
     state.value = 'normal'
-  } else { state.value = errorToPageState(errorCodeOf(groups.kind === 'completed' ? clubs : groups)) }
+  } else {
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败）
+    state.value = errorToPageState(errorCodeOf(groups.kind === 'completed' ? clubs : groups))
+  }
 }
 
 function toSearchResult(g: GroupRow): SearchResult {

@@ -84,12 +84,15 @@ export function errorCodeOf(result: ApiResult<unknown>): ErrorCode {
   return 'IFC-ERR-016'
 }
 
+/**
+ * 错误码 → 页面状态映射（仅用于**页面加载**失败分支）。
+ * - forbidden：认证/权限/作用域/安全/不可见类
+ * - error：其余错误；含 013/014（P2-2：加载场景不再映射为 loading，避免无自动重试时永久卡 loading；
+ *   提交/轮询场景的 loading 语义由 useRequest 单独处理 accepted/external_uncertain）
+ */
 export function errorToPageState(code: ErrorCode): PageStateFromError {
   if (code === 'IFC-ERR-001' || code === 'IFC-ERR-002' || code === 'IFC-ERR-003' || code === 'IFC-ERR-004' || code === 'IFC-ERR-011' || code === 'IFC-ERR-015') {
     return 'forbidden'
-  }
-  if (code === 'IFC-ERR-013' || code === 'IFC-ERR-014') {
-    return 'loading'
   }
   return 'error'
 }

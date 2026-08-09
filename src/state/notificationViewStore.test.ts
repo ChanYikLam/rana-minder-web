@@ -71,12 +71,33 @@ describe('notificationViewStore 未读数与列表', () => {
     expect(store.items.map((n) => n.id)).toEqual(['n-1', 'n-2'])
   })
 
-  it('loadNotifications 失败：显式抛出且 loading 复位', async () => {
+  it('loadNotifications 失败：返回错误码且 loading 复位', async () => {
     const store = useNotificationViewStore()
-    mocks.list.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    mocks.list.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: 'x' } })
 
-    await expect(store.loadNotifications()).rejects.toThrow('load notifications failed')
+    const code = await store.loadNotifications()
+
+    expect(code).toBe('IFC-ERR-003')
     expect(store.loading).toBe(false)
+  })
+
+  it('loadNotifications 失败（external_uncertain）：返回 013 错误码', async () => {
+    const store = useNotificationViewStore()
+    mocks.list.mockResolvedValue({ kind: 'external_uncertain', error: { code: 'IFC-ERR-013', message: 'x' } })
+
+    const code = await store.loadNotifications()
+
+    expect(code).toBe('IFC-ERR-013')
+    expect(store.loading).toBe(false)
+  })
+
+  it('loadNotifications 成功：返回 null 且不抛错', async () => {
+    const store = useNotificationViewStore()
+    mocks.list.mockResolvedValue({ kind: 'completed', data: { items: [], nextCursor: null } })
+
+    const code = await store.loadNotifications()
+
+    expect(code).toBeNull()
   })
 })
 
@@ -152,14 +173,27 @@ describe('notificationViewStore 已读操作', () => {
     expect(store.hasUnread).toBe(false)
   })
 
-  it('markAllRead 失败：显式抛出且状态不变', async () => {
+  it('markAllRead 失败：返回错误码且状态不变', async () => {
     const store = useNotificationViewStore()
     store.items = [makeItem('n-1', false)]
     store.unreadCount = 1
-    mocks.markAllRead.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    mocks.markAllRead.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: 'x' } })
 
-    await expect(store.markAllRead()).rejects.toThrow('mark all read failed')
+    const code = await store.markAllRead()
+
+    expect(code).toBe('IFC-ERR-003')
     expect(store.items[0].read).toBe(false)
     expect(store.unreadCount).toBe(1)
+  })
+
+  it('markAllRead 失败不影响下一次 loadNotifications 的错误码（P1-1：无 lastError 竞态）', async () => {
+    const store = useNotificationViewStore()
+    mocks.markAllRead.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    mocks.list.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-012', message: '依赖不可用' } })
+
+    await store.markAllRead()
+    const code = await store.loadNotifications()
+
+    expect(code).toBe('IFC-ERR-012')
   })
 })
