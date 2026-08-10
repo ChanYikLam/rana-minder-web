@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import { resolveMockUser, clearMockSession } from './auth'
 import { resetRecruitmentDB, resetNotifications, resetCorrections, resetAuditLogs } from './reset'
+import { listNotifications } from './notifications'
 
 class MockServerResponse {
   statusCode = 200
@@ -45,6 +46,8 @@ const decidePattern = '/api/admin/audit/corrections/:correctionId/decide'
 const withdrawPattern = '/api/admin/audit/corrections/:correctionId/withdraw'
 const adminAuditLogsUrl = '/api/admin/audit/logs'
 const adminAuditLogsPattern = '/api/admin/audit/logs'
+const meCorrectionsUrl = '/api/me/corrections'
+const meWithdrawPattern = '/api/me/corrections/:correctionId/withdraw'
 
 interface CorrectionItem { id: string; status: string; reason: string; submitterName: string; decidedBy?: string; decidedAt?: string; withdrawnBy?: string; withdrawnAt?: string; auditTrail?: Array<{ action: string; actorName: string; at: string }> }
 
@@ -240,6 +243,63 @@ describe('管理员事实纠错处置（decide 真实落库）', () => {
     const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === id)
     expect(updated?.status).toBe('withdrawn')
     expect(updated?.auditTrail?.filter((e) => e.action === 'withdraw')).toHaveLength(1)
+  })
+
+  it('overdue 种子在列表中直接可见（P2-1：SM-AUD-001 deadline 产生路径）', async () => {
+    const list = await invokeHandler(listPattern, 'get', listUrl)
+    expect(list.statusCode).toBe(200)
+    const items = (list.body.data as { items: CorrectionItem[] }).items
+    const overdue = items.find((i) => i.id === 'cor-005')
+    expect(overdue, '种子应含 overdue 纠错').toBeTruthy()
+    expect(overdue?.status).toBe('overdue')
+  })
+
+  it('overdue 纠错可被批准处置（SM-AUD-001：overdue -> approve）', async () => {
+    const out = await invokeHandler(decidePattern, 'post', `${listUrl}/cor-005/decide`, { input: { decision: 'approve' } })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect((out.body.data as { status: string }).status).toBe('approved')
+    const after = await invokeHandler(listPattern, 'get', listUrl)
+    const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === 'cor-005')
+    expect(updated?.status).toBe('approved')
+  })
+
+  it('overdue 纠错可被提交人本人撤回（SM-AUD-001：overdue -> withdraw）', async () => {
+    // cor-005 提交人为赵雨萌（incomplete 用户），经个人中心端点本人撤回
+    resolveMockUser('/api/auth/session?_mock_user=incomplete')
+    const out = await invokeHandler(meWithdrawPattern, 'post', `${meCorrectionsUrl}/cor-005/withdraw`)
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    expect((out.body.data as { status: string }).status).toBe('withdrawn')
+  })
+
+  it('US-AUD-01 自批校验：不能批准自己提交的纠错（422）', async () => {
+    // admin 发起一笔纠错（submitterName=平台管理员），随后 admin 尝试批准 → 应拒绝
+    const created = await invokeHandler(listPattern, 'post', listUrl, {
+      input: { targetType: '社团信息', targetId: 'club-001', reason: '自批校验测试', evidence: '' },
+    })
+    expect(created.statusCode, JSON.stringify(created.body)).toBe(200)
+    const { id } = created.body.data as { id: string }
+    const out = await invokeHandler(decidePattern, 'post', `${listUrl}/${id}/decide`, { input: { decision: 'approve' } })
+    expect(out.statusCode).toBe(422)
+    expect((out.body as { code?: string }).code).toBe('IFC-ERR-006')
+  })
+
+  it('US-AUD-01 通知联动：批准后提交人收到纠错通知', async () => {
+    // cor-001 提交人为王浩然（interviewer）；admin 批准后王浩然应收到通知
+    const out = await invokeHandler(decidePattern, 'post', `${listUrl}/cor-001/decide`, { input: { decision: 'approve' } })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const notifs = listNotifications('user-interviewer-001', false)
+    const hit = notifs.find((n) => n.type === 'correction' && n.body.includes('app-003') && n.body.includes('批准'))
+    expect(hit, '提交人应收到处置通知').toBeTruthy()
+  })
+
+  it('审批不改变 overdue 种子的底层落库状态（列表派生，处置守卫用派生态）', async () => {
+    // 通过 org 域（leader）对 overdue 种子批准：底层 submitted 记录按派生 overdue 放行
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const out = await invokeHandler('/api/org/:clubId/audit/corrections/:correctionId/decide', 'post', '/api/org/club-001/audit/corrections/cor-005/decide', { input: { decision: 'approve' } })
+    expect(out.statusCode, JSON.stringify(out.body)).toBe(200)
+    const after = await invokeHandler('/api/org/:clubId/audit/corrections', 'get', '/api/org/club-001/audit/corrections')
+    const updated = (after.body.data as { items: CorrectionItem[] }).items.find((i) => i.id === 'cor-005')
+    expect(updated?.status).toBe('approved')
   })
 })
 

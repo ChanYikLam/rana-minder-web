@@ -54,6 +54,17 @@ describe('成员状态机接线（P1-C7 SM-MEM/SM-ORG）', () => {
     expect(membershipInvitations.find((i) => i.id === 'minv-002')!.status).toBe('effective')
   })
 
+  it('SM-MEM-004 sync_failed 后可重试确认生效（P2-3）', () => {
+    const inv = membershipInvitations.find((i) => i.id === 'minv-002')!
+    // 模拟成员创建失败 → 同步失败态
+    inv.status = 'sync_failed'
+    expect(inv.status).toBe('sync_failed')
+
+    const retried = confirmInvitationSync('minv-002')
+    expect(retried.ok, retried.error || '').toBe(true)
+    expect(membershipInvitations.find((i) => i.id === 'minv-002')!.status).toBe('effective')
+  })
+
   it('SM-ORG-003 任命命令：取消与重新确认受状态约束', () => {
     const cancelled = cancelAppointmentCommand('apc-001')
     expect(cancelled.ok).toBe(true)
