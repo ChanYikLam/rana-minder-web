@@ -330,8 +330,10 @@ onMounted(loadData)
         :impact-summary="preview?.bufferDays ? `保留期限被缩短，已有数据将获得至少 ${preview.bufferDays} 天缓冲期后按新策略处理。` : '发布后新策略立即生效，不可变版本。'"
         confirm-label="确认发布"
         :executing="publishing"
+        :succeeded="publishSucceeded"
+        :error-message="publishError"
         @confirm="handlePublish"
-        @update:open="(v) => { if (!v) confirmOpen = false }"
+        @update:open="(v) => { if (!v) { confirmOpen = false; publishSucceeded = false; publishError = '' } }"
       />
     </div>
 
