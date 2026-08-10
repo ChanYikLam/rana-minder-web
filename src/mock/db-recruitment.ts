@@ -1002,6 +1002,14 @@ export function cancelActivity(activityId: string, reason: string, confirmAccept
     if (it.activityId === a.id && ['pending_selection', 'scheduled', 'leave', 'late', 'absent'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '活动取消'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markAttendance 约定一致）
+      if (it.slotId) {
+        const slot = a.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   expireActivityTasks(activityId)
@@ -1028,6 +1036,14 @@ export function forceCompleteActivity(activityId: string, reason: string): { ok:
     if (it.activityId === a.id && ['pending_selection', 'scheduled', 'leave', 'late', 'absent'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '活动强制完成'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markAttendance 约定一致）
+      if (it.slotId) {
+        const slot = a.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   for (const inv of recruitmentInvitations) {
@@ -1189,6 +1205,15 @@ export function invalidateInterview(interviewId: string, reason: string): { ok: 
   if (it.actualStartAt) return err('主观不同意评分不能作为作废理由；记录已开始需谨慎确认')
   it.status = 'invalidated'
   it.invalidReason = reason
+  // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用
+  if (it.slotId) {
+    const a = findAnyActivity(it.activityId)
+    const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+    if (slot) slot.taken = Math.max(0, slot.taken - 1)
+    it.slotId = null
+    it.startAt = null
+    it.endAt = null
+  }
   it.version += 1
   return ok(it)
 }
@@ -1392,10 +1417,19 @@ export function withdrawApplication(activityId: string, applicantId: string, con
   if (!confirm) return err('请二次确认退出招新')
   app.status = 'exited'
   app.withdrawnAt = now()
+  const a = findAnyActivity(activityId)
   for (const it of recruitmentInterviews) {
     if (it.applicantId === applicantId && it.activityId === activityId && ['pending_selection', 'scheduled', 'leave', 'late', 'absent'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '申请人退出招新'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用
+      if (it.slotId) {
+        const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   for (const inv of recruitmentInvitations) {
@@ -1459,10 +1493,19 @@ export function publishNotQualified(activityId: string, applicantId: string, rea
   if (!t.ok) return err(t.reason || '当前申请不可发布资格失效结论')
   if (!reason.trim()) return err('必须填写结论原因')
   app.status = 'not_qualified'
+  const a = findAnyActivity(activityId)
   for (const it of recruitmentInterviews) {
     if (it.applicantId === applicantId && it.activityId === activityId && ['pending_selection', 'scheduled'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '资格失效'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用
+      if (it.slotId) {
+        const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   app.version += 1
@@ -2488,6 +2531,14 @@ export function cancelJointActivity(jointId: string, clubId: string, actorName: 
     for (const it of jointInterviews) {
       if (it.jointId === ja.id && ['pending_selection', 'scheduled'].includes(it.status)) {
         it.status = 'cancelled_archived'
+        // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markJointAttendance 约定一致）
+        if (it.slotId) {
+          const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === ja.id)
+          if (slot) slot.taken = Math.max(0, slot.taken - 1)
+          it.slotId = null
+          it.startAt = null
+          it.endAt = null
+        }
       }
     }
     expireActivityTasks(jointId)
@@ -2609,6 +2660,14 @@ export function forceCloseJointActivity(jointId: string, reason: string): { ok: 
   for (const it of jointInterviews) {
     if (it.jointId === ja.id && ['pending_selection', 'scheduled', 'in_progress'].includes(it.status)) {
       it.status = 'cancelled_archived'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markJointAttendance 约定一致）
+      if (it.slotId) {
+        const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === ja.id)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   for (const con of jointConclusions) {
