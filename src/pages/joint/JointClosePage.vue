@@ -18,11 +18,18 @@ const detail = ref<{
   totalApplicants: number; totalConcluded: number; totalInvited: number; canClose: boolean
 } | null>(null)
 
+const clubId = computed(() => (route.params.clubId as string) || '')
+const jointId = computed(() => (route.params.jointId as string) || '')
+const isAdminScope = computed(() => !clubId.value)
+const closeBaseUrl = computed(() =>
+  isAdminScope.value
+    ? `/admin/joint/${jointId.value}/close`
+    : `/org/${clubId.value}/joint/${jointId.value}/close`
+)
+
 async function loadData() {
   state.value = 'loading'
-  const clubId = route.params.clubId as string
-  const jointId = route.params.jointId as string
-  const result = await get(`/org/${clubId}/joint/${jointId}/close`)
+  const result = await get(closeBaseUrl.value)
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value
     state.value = 'normal'
@@ -37,8 +44,7 @@ const allConfirmed = computed(() => {
 async function handleStartClose() {
   if (!detail.value || closing.value) return
   closing.value = true
-  const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/joint/${detail.value.id}/close/start`, {})
+  const result = await post(`${closeBaseUrl.value}/start`, {})
   closing.value = false
   if (result.kind === 'completed') {
     toast.success('已进入结束确认阶段')
@@ -51,9 +57,7 @@ async function handleStartClose() {
 async function handleClose() {
   if (!detail.value || closing.value) return
   closing.value = true
-  const clubId = route.params.clubId as string
-  const jointId = route.params.jointId as string
-  const result = await post(`/org/${clubId}/joint/${jointId}/close`, {})
+  const result = await post(closeBaseUrl.value, {})
   closing.value = false
   if (result.kind === 'completed') {
     toast.success('本社团确认完成')
