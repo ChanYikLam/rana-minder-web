@@ -544,6 +544,7 @@ describe('任期到期提醒（MEM-004）', () => {
         tenures: [], departmentHistory: [], anomalies: [],
       }) as unknown as void
     // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
+    freshMember('mem-t0', '更近任期', iso(3))
     freshMember('mem-t1', '近任期', iso(10))
     freshMember('mem-t2', '远任期', iso(300))
     freshMember('mem-t3', '已结束', iso(10), 'ended')
@@ -555,10 +556,11 @@ describe('任期到期提醒（MEM-004）', () => {
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
-      // daysLeft 升序（近任期在前）
-      expect(hits[0].memberId).toBe('mem-t1')
+      // daysLeft 升序（近任期在前）；仅就本次构造的窗口内合成成员断言，避免被种子数据（如 mem-004 的 2026-08-20 任期）同窗口命中导致排序串扰
+      const synthetic = hits.filter((h) => ['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'].includes(h.memberId))
+      expect(synthetic.map((h) => h.memberId)).toEqual(['mem-t0', 'mem-t1'])
     } finally {
-      const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3'])
+      const ids = new Set(['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
         if (ids.has(members[i].id)) members.splice(i, 1)
       }
