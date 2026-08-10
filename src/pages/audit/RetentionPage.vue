@@ -53,6 +53,8 @@ const reauthProof = ref('')
 const reauthenticating = ref(false)
 const confirmOpen = ref(false)
 const publishing = ref(false)
+const publishSucceeded = ref(false)
+const publishError = ref('')
 
 // 执行保留策略（P1-010：执行器真实处置到期数据，写审计日志）
 const executeOpen = ref(false)
@@ -129,14 +131,18 @@ async function handlePublish() {
     return
   }
   publishing.value = true
+  publishSucceeded.value = false
+  publishError.value = ''
   const result = await post(`/admin/retention/${p.id}/publish`, {
     reason: publishReason.value.trim(),
     reauthProof: reauthProof.value,
     previewVersion: pv.previewVersion,
   })
   publishing.value = false
-  confirmOpen.value = false
   if (result.kind === 'completed') {
+    publishSucceeded.value = true
+    publishError.value = ''
+    confirmOpen.value = false
     toast.success('策略已发布')
     const data = result.data as { notice?: string | null; auditRef?: string }
     if (data.notice) toast.info(data.notice)
@@ -145,12 +151,16 @@ async function handlePublish() {
     toastAcceptedAction('发布已受理，正在后台处理')
     await loadData()
   } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
-    toast.error('身份验证已失效，请重新认证后重试')
+    publishSucceeded.value = false
+    publishError.value = '身份验证已失效，请重新认证后重试'
     reauthProof.value = ''
   } else if (result.kind === 'concurrency_conflict') {
-    toast.error('影响预览已过期，请重新预览后发布')
+    publishSucceeded.value = false
+    publishError.value = '影响预览已过期，请重新预览后发布'
     preview.value = null
   } else {
+    publishSucceeded.value = false
+    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
     toastError(result, '发布失败，请重试')
   }
 }
@@ -328,8 +338,10 @@ onMounted(loadData)
         :impact-summary="preview?.bufferDays ? `保留期限被缩短，已有数据将获得至少 ${preview.bufferDays} 天缓冲期后按新策略处理。` : '发布后新策略立即生效，不可变版本。'"
         confirm-label="确认发布"
         :executing="publishing"
+        :succeeded="publishSucceeded"
+        :error-message="publishError"
         @confirm="handlePublish"
-        @update:open="(v) => { if (!v) confirmOpen = false }"
+        @update:open="(v) => { if (!v) { confirmOpen = false; publishSucceeded = false; publishError = '' } }"
       />
     </div>
 

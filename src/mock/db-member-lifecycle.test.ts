@@ -544,8 +544,8 @@ describe('任期到期提醒（MEM-004）', () => {
         tenures: [], departmentHistory: [], anomalies: [],
       }) as unknown as void
     // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
-    freshMember('mem-t0', '更近任期', iso(3))
-    freshMember('mem-t1', '近任期', iso(10))
+    freshMember('mem-t0', '更近任期', iso(5))
+    freshMember('mem-t1', '近任期', iso(1))
     freshMember('mem-t2', '远任期', iso(300))
     freshMember('mem-t3', '已结束', iso(10), 'ended')
     try {
@@ -559,7 +559,17 @@ describe('任期到期提醒（MEM-004）', () => {
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
       // daysLeft 升序（近任期在前）；仅就本次构造的窗口内合成成员断言，避免被种子数据（如 mem-004 的 2026-08-20 任期）同窗口命中导致排序串扰
       const synthetic = hits.filter((h) => ['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'].includes(h.memberId))
-      expect(synthetic.map((h) => h.memberId)).toEqual(['mem-t0', 'mem-t1'])
+      expect(synthetic.map((h) => h.memberId)).toEqual(['mem-t1', 'mem-t0'])
+      // daysLeft 升序（近任期在前）：种子数据里 mem-004（2026-08-20 到期）等成员可能随
+      // 真实时钟进入同一窗口并与 mem-t1 并列，故只断言全局升序性质，不绑定具体成员位次
+      for (let i = 1; i < hits.length; i++) {
+        expect(hits[i].daysLeft).toBeGreaterThanOrEqual(hits[i - 1].daysLeft)
+      }
+      expect(hits[0].daysLeft).toBeLessThanOrEqual(30)
+      // 宽窗口内 mem-t1(1 天) 必须排在 mem-t2(300 天) 之前，用相对顺序断言避免依赖固定日期种子数据
+      const wideOrder = wide.map((h) => h.memberId)
+      expect(wideOrder.indexOf('mem-t1')).toBeGreaterThanOrEqual(0)
+      expect(wideOrder.indexOf('mem-t1')).toBeLessThan(wideOrder.indexOf('mem-t2'))
     } finally {
       const ids = new Set(['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {

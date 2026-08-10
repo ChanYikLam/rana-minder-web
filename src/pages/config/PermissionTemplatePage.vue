@@ -54,8 +54,15 @@ async function loadData() {
     diff.value = null
     publishReason.value = ''
     reauthProof.value = ''
+    mode.value = null
+    draft.value = { name: '', permissions: '' }
     state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
+}
+
+function resetEditor() {
+  mode.value = null
+  draft.value = { name: '', permissions: '' }
 }
 
 function startCreate() {
@@ -84,7 +91,7 @@ async function handleSave() {
     creating.value = false
     if (result.kind === 'completed') {
       toast.success('模板已创建（草稿）')
-      mode.value = null
+      resetEditor()
       await loadData()
       selected.value = result.data
       return
@@ -103,7 +110,7 @@ async function handleSave() {
   }
   await loadData()
   selected.value = items.value.find((t) => t.id === result.data.id) ?? null
-  mode.value = null
+  resetEditor()
   toast.success('草稿已保存')
 }
 
@@ -188,7 +195,7 @@ onMounted(loadData)
             :key="tpl.id"
             class="cursor-pointer"
             :selected="selected?.id === tpl.id"
-            @click="selected = tpl; mode = null; diff = null"
+            @click="selected = tpl; resetEditor(); diff = null"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
@@ -220,7 +227,7 @@ onMounted(loadData)
                 </div>
               </div>
               <div class="mt-4 pt-3 border-t border-border flex gap-2">
-                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="mode = null">取消</button>
+                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="resetEditor">取消</button>
                 <button class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60" :disabled="creating" @click="handleSave">{{ creating ? '创建中...' : '创建草稿' }}</button>
               </div>
             </template>
@@ -239,7 +246,7 @@ onMounted(loadData)
                 </div>
               </div>
               <div class="mt-4 pt-3 border-t border-border flex gap-2">
-                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="mode = null">取消</button>
+                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="resetEditor">取消</button>
                 <button class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60" :disabled="saving" @click="handleSave">{{ saving ? '保存中...' : '保存草稿' }}</button>
               </div>
             </template>
@@ -265,8 +272,6 @@ onMounted(loadData)
               </div>
             </template>
           </Card>
-
-          <!-- 权限详情（只读态由上方 mode 驱动卡片展示） -->
 
           <!-- 发布流程（仅草稿） -->
           <Card v-if="selected?.status === 'draft'" class="h-fit border-warning">
