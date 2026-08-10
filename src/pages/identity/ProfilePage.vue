@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
@@ -45,6 +45,8 @@ const state = ref<PageState>('loading')
 const error = ref<{ code: string; message: string } | null>(null)
 const profile = ref<Profile | null>(null)
 const version = ref(0)
+// 错误态提示文案：按失败来源区分「资料加载失败」与「冲突加载失败」（审计 P3）
+const pageErrorMsg = ref('资料加载失败')
 
 const editing = ref(false)
 const formEmail = ref('')
@@ -95,6 +97,30 @@ async function loadProfile() {
     // P3-2：rejected 也统一走 errorToPageState，避免手写 forbidden 集合与映射不一致（004/011/015 同样映射为 forbidden）
     state.value = errorToPageState(errorCodeOf(result))
     error.value = 'error' in result ? result.error : { code: errorCodeOf(result), message: '加载失败' }
+  }
+}
+
+// 统一入口：按模式分派加载逻辑（正常模式加载资料，sync-conflict 模式先拉资料再拉冲突清单）
+async function loadPage() {
+  // 重置冲突页遗留状态（审计 P2-1：组件实例被路由复用/onMounted 不重新触发时，防止旧冲突数据残留）
+  resetConflictState()
+  // 默认错误文案为「资料加载失败」，sync-conflict 分支若冲突清单加载失败会覆盖为「冲突清单加载失败」（审计 P3）
+  pageErrorMsg.value = '资料加载失败'
+  if (!isSyncConflict.value) {
+    await loadProfile()
+    return
+  }
+  // sync-conflict 模式：先拉取真实本地档案，再请求真实冲突清单
+  state.value = 'loading'
+  error.value = null
+  const result = await get<Profile>('/auth/profile')
+  if (result.kind === 'completed') {
+    profile.value = result.data
+    state.value = 'normal'
+    await loadConflicts()
+  } else {
+    state.value = 'error'
+    error.value = result.kind === 'rejected' && result.error ? result.error : { code: 'IFC-ERR-016', message: '加载失败' }
   }
 }
 
@@ -198,51 +224,78 @@ function syncTag(field: string): { label: string; className: string } | null {
 interface ConflictField { field: string; label: string; localValue: string; remoteValue: string; chosen: 'local' | 'remote' }
 const conflictFields = ref<ConflictField[]>([])
 const conflictSubmitting = ref(false)
+const conflictLoading = ref(false)
 
-function buildConflicts(p: Profile) {
-  conflictFields.value = [
-    { field: 'name', label: '姓名', localValue: p.name, remoteValue: p.name + '（学校侧已更新）', chosen: 'remote' },
-    { field: 'studentId', label: '学号', localValue: p.studentId, remoteValue: p.studentId, chosen: 'remote' },
-    { field: 'email', label: '邮箱', localValue: p.email, remoteValue: p.email, chosen: 'local' },
-    { field: 'phone', label: '手机号', localValue: p.phone, remoteValue: p.phone, chosen: 'local' },
-  ]
+/** 重置冲突页状态（进入/重试 sync-conflict 模式时调用，避免旧状态残留） */
+function resetConflictState() {
+  conflictFields.value = []
+  conflictSubmitting.value = false
+  conflictLoading.value = false
 }
 
-onMounted(() => {
-  if (!isSyncConflict.value) {
-    loadProfile()
-    return
+async function loadConflicts() {
+  conflictLoading.value = true
+  const result = await get<{ conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> }>('/auth/profile/sync-conflicts')
+  conflictLoading.value = false
+  if (result.kind === 'completed') {
+    conflictFields.value = result.data.conflicts.map((c) => ({ ...c, chosen: 'remote' as const }))
+    if (conflictFields.value.length === 0) {
+      toast.success('没有待处理的同步冲突')
+      router.push('/me/profile')
+      return
+    }
+  } else if (result.kind === 'rejected' && result.error) {
+    state.value = 'error'
+    error.value = result.error
+    // 冲突清单加载失败：区分错误文案，便于用户判断重试对象（审计 P3）
+    pageErrorMsg.value = '冲突清单加载失败'
+  } else {
+    state.value = 'error'
+    error.value = { code: 'IFC-ERR-016', message: '冲突加载失败' }
+    pageErrorMsg.value = '冲突清单加载失败'
   }
-  // sync-conflict 模式：展示冲突并引导解决
-  state.value = 'normal'
-  const placeholder: Profile = {
-    studentId: '2024110101', name: '陈小明', email: 'chenxiaoming@stu.gdmu.edu.cn',
-    phone: '13800000000', emailVerified: true, profileComplete: true,
-  }
-  profile.value = placeholder
-  buildConflicts(placeholder)
-})
+}
 
 async function handleResolveConflicts() {
-  if (!profile.value || conflictSubmitting.value) return
+  if (conflictSubmitting.value) return
   conflictSubmitting.value = true
-  const resolved: { field: string; chosenValue: string }[] = []
   for (const f of conflictFields.value) {
     const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
-    resolved.push({ field: f.field, chosenValue })
     const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
     if (r.kind === 'rejected' && r.error) {
       conflictSubmitting.value = false
       toastError(r, '冲突解决失败')
+      // 逐条写回过程中途失败：已写回字段已生效，重新拉取冲突清单使页面与服务端状态对齐，
+      // 避免已解决字段留在页面上被重复提交
+      await loadConflicts()
       return
     }
   }
   conflictSubmitting.value = false
-  profile.value = { ...profile.value }
-  buildConflicts(profile.value)
+  if (profile.value) {
+    profile.value = { ...profile.value }
+  }
+  conflictFields.value = []
   toast.success('冲突已解决')
   router.push('/me/profile')
 }
+
+onMounted(async () => {
+  await loadPage()
+})
+
+// 审计 P2-1：ProfilePage 被 /me/profile、/me/profile/edit、/me/profile/sync-conflict 三个路由共用，
+// vue-router 复用组件实例时 onMounted 不会重新触发。监听路由模式变化，
+// 在切入 sync-conflict 模式时强制重置状态并重新加载，避免旧 profile/conflictFields 残留导致静默失效。
+watch(
+  () => route.meta.mode,
+  async (mode, prevMode) => {
+    if (mode === 'sync-conflict' && mode !== prevMode) {
+      await loadPage()
+    }
+  },
+  { immediate: false }
+)
 </script>
 
 <template>
@@ -250,8 +303,8 @@ async function handleResolveConflicts() {
     :state="state"
     title="个人资料"
     :error="error"
-    error-message="资料加载失败"
-    @retry="loadProfile"
+    :error-message="pageErrorMsg"
+    @retry="loadPage"
   >
     <div class="max-w-2xl mx-auto" v-if="profile">
       <!-- 同步冲突解决模式 -->
@@ -262,7 +315,11 @@ async function handleResolveConflicts() {
         </div>
         <p class="text-sm text-text-secondary mb-6">本地档案与统一身份认证存在不一致，请选择保留哪一侧的值</p>
 
-        <div class="rounded-lg border border-border bg-elevated mb-4 overflow-hidden">
+        <div v-if="conflictLoading" class="rounded-lg border border-border bg-elevated p-8 text-center text-sm text-text-secondary">
+          正在加载冲突字段...
+        </div>
+
+        <div v-else-if="conflictFields.length > 0" class="rounded-lg border border-border bg-elevated mb-4 overflow-hidden">
           <div class="px-4 py-3 border-b border-border flex items-center gap-2">
             <Scale :size="16" class="text-warning" />
             <span class="text-sm font-medium text-text-primary">冲突字段</span>
@@ -293,7 +350,7 @@ async function handleResolveConflicts() {
           </button>
           <button
             class="flex-1 h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60"
-            :disabled="conflictSubmitting"
+            :disabled="conflictSubmitting || conflictLoading || conflictFields.length === 0"
             @click="handleResolveConflicts"
           >
             {{ conflictSubmitting ? '提交中...' : '解决冲突' }}

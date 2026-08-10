@@ -8,6 +8,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post, put } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import {
   ClipboardList, Users, Mail, Rocket, PauseCircle, Flag, XCircle, PlayCircle,
@@ -29,6 +30,7 @@ const detail = ref<ActivityManage | null>(null)
 const actionLoading = ref(false)
 const tightenError = ref('')
 const riskError = ref('')
+const riskSucceeded = ref(false)
 const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
 const riskAction = ref<'complete' | 'cancel' | null>(null)
@@ -52,15 +54,28 @@ function formatDeadline(iso: string): string {
 async function runAction(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
+  riskError.value = ''
+  riskSucceeded.value = false
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/${action}`, { ...(input || {}) })
   actionLoading.value = false
   if (result.kind === 'completed') {
+    // P1：complete/cancel 成功后需关闭弹窗并置位 succeeded，避免 HighRiskConfirm 永久停留“正在执行...”
+    if (action === 'complete' || action === 'cancel') {
+      riskSucceeded.value = true
+      riskOpen.value = false
+    }
     await loadDetail()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
+    if (action === 'complete' || action === 'cancel') riskOpen.value = false
   } else if (result.kind === 'rejected' && result.error) {
     const message = (result.error as { message?: string }).message || '操作失败'
     riskError.value = message
     toast.error(message)
+  } else {
+    riskError.value = '操作失败，请稍后重试'
+    toast.error('操作失败，请稍后重试')
   }
 }
 
@@ -456,6 +471,7 @@ onMounted(loadDetail)
         impact-summary="操作后活动状态不可自行恢复；取消仅限未发出邀请的活动。"
         confirm-label="确认执行"
         :executing="actionLoading"
+        :succeeded="riskSucceeded"
         :error-message="riskError"
         @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
       />
