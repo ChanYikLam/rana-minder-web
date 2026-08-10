@@ -298,20 +298,32 @@ async function handleRepair(club: ClubItem) {
   }
 }
 
+// 重新绑定/重新接入：搜索候选后先确认展示将绑定的 Group，避免同名社团静默绑错对象（P1-16）
+const rebind = ref<{ club: ClubItem; candidate: GroupSearchResult; endpoint: 'rebind' | 'reaccess' } | null>(null)
+const rebindExecuting = ref(false)
+
 async function handleRebind(club: ClubItem) {
   actingId.value = club.clubId
   const search = await get<{ items: GroupSearchResult[] }>('/admin/groups/search', { q: club.clubName.trim() })
+  actingId.value = null
   const candidate = search.kind === 'completed' ? search.data.items.find((g) => g.id !== club.groupId && !g.boundClubId && g.purpose === 'club') : undefined
   if (!candidate) {
-    actingId.value = null
     toast.error('未找到可绑定的同名 Group，请在向导中选择')
     return
   }
-  const endpoint = club.status === 'pending_rebind' ? 'reaccess' : 'rebind'
-  const res = await post(`/admin/clubs/${club.clubId}/${endpoint}`, { groupId: candidate.id })
-  actingId.value = null
+  // 展示待绑定 Group 供确认，不直接执行
+  rebind.value = { club, candidate, endpoint: club.status === 'pending_rebind' ? 'reaccess' : 'rebind' }
+}
+
+async function handleRebindConfirm() {
+  const t = rebind.value
+  if (!t) return
+  rebindExecuting.value = true
+  const res = await post(`/admin/clubs/${t.club.clubId}/${t.endpoint}`, { groupId: t.candidate.id })
+  rebindExecuting.value = false
+  rebind.value = null
   if (res.kind === 'completed') {
-    toast.success(endpoint === 'reaccess' ? '重新接入完成' : '重新绑定完成')
+    toast.success(t.endpoint === 'reaccess' ? '重新接入完成' : '重新绑定完成')
     await loadData()
   } else {
     toastError(res, '操作失败，请重试')
@@ -492,6 +504,19 @@ onMounted(loadData)
         :executing="riskExecuting"
         @confirm="riskExec"
         @update:open="(v) => { if (!v) risk = null }"
+      />
+
+      <!-- 重新绑定/重新接入确认：展示将绑定的 Group（P1-16） -->
+      <HighRiskConfirm
+        :open="rebind !== null"
+        title="确认绑定 Group"
+        :description="`将社团「${rebind?.club.clubName}」绑定到同名 Group「${rebind?.candidate.name}」（${rebind?.candidate.stableId}），请确认绑定对象无误。`"
+        :targets="rebind ? [{ id: rebind.club.clubId, label: rebind.club.clubName, detail: `目标 Group：${rebind.candidate.name}` }] : []"
+        impact-summary="绑定后该社团的成员/权限以目标 Group 为准；绑定错误可能影响成员数据归属。"
+        confirm-label="确认绑定"
+        :executing="rebindExecuting"
+        @confirm="handleRebindConfirm"
+        @update:open="(v) => { if (!v) rebind = null }"
       />
     </div>
 

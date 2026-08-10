@@ -870,10 +870,12 @@ export function resignationRequestsOfMember(clubId: string, memberId: string): M
   return resignationRequests.filter((r) => r.clubId === clubId && r.memberId === memberId)
 }
 
-export function decideResignationRequest(requestId: string, decision: 'approve' | 'reject', actorName: string): { ok: boolean; error?: string } {
+export function decideResignationRequest(requestId: string, decision: 'approve' | 'reject', actorName: string, actorId?: string): { ok: boolean; error?: string } {
   const req = resignationRequests.find((r) => r.id === requestId)
   if (!req) return { ok: false, error: '申请不存在' }
   if (req.status !== 'under_review') return { ok: false, error: '该申请已处理' }
+  // P1-13：自审拦截——负责人/人事不得审批自己的辞职申请（与退出审批规则对齐）
+  if (actorId && req.memberId === actorId) return { ok: false, error: '不能审批自己的辞职申请' }
   if (decision === 'reject') {
     const t = assertTransition('SM-MEM-005', req.status, 'rejected', 'reject')
     if (!t.ok) return { ok: false, error: t.reason || '该申请已处理' }

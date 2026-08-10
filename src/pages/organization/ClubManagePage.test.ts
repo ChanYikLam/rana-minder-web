@@ -57,6 +57,40 @@ describe('ClubManagePage 社团管理', () => {
     expect(wrapper.text()).not.toContain('计算机协会')
   })
 
+  it('重新绑定：先展示待绑定 Group 确认，确认后才执行请求（P1-16）', async () => {
+    const rebindClub = { ...enabledClub, status: 'sync_abnormal_ro', groupId: 'g1', groupName: '计算机协会' }
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [rebindClub] } })
+    const wrapper = mount(ClubManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 切到管理 tab 并点击"重新绑定"
+    const manageTab = wrapper.findAll('button').find((b) => b.text().includes('社团管理'))
+    await manageTab!.trigger('click')
+    const rebindBtn = wrapper.findAll('button').find((b) => b.text().includes('重新绑定'))
+    // 搜索结果返回同名未绑定候选 g9
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { items: [{ id: 'g9', name: '计算机协会', stableId: 'S-GDMU-009', path: '/社团/计算机协会', parentId: null, purpose: 'club', boundClubId: null, memberCount: 0, match: 'exact', score: 1 }] },
+    })
+    await rebindBtn!.trigger('click')
+    await flushPromises()
+
+    // 搜索请求已发出，但尚未执行绑定请求
+    expect(mockGet).toHaveBeenCalledWith('/admin/groups/search', { q: '计算机协会' })
+    expect(mockPost).not.toHaveBeenCalled()
+
+    // 确认弹窗可见（HighRiskConfirm stub 以 hrc 渲染）
+    const hrc = wrapper.find('.hrc')
+    expect(hrc.exists()).toBe(true)
+
+    // 点击确认后才发绑定请求
+    mockPost.mockResolvedValue({ kind: 'completed', data: { id: 'club-001', status: 'enabled' } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [rebindClub] } })
+    await hrc.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/clubs/club-001/rebind', { groupId: 'g9' })
+  })
+
   it('接入向导：搜索 Group → 选中 → 指定负责人 → 完成接入并切到管理页', async () => {
     vi.useFakeTimers()
     const pendingClub = { ...enabledClub, status: 'wizard_pending', wizard: null, wizardStep: 0, importedCount: 0 }

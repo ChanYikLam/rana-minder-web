@@ -330,6 +330,14 @@ describe('辞职申请（create / decide）', () => {
     expect(decideResignationRequest(created.id, 'approve', '李思颖')).toMatchObject({ ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' })
   })
 
+  it('decideResignationRequest：自审拦截——审批人不可批准自己的辞职申请（P1-13）', () => {
+    const created = createResignationRequest('club-001', 'mem-003', '李思颖', '人事部', '部长', '家庭原因')
+    expect(decideResignationRequest(created.id, 'approve', '李思颖', 'mem-003')).toMatchObject({ ok: false, error: '不能审批自己的辞职申请' })
+    expect(created.status).toBe('under_review')
+    // 他人审批不受影响（用 reject 避免污染全局成员状态）
+    expect(decideResignationRequest(created.id, 'reject', '张明远', 'mem-004').ok).toBe(true)
+  })
+
   it('decideResignationRequest：驳回成功', () => {
     const created = createResignationRequest('club-001', 'mem-003', '李思颖', '人事部', '部长', '家庭原因')
     const r = decideResignationRequest(created.id, 'reject', '张明远')

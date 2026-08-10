@@ -2072,7 +2072,7 @@ if (!r.ok) return businessError(r.error || '操作失败')
       const req = db.resignationRequests.find((r) => r.id === query.requestId)
       if (scope && req && req.departmentName !== scope) return forbidden()
       const decision = body.input?.decision === 'approve' ? 'approve' : 'reject'
-      const r = db.decideResignationRequest(query.requestId, decision, member.name)
+      const r = db.decideResignationRequest(query.requestId, decision, member.name, actor ?? undefined)
       if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { id: query.requestId, status: decision === 'approve' ? 'approved' : 'rejected' } }
     },

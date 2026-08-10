@@ -403,8 +403,8 @@ onMounted(loadData)
               >
                 二次确认退出
               </button>
-              <!-- 管理端：审批（仅社团负责人/人事，与后端 canManageMembersFull 一致） -->
-              <template v-if="req.status === 'under_review' && canApproveExit">
+              <!-- 管理端：审批（仅社团负责人/人事，与后端 canManageMembersFull 一致；自审拦截 P1-13） -->
+              <template v-if="req.status === 'under_review' && canApproveExit && req.memberId !== session.workspace?.memberId">
                 <button
                   class="flex items-center gap-1 px-2.5 py-1 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90"
                   :disabled="exitActingId === req.id"
@@ -485,12 +485,15 @@ onMounted(loadData)
                 >
                   撤回申请
                 </button>
-                <button class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90" :disabled="actingId === res.id" @click="handleResignDecide(res, 'approve')">
-                  <CheckCircle2 :size="14" /> 批准
-                </button>
-                <button class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === res.id" @click="handleResignDecide(res, 'reject')">
-                  <XCircle :size="14" /> 驳回
-                </button>
+                <!-- P1-13：自审拦截——不渲染本人辞职申请的审批按钮 -->
+                <template v-if="res.memberId !== session.workspace?.memberId">
+                  <button class="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90" :disabled="actingId === res.id" @click="handleResignDecide(res, 'approve')">
+                    <CheckCircle2 :size="14" /> 批准
+                  </button>
+                  <button class="flex items-center gap-1 px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === res.id" @click="handleResignDecide(res, 'reject')">
+                    <XCircle :size="14" /> 驳回
+                  </button>
+                </template>
               </div>
               <p v-else-if="res.status === 'rejected' && res.decidedBy" class="text-xs text-text-secondary mt-2">由 {{ res.decidedBy }} 驳回</p>
               <p v-else-if="res.status === 'approved' && res.decidedBy" class="text-xs text-success mt-2">由 {{ res.decidedBy }} 批准</p>
