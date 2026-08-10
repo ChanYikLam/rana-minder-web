@@ -90,6 +90,13 @@ export async function runNavigationGuard(
 
   const isPublic = to.meta.public === true
 
+  // 404 页（P-GEN-01）虽为公开页（未登录可访问不重定向），仍需加载会话
+  // 以支持 App 按登录态动态布局（已登录保留导航便于返回）。否则整页刷新
+  // 直达 404 时 session 仍为空，已登录用户会落到无导航的公开布局。
+  if (to.name === 'P-GEN-01' && !session.isAuthenticated) {
+    await session.loadSession()
+  }
+
   if (!isPublic) {
     if (!session.isAuthenticated) {
       await session.loadSession()
