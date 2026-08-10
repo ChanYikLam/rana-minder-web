@@ -4532,7 +4532,7 @@ const mockFileHandlers: MockMethod[] = [
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="${fileId}"`,
         },
-        body: '\uFEFF姓名,学号,部门,状态\n陈雨桐,20240002,技术部,成员\n刘子豪,20240001,技术部,候选人\n林婉婷,20240006,设计部,候选人\n',
+        body: '\uFEFF姓名,学号,部门,状态\n陈雨彤,20240002,技术部,成员\n刘子豪,20240001,技术部,候选人\n林婉婷,20240006,设计部,候选人\n',
       }
     },
   },
