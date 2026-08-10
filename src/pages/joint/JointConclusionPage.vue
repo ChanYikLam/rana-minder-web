@@ -136,7 +136,31 @@ async function handleInvitationAction(invitationId: string, action: string) {
   }
 }
 
-const invitedFor = (applicantName: string) => invitations.value.filter((i) => i.applicantName === applicantName)
+// P1-18：按 applicantId 分组与关联邀请，同名申请人不再串号；applicantId 缺失时回退姓名分组（兼容历史数据）
+interface ConclusionGroup { key: string; applicantName: string; items: Conclusion[] }
+const conclusionGroups = computed<ConclusionGroup[]>(() => {
+  const map = new Map<string, ConclusionGroup>()
+  for (const c of conclusions.value) {
+    const key = c.applicantId || `name:${c.applicantName}`
+    let g = map.get(key)
+    if (!g) {
+      g = { key, applicantName: c.applicantName, items: [] }
+      map.set(key, g)
+    }
+    g.items.push(c)
+  }
+  return [...map.values()]
+})
+
+const invitedFor = (group: ConclusionGroup) =>
+  invitations.value.filter((i) =>
+    group.key.startsWith('name:') ? i.applicantName === group.applicantName : i.applicantId === group.key,
+  )
+
+// P2-39：发送/重发邀请前确认目标结论存在，避免非空断言崩溃
+function handleInviteFor(target: Conclusion | undefined) {
+  if (target) handleInvite(target)
+}
 
 const historyOpen = ref<string | null>(null)
 
@@ -159,11 +183,11 @@ onMounted(async () => {
 
       <PermissionGuard permission="club:joint:manage">
         <div class="space-y-4">
-          <Card v-for="name in [...new Set(conclusions.map((c) => c.applicantName))]" :key="name">
-            <p class="text-base font-medium text-text-primary mb-3">{{ name }}</p>
+          <Card v-for="g in conclusionGroups" :key="g.key">
+            <p class="text-base font-medium text-text-primary mb-3">{{ g.applicantName }}</p>
             <div class="space-y-2">
               <div
-                v-for="c in conclusions.filter((c) => c.applicantName === name)"
+                v-for="c in g.items"
                 :key="c.id"
                 class="flex items-center justify-between rounded-lg border border-border p-3"
                 :class="c.myClub ? 'border-border' : 'border-border bg-subtle/50'"
@@ -271,10 +295,10 @@ onMounted(async () => {
             </div>
 
             <!-- 已发邀请 -->
-            <div v-if="invitedFor(name).length > 0" class="mt-3 pt-3 border-t border-border space-y-2">
+            <div v-if="invitedFor(g).length > 0" class="mt-3 pt-3 border-t border-border space-y-2">
               <p class="text-xs text-text-secondary">已发送的邀请</p>
               <div
-                v-for="inv in invitedFor(name)"
+                v-for="inv in invitedFor(g)"
                 :key="inv.id"
                 class="flex items-center justify-between rounded-md bg-subtle px-3 py-2"
               >
@@ -300,7 +324,7 @@ onMounted(async () => {
                   <button
                     v-if="['rejected', 'withdrawn', 'expired'].includes(inv.status)"
                     class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
-                    @click="handleInvite(conclusions.find((c) => c.applicantId === inv.applicantId)!)"
+                    @click="handleInviteFor(g.items.find((c) => c.applicantId === inv.applicantId))"
                   >
                     <RefreshCw :size="12" /> {{ invitingName === inv.applicantName ? '发送中...' : '重发' }}
                   </button>
@@ -309,16 +333,16 @@ onMounted(async () => {
             </div>
 
             <div
-              v-else-if="conclusions.filter((c) => c.applicantName === name).every((c) => c.status === 'concluded')"
+              v-else-if="g.items.every((c) => c.status === 'concluded')"
               class="mt-3 pt-3 border-t border-border"
             >
               <button
-                v-if="conclusions.some((c) => c.applicantName === name && c.myClub)"
+                v-if="g.items.some((c) => c.myClub)"
                 class="flex items-center gap-1.5 text-sm text-primary hover:underline disabled:opacity-60 disabled:cursor-not-allowed"
                 :disabled="invitingName !== null"
-                @click="handleInvite(conclusions.find((c) => c.applicantName === name)!)"
+                @click="handleInviteFor(g.items.find((c) => c.myClub) ?? g.items[0])"
               >
-                <Send :size="14" /> {{ invitingName === name ? '发送中...' : '发送邀请' }}
+                <Send :size="14" /> {{ invitingName === g.applicantName ? '发送中...' : '发送邀请' }}
               </button>
             </div>
           </Card>
