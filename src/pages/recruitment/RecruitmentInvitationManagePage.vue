@@ -5,6 +5,7 @@ import { Mail } from '@lucide/vue'
 import { Card, EmptyState, PageStateBoundary } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 
 interface InvitationItem {
@@ -28,9 +29,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = result.data.items
     state.value = items.value.length ? 'normal' : 'empty'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 onMounted(loadData)

@@ -172,6 +172,7 @@ async function handleExecute(proof?: string) {
     data.value.canExecute = false
     const failed = r.data.results.filter((x) => !x.success)
     executeSucceeded.value = true
+    executeError.value = ''
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
     showExecuteConfirm.value = false
     executeReason.value = ''
@@ -379,7 +380,7 @@ onMounted(async () => {
         @confirm="handleExecute($event)"
         @retry="executeError = ''"
         @update:errorMessage="(v) => executeError = v"
-        @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = '' } }"
+        @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = ''; executeSucceeded = false; executeError = '' } }"
       >
         <template #extra>
           <textarea

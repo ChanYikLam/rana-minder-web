@@ -2,23 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const mocks = vi.hoisted(() => ({
-  get: vi.fn(),
-  post: vi.fn(),
-  reauthenticate: vi.fn(),
-}))
-const { mockToastSuccess, mockToastError, mockToastInfo } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockReauthenticate, mockToastSuccess, mockToastError, mockToastInfo } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockReauthenticate: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
   mockToastInfo: vi.fn(),
 }))
-
 vi.mock('@/services/client', () => ({
-  get: (...args: unknown[]) => mocks.get(...args),
-  post: (...args: unknown[]) => mocks.post(...args),
+  get: (...args: unknown[]) => mockGet(...args),
+  post: (...args: unknown[]) => mockPost(...args),
 }))
 vi.mock('@/services/modules', () => ({
-  identityApi: { reauthenticate: (...args: unknown[]) => mocks.reauthenticate(...args) },
+  identityApi: { reauthenticate: (...args: unknown[]) => mockReauthenticate(...args) },
 }))
 vi.mock('vue-sonner', () => ({
   toast: { success: (...a: unknown[]) => mockToastSuccess(...a), error: (...a: unknown[]) => mockToastError(...a), info: (...a: unknown[]) => mockToastInfo(...a) },
@@ -37,38 +34,40 @@ const draftTemplate = {
 
 describe('PermissionTemplatePage 权限模板', () => {
   beforeEach(() => {
-    mocks.get.mockReset()
-    mocks.post.mockReset()
-    mocks.reauthenticate.mockReset()
+    mockGet.mockReset()
+    mockPost.mockReset()
+    mockReauthenticate.mockReset()
     mockToastSuccess.mockReset()
     mockToastError.mockReset()
     mockToastInfo.mockReset()
     vi.clearAllMocks()
+    // reauth 默认成功：隔离发布流程副作用（与 dev 发布用例共用，走 identityApi mock）
+    mockReauthenticate.mockResolvedValue({ kind: 'completed', data: { proof: 'proof-1', expiresAt: '' } })
   })
   afterEach(() => vi.restoreAllMocks())
 
   function mountPage() {
-    mocks.get.mockResolvedValue({ kind: 'completed', data: { items: [draftTemplate] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [draftTemplate] } })
     return mount(PermissionTemplatePage, { global: { stubs: pageStubs } })
   }
 
   it('加载成功：渲染模板列表', async () => {
-    mocks.get.mockResolvedValue({ kind: 'completed', data: { items: [sampleTpls[0]] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [sampleTpls[0]] } })
     const wrapper = mount(PermissionTemplatePage, { global: { stubs: pageStubs } })
     await flushPromises()
-    expect(mocks.get).toHaveBeenCalledWith('/admin/config/permission-templates')
+    expect(mockGet).toHaveBeenCalledWith('/admin/config/permission-templates')
     expect(wrapper.text()).toContain('默认负责人')
   })
 
   it('加载失败：不渲染模板', async () => {
-    mocks.get.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
     const wrapper = mount(PermissionTemplatePage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('默认负责人')
   })
 
   it('编辑草稿：点取消后复位 mode 与 draft，避免残留旧数据', async () => {
-    mocks.get.mockResolvedValue({ kind: 'completed', data: { items: [sampleTpls[0]] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [sampleTpls[0]] } })
     const wrapper = mount(PermissionTemplatePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
@@ -94,10 +93,10 @@ describe('PermissionTemplatePage 权限模板', () => {
   })
 
   it('创建模板成功后复位 mode 与 draft', async () => {
-    mocks.get.mockResolvedValue({ kind: 'completed', data: { items: [] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
     const newTpl = { id: 'tpl-new', name: '新模板', permissions: ['a:b:c'], version: 1, draftVersion: 1, status: 'draft' }
-    mocks.post.mockResolvedValueOnce({ kind: 'completed', data: newTpl })
-    mocks.get.mockResolvedValueOnce({ kind: 'completed', data: { items: [newTpl] } })
+    mockPost.mockResolvedValueOnce({ kind: 'completed', data: newTpl })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [newTpl] } })
 
     const wrapper = mount(PermissionTemplatePage, { global: { stubs: pageStubs } })
     await flushPromises()
@@ -122,7 +121,7 @@ describe('PermissionTemplatePage 权限模板', () => {
   })
 
   it('切换模板：编辑态在切换后不再渲染（避免与新模板详情卡互相覆盖）', async () => {
-    mocks.get.mockResolvedValue({ kind: 'completed', data: { items: sampleTpls } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: sampleTpls } })
     const wrapper = mount(PermissionTemplatePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
@@ -154,14 +153,13 @@ describe('PermissionTemplatePage 权限模板', () => {
     // 重新验证身份（mock reauth）
     const reauthBtn = wrapper.findAll('button').find((b) => b.text().includes('重新验证身份'))
     expect(reauthBtn, '未找到重新验证身份按钮').toBeTruthy()
-    mocks.reauthenticate.mockResolvedValueOnce({ kind: 'completed', data: { proof: 'proof-1', expiresAt: '' } })
     await reauthBtn!.trigger('click')
     await flushPromises()
 
     // 预览差异
     const previewBtn = wrapper.findAll('button').find((b) => b.text().includes('预览差异'))
     expect(previewBtn, '未找到预览差异按钮').toBeTruthy()
-    mocks.get.mockResolvedValueOnce({
+    mockGet.mockResolvedValueOnce({
       kind: 'completed',
       data: { added: ['club:member:manage'], removed: [], affectedGroups: ['技术部'], affectedMembers: 12, previewVersion: 1 },
     })
@@ -173,7 +171,7 @@ describe('PermissionTemplatePage 权限模板', () => {
     await textarea.setValue('安全加固，收紧权限范围')
 
     // 确认发布 → mock accepted
-    mocks.post.mockResolvedValue({ kind: 'accepted', data: { taskId: 't-1', status: 'processing' } })
+    mockPost.mockResolvedValue({ kind: 'accepted', data: { taskId: 't-1', status: 'processing' } })
     const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('确认发布草稿'))
     expect(confirmBtn, '未找到确认发布草稿按钮').toBeTruthy()
     await confirmBtn!.trigger('click')
@@ -186,12 +184,12 @@ describe('PermissionTemplatePage 权限模板', () => {
     await flushPromises()
 
     // HighRiskConfirm stub 的 confirm 会触发 handlePublish
-    expect(mocks.post).toHaveBeenCalledWith(
+    expect(mockPost).toHaveBeenCalledWith(
       '/admin/config/permission-templates/tpl-1/publish',
       expect.objectContaining({ reason: '安全加固，收紧权限范围', reauthProof: 'proof-1', previewVersion: 1 }),
     )
     expect(mockToastInfo).toHaveBeenCalledWith('发布已受理，正在后台处理')
     // accepted 后刷新列表（loadData 再次 get）
-    expect(mocks.get).toHaveBeenCalledWith('/admin/config/permission-templates')
+    expect(mockGet).toHaveBeenCalledWith('/admin/config/permission-templates')
   })
 })
