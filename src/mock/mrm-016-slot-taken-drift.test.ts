@@ -6,6 +6,7 @@ import {
   jointInterviews,
   jointActivities,
   jointSlots,
+  jointConclusions,
   withdrawApplication,
   invalidateInterview,
   cancelActivity,
@@ -17,6 +18,8 @@ import {
   submitApplication,
   bookInterview,
   markIdentityAnomaly,
+  markAttendance,
+  markJointAttendance,
 } from './db-recruitment'
 
 /**
@@ -25,11 +28,20 @@ import {
 type InterviewSnap = {
   status: string
   slotId: string | null
+  startAt: string | null
+  endAt: string | null
   version: number
 }
 type SlotSnap = { taken: number }
 type AppSnap = { status: string; version: number }
-type JointIntSnap = { status: string; slotId: string | null; version: number }
+type JointIntSnap = {
+  status: string
+  slotId: string | null
+  startAt: string | null
+  endAt: string | null
+  version: number
+}
+type JointConSnap = { status: string; reviewFlag: boolean; version: number }
 type JointActSnap = {
   status: string
   cancelConfirmRound: number
@@ -47,8 +59,8 @@ type ActSnap = {
 }
 
 const SEED_INTERVIEWS: Record<string, InterviewSnap> = {
-  'int-001': { status: 'scheduled', slotId: 'slot-001', version: 1 },
-  'int-002': { status: 'completed', slotId: 'slot-001', version: 2 },
+  'int-001': { status: 'scheduled', slotId: 'slot-001', startAt: '2026-08-01T10:00:00Z', endAt: '2026-08-01T10:30:00Z', version: 1 },
+  'int-002': { status: 'completed', slotId: 'slot-001', startAt: '2026-08-01T10:00:00Z', endAt: '2026-08-01T10:30:00Z', version: 2 },
 }
 
 const SEED_SLOTS: Record<string, SlotSnap> = {
@@ -70,7 +82,12 @@ const SEED_ACTS: Record<string, ActSnap> = {
 }
 
 const SEED_JOINT_INTS: Record<string, JointIntSnap> = {
-  'jint-001': { status: 'scheduled', slotId: 'jslot-001', version: 1 },
+  'jint-001': { status: 'scheduled', slotId: 'jslot-001', startAt: '2026-08-01T10:00:00Z', endAt: '2026-08-01T10:30:00Z', version: 1 },
+}
+
+const SEED_JOINT_CONS: Record<string, JointConSnap> = {
+  'jcon-001': { status: 'evaluating', reviewFlag: false, version: 1 },
+  'jcon-002': { status: 'evaluating', reviewFlag: false, version: 1 },
 }
 
 const SEED_JOINT_SLOTS: Record<string, SlotSnap> = {
@@ -96,6 +113,8 @@ function resetSeeds(): void {
     if (!snap) continue
     it.status = snap.status as typeof it.status
     it.slotId = snap.slotId
+    it.startAt = snap.startAt
+    it.endAt = snap.endAt
     it.version = snap.version
   }
   for (const a of recruitmentActivities) {
@@ -124,11 +143,20 @@ function resetSeeds(): void {
     if (!snap) continue
     it.status = snap.status as typeof it.status
     it.slotId = snap.slotId
+    it.startAt = snap.startAt
+    it.endAt = snap.endAt
     it.version = snap.version
   }
   for (const s of jointSlots) {
     const snap = SEED_JOINT_SLOTS[s.id]
     if (snap) s.taken = snap.taken
+  }
+  for (const con of jointConclusions) {
+    const snap = SEED_JOINT_CONS[con.id]
+    if (!snap) continue
+    con.status = snap.status as typeof con.status
+    con.reviewFlag = snap.reviewFlag
+    con.version = snap.version
   }
   for (const ja of jointActivities) {
     const snap = SEED_JOINT_ACTS[ja.id]
@@ -186,7 +214,11 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
 
     const r = withdrawApplication('act-001', 'u-001', true)
     expect(r.ok, JSON.stringify(r)).toBe(true)
-    expect(findInterview('int-001').status).toBe('cancelled')
+    const it = findInterview('int-001')
+    expect(it.status).toBe('cancelled')
+    expect(it.slotId, '退出招新后应清空 slotId 引用').toBeNull()
+    expect(it.startAt).toBeNull()
+    expect(it.endAt).toBeNull()
     expect(slot.taken, 'slot.taken 应在取消后回退').toBe(before - 1)
   })
 
@@ -196,7 +228,11 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
 
     const r = invalidateInterview('int-001', '测试作废')
     expect(r.ok, JSON.stringify(r)).toBe(true)
-    expect(findInterview('int-001').status).toBe('invalidated')
+    const it = findInterview('int-001')
+    expect(it.status).toBe('invalidated')
+    expect(it.slotId, '作废后应清空 slotId 引用').toBeNull()
+    expect(it.startAt).toBeNull()
+    expect(it.endAt).toBeNull()
     expect(slot.taken, 'slot.taken 应在作废后回退').toBe(before - 1)
   })
 
@@ -206,7 +242,11 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
 
     const r = cancelActivity('act-001', '活动取消测试', true)
     expect(r.ok, JSON.stringify(r)).toBe(true)
-    expect(findInterview('int-001').status).toBe('cancelled')
+    const it = findInterview('int-001')
+    expect(it.status).toBe('cancelled')
+    expect(it.slotId, '活动取消后应清空 slotId 引用').toBeNull()
+    expect(it.startAt).toBeNull()
+    expect(it.endAt).toBeNull()
     expect(slot.taken, 'slot.taken 应在活动取消后回退').toBe(before - 1)
   })
 
@@ -216,7 +256,11 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
 
     const r = forceCompleteActivity('act-001', '强制完成测试')
     expect(r.ok, JSON.stringify(r)).toBe(true)
-    expect(findInterview('int-001').status).toBe('cancelled')
+    const it = findInterview('int-001')
+    expect(it.status).toBe('cancelled')
+    expect(it.slotId, '强制完成后应清空 slotId 引用').toBeNull()
+    expect(it.startAt).toBeNull()
+    expect(it.endAt).toBeNull()
     expect(slot.taken, 'slot.taken 应在强制完成后回退').toBe(before - 1)
   })
 
@@ -228,7 +272,11 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
 
     const r = publishNotQualified('act-001', 'u-001', '资格失效测试')
     expect(r.ok, JSON.stringify(r)).toBe(true)
-    expect(findInterview('int-001').status).toBe('cancelled')
+    const it = findInterview('int-001')
+    expect(it.status).toBe('cancelled')
+    expect(it.slotId, '资格失效后应清空 slotId 引用').toBeNull()
+    expect(it.startAt).toBeNull()
+    expect(it.endAt).toBeNull()
     expect(slot.taken, 'slot.taken 应在资格失效后回退').toBe(before - 1)
   })
 
@@ -242,7 +290,11 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
     ja.clubs.forEach((c) => {
       cancelJointActivity(ja.id, c.clubId, '测试')
     })
-    expect(findJointInterview('jint-001').status).toBe('cancelled_archived')
+    const jit = findJointInterview('jint-001')
+    expect(jit.status).toBe('cancelled_archived')
+    expect(jit.slotId, '联合活动取消后应清空 slotId 引用').toBeNull()
+    expect(jit.startAt).toBeNull()
+    expect(jit.endAt).toBeNull()
     expect(slot.taken, 'joint slot.taken 应在联合活动取消后回退').toBe(before - 1)
   })
 
@@ -252,8 +304,94 @@ describe('MRM-016 处置终态释放 slot.taken（容量计数不漂移）', () 
 
     const r = forceCloseJointActivity('jnt-001', '强制结束测试')
     expect(r.ok, JSON.stringify(r)).toBe(true)
-    expect(findJointInterview('jint-001').status).toBe('cancelled_archived')
+    const jit = findJointInterview('jint-001')
+    expect(jit.status).toBe('cancelled_archived')
+    expect(jit.slotId, '强制结束后应清空 slotId 引用').toBeNull()
+    expect(jit.startAt).toBeNull()
+    expect(jit.endAt).toBeNull()
     expect(slot.taken, 'joint slot.taken 应在强制结束后回退').toBe(before - 1)
+  })
+
+
+  it('markAttendance(leave) 后再 cancelActivity：不得二次扣减 slot.taken（回归双重释放）', () => {
+    const it = findInterview('int-001')
+    const slot = findSlot('slot-001')!
+    const before = slot.taken
+
+    const mark = markAttendance('int-001', 'leave', true)
+    expect(mark.ok, JSON.stringify(mark)).toBe(true)
+    expect(it.slotId).toBeNull()
+    expect(slot.taken).toBe(before - 1)
+
+    // leave 已释放过一次，活动取消不应再次扣减
+    const r = cancelActivity('act-001', '活动取消测试', true)
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(it.status).toBe('cancelled')
+    expect(slot.taken, 'markAttendance 释放后再次取消不得二次扣减').toBe(before - 1)
+  })
+
+  it('markAttendance(absent) 后再 forceCompleteActivity：不得二次扣减 slot.taken', () => {
+    const it = findInterview('int-001')
+    const slot = findSlot('slot-001')!
+    const before = slot.taken
+
+    const mark = markAttendance('int-001', 'absent', true)
+    expect(mark.ok, JSON.stringify(mark)).toBe(true)
+    expect(slot.taken).toBe(before - 1)
+
+    const r = forceCompleteActivity('act-001', '强制完成测试')
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(it.status).toBe('cancelled')
+    expect(slot.taken, 'markAttendance 释放后再次强制完成不得二次扣减').toBe(before - 1)
+  })
+
+  it('markJointAttendance(leave) 释放后 forceCloseJointActivity：不得二次扣减 joint slot.taken', () => {
+    const jit = findJointInterview('jint-001')
+    const slot = findJointSlot('jslot-001')!
+    const before = slot.taken
+
+    const mark = markJointAttendance('jnt-001', jit.applicantId, 'leave')
+    expect(mark.ok, JSON.stringify(mark)).toBe(true)
+    expect(jit.slotId).toBeNull()
+    expect(slot.taken).toBe(before - 1)
+
+    // 联合活动终态处置只处理 pending_selection/scheduled/in_progress，
+    // leave 状态面试不在其内，不会再次扣减容量
+    const r = forceCloseJointActivity('jnt-001', '强制结束测试')
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(jit.status).toBe('leave')
+    expect(slot.taken, 'markJointAttendance 释放后再次强制结束不得二次扣减').toBe(before - 1)
+  })
+
+  it('释放后的 slot 可被新申请人再次预约（不误报满员）', () => {
+    const slot = findSlot('slot-001')!
+    const before = slot.taken
+
+    // 取消占位的面试，释放容量
+    const r = cancelActivity('act-001', '活动取消测试', true)
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(slot.taken).toBe(before - 1)
+
+    // 新申请人 u-007 可在同一 slot 上预约成功
+    const book = bookInterview('act-001', 'u-007', 'rd-001', 'slot-001', 'u-007', true)
+    expect(book.ok, JSON.stringify(book)).toBe(true)
+    expect(slot.taken).toBe(before)
+  })
+
+  it('重复执行同一处置路径不重复扣减（幂等）', () => {
+    const it = findInterview('int-001')
+    const slot = findSlot('slot-001')!
+    const before = slot.taken
+
+    const r1 = invalidateInterview('int-001', '测试作废')
+    expect(r1.ok, JSON.stringify(r1)).toBe(true)
+    expect(slot.taken).toBe(before - 1)
+    expect(it.slotId).toBeNull()
+
+    // 二次作废：状态机不允许重复 invalidate，且容量不再变化
+    const r2 = invalidateInterview('int-001', '再次作废')
+    expect(r2.ok).toBe(false)
+    expect(slot.taken, '重复作废不得再次扣减容量').toBe(before - 1)
   })
 
   it('场景：填满 slot 取消后，预约不再误报满员（回归主诉）', () => {

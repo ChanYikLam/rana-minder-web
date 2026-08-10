@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { mockUsers } from './auth'
-import { members } from './db'
+import { members } from './db-members'
 import {
   recruitmentApplications,
   recruitmentInterviews,
   jointActivities,
+  jointConclusions,
   createJointActivity,
 } from './db-recruitment'
 
@@ -40,11 +41,10 @@ describe('MRM-017 跨模块实体名称/身份一致性（副本数据漂移回�
   })
 
   it('club-002：联合结论种子数据中 clubName 与其他模块保持一致', () => {
-    const con = jointActivities.length > 0
-    expect(con).toBe(true)
-    // 通过 import 间接验证：jointConclusions 在 db-recruitment 与 clubNames 同源
-    // 这里改为静态检查 import 后的联合结论数据
-    void con
+    const con = jointConclusions.find((c) => c.jointId === 'jnt-001' && c.clubId === 'club-002')!
+    expect(con, '联合结论 jnt-001/club-002 应存在').toBeDefined()
+    expect(con.clubName).toBe(OFFICIAL_CLUB_002_NAME)
+    expect(con.clubName).not.toBe('网络协会')
   })
 
   it('club-003：createJointActivity 内部 clubNames 兜底映射 = 数学建模协会（消除羽毛球协会漂移）', () => {

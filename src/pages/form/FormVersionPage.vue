@@ -10,8 +10,10 @@ import DynamicForm from '@/components/form/DynamicForm.vue'
 import { toast } from 'vue-sonner'
 import { Save, Send, FileWarning } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
+import { fileBlockingError, isFieldFilled, restoredFieldValue, restoredFileMeta, draftSafeFileMeta } from '@/lib/formFile'
 
 interface FormVersion { version: number; status: string; publishedAt: string | null; fields: FormField[] }
+interface MyFormRecord { id?: string; version?: number; status?: string; data?: Record<string, unknown>; submittedAt?: string }
 
 const route = useRoute()
 const state = ref<PageState>('loading')
@@ -19,8 +21,10 @@ const formTitle = ref('')
 const versions = ref<FormVersion[]>([])
 const currentVersion = ref<FormVersion | null>(null)
 const formData = ref<DynamicFormValue>({})
+const formErrors = ref<Record<string, string[]>>({})
 const submitting = ref(false)
 const saving = ref(false)
+const hasMyRecord = ref(false)
 
 async function loadForm() {
   state.value = 'loading'
@@ -34,41 +38,46 @@ async function loadForm() {
     currentVersion.value = versions.value[0] || null
     formData.value = {}
     state.value = 'normal'
+    if (currentVersion.value) {
+      await loadMyRecord(formId, apiScope.prefix, currentVersion.value)
+    }
   } else {
     state.value = 'error'
   }
 }
 
-async function handleSaveDraft() {
-  saving.value = true
-  const formId = route.params.formId as string
-  const apiScope = resolveApiScope(route)
-  if (!apiScope) { saving.value = false; return }
-
-  if (currentVersion.value?.status === 'published') {
-    toast.error('已发布版本不可覆盖，请修改后创建新草稿')
-    saving.value = false
-    return
+/** P2-1：刷新/重进页面后恢复本人草稿/已提交记录（能存也能取） */
+async function loadMyRecord(formId: string, prefix: string, version: FormVersion) {
+  const versionNo = version.version || 1
+  const result = await get<MyFormRecord>(`${prefix}/forms/versions/${formId}/my-draft`, { version: versionNo })
+  if (result.kind === 'completed' && result.data && typeof result.data.data === 'object' && result.data.data !== null) {
+    const record = result.data.data as Record<string, unknown>
+    for (const [fieldId, value] of Object.entries(record)) {
+      const field = version.fields.find((f) => f.id === fieldId)
+      if (!field) continue
+      if (field.type === 'file' || field.type === 'image') {
+        formData.value[fieldId] = restoredFileMeta(value)
+        continue
+      }
+      const restored = restoredFieldValue(value, field.type)
+      if (restored !== undefined) formData.value[fieldId] = restored
+    }
+    hasMyRecord.value = result.data.status === 'draft'
   }
+}
 
-  const nextVersion = (currentVersion.value?.version || 1) + 1
-  const result = await post(`${apiScope.prefix}/forms/designer/${formId}/save`, {
-    fields: currentVersion.value?.fields || [],
-    version: nextVersion,
-    expectedVersion: currentVersion.value?.version || 1,
-  })
-  saving.value = false
-  if (result.kind === 'completed') {
-    const data = result.data as { version?: number }
-    toast.success(`草稿已保存（v${data?.version ?? nextVersion}）`)
-  } else if (result.kind === 'concurrency_conflict') {
-    // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
-    toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
-  } else {
-    toast.error('保存失败，请稍后重试')
+function buildFingerprint(value: DynamicFormValue): string {
+  // 稳定序列化：键序无关，相同内容 → 相同指纹（P3-1），避免 {f1,f2} 与 {f2,f1} 生成不同幂等键
+  return stableHash(stableStringify(value))
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`
   }
+  return JSON.stringify(value)
 }
 
 function stableHash(value: string): string {
@@ -81,14 +90,82 @@ function stableHash(value: string): string {
   return (h >>> 0).toString(16)
 }
 
+function validateForSubmit(): boolean {
+  const errors: Record<string, string[]> = {}
+  const fields = currentVersion.value?.fields || []
+  for (const field of fields) {
+    const value = formData.value[field.id]
+    if (field.required && !isFieldFilled(value, field.type)) {
+      errors[field.id] = [`${field.label}为必填项`]
+    }
+    if (field.type === 'file' || field.type === 'image') {
+      const msg = fileBlockingError(value)
+      if (msg) {
+        errors[field.id] = [...(errors[field.id] ?? []), msg]
+      }
+    }
+  }
+  formErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
+async function handleSaveDraft() {
+  saving.value = true
+  const formId = route.params.formId as string
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) { saving.value = false; return }
+
+  const version = currentVersion.value?.version || 1
+  // 草稿落库前对 file/image 字段做归一：瞬态 uploading 丢弃、checking 降级 uploaded，
+  // 避免重开草稿后出现永远无法 auto-approve / 无法提交的卡死文件（P1-2，见 formFile.draftSafeFileMeta）
+  const draftData: DynamicFormValue = {}
+  for (const [fieldId, value] of Object.entries(formData.value)) {
+    const field = currentVersion.value?.fields.find((f) => f.id === fieldId)
+    if (field?.type === 'file' || field?.type === 'image') {
+      const safe = draftSafeFileMeta(value)
+      if (safe !== undefined) draftData[fieldId] = safe
+      continue
+    }
+    draftData[fieldId] = value
+  }
+
+  // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键，避免重复提交
+  const dataFingerprint = buildFingerprint(draftData)
+  const idempotencyKey = `${formId}-v${version}-${dataFingerprint}`
+
+  const result = await post(`${apiScope.prefix}/forms/versions/${formId}/draft`, {
+    formData: draftData,
+    version,
+    idempotencyKey,
+  })
+  saving.value = false
+  if (result.kind === 'completed') {
+    const data = result.data as { status?: string; savedAt?: string; submittedAt?: string }
+    const savedAt = data?.savedAt ?? data?.submittedAt
+    toast.success(savedAt ? `草稿已保存（${new Date(savedAt).toLocaleString()}）` : '草稿已保存')
+  } else if (result.kind === 'concurrency_conflict') {
+    // P3-3：保留版本/幂等冲突的专属提示，避免落入泛化文案
+    toast.error((result.error as { message?: string }).message || '表单已被其他操作修改，请刷新后重试')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
+  } else {
+    toast.error('保存失败，请稍后重试')
+  }
+}
+
 async function handleSubmit() {
+  // P1-2：提交前必填校验 + 附件安全状态校验，空数据/未检查附件不可提交
+  if (!validateForSubmit()) {
+    toast.error('请完善必填项并确认附件检查完成后再提交')
+    return
+  }
   submitting.value = true
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
   if (!apiScope) { submitting.value = false; return }
 
   // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键
-  const dataFingerprint = stableHash(JSON.stringify(formData.value))
+  const dataFingerprint = buildFingerprint(formData.value)
   const idempotencyKey = `${formId}-v${currentVersion.value?.version || 1}-${dataFingerprint}`
 
   const result = await post(`${apiScope.prefix}/forms/versions/${formId}/submit`, {
@@ -98,7 +175,10 @@ async function handleSubmit() {
   })
   submitting.value = false
   if (result.kind === 'completed') {
+    hasMyRecord.value = true
     toast.success('表单已提交')
+  } else if (result.kind === 'concurrency_conflict') {
+    toast.error((result.error as { message?: string }).message || '表单已被其他操作修改，请刷新后重试')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '提交失败')
   } else {
@@ -115,8 +195,13 @@ onMounted(loadForm)
       <h1 class="text-2xl font-bold text-text-primary mb-1">{{ formTitle }}</h1>
       <p class="text-sm text-text-secondary mb-6">版本 v{{ currentVersion.version }} · {{ currentVersion.publishedAt ? '已发布' : '草稿' }}</p>
 
+      <div v-if="hasMyRecord" class="mb-4 rounded-lg bg-warning-subtle p-3 flex items-center gap-2">
+        <FileWarning :size="16" class="text-warning" />
+        <p class="text-xs text-warning">已为您恢复此前保存的内容，可继续修改后提交。</p>
+      </div>
+
       <Card class="mb-4">
-        <DynamicForm v-model="formData" :fields="currentVersion.fields" />
+        <DynamicForm v-model="formData" :fields="currentVersion.fields" :field-errors="formErrors" />
       </Card>
 
       <!-- FORM-007: 文件检查状态提示 -->
