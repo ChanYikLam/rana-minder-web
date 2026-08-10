@@ -133,11 +133,15 @@ export async function runNavigationGuard(
       (!workspace.hasWorkspace || workspace.currentUserId !== session.user?.id)
     ) {
       // 非工作空间页面：保留当前工作空间上下文，方便侧边栏导航；未加载或登录身份已变化时按会话初始化
+      // P2-3：seed store 时只传当前社团的 club:* 权限，不能直接用 session.permissions 快照。
+      // session.permissions 包含 platform:* 全局权限与历史社团残留的 club:* 权限，
+      // 两者都不属于当前工作空间；直接 snapshot 会污染 store 的 hasPermission 判定，
+      // 并在切换社团后留下陈旧权限，导致侧边栏导航按旧社团权限放行/拦截。
       workspace.setWorkspace(
         session.workspace.clubId,
         session.workspace.clubName,
         session.workspace.role,
-        session.permissions,
+        session.permissions.filter((p) => p.startsWith('club:')),
         session.user?.id ?? null,
         session.workspace.memberId ?? null,
       )

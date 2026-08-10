@@ -459,6 +459,56 @@ describe('runNavigationGuard 非工作空间页面上下文同步', () => {
     )
   })
 
+  // P2-3：seed store 时禁止直接用 session.permissions 快照，避免 platform:* 与历史 club:* 污染当前工作空间
+  it('seed store 时只过滤出 club:* 权限，platform:* 不进入 workspace store', async () => {
+    const session = makeSession({
+      isAuthenticated: true,
+      user: { id: 'u1' },
+      workspace: { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-001' },
+      permissions: [
+        'platform:club:manage',
+        'platform:audit:view',
+        'club:dashboard:view',
+        'club:member:view-self',
+      ],
+    })
+    const workspace = makeWorkspace()
+
+    await runNavigationGuard(makeTarget({ path: '/me', name: 'P-IDN-03' }), session, workspace, mockResolve('/me'))
+
+    expect(workspace.setWorkspace).toHaveBeenCalledWith(
+      'club-001',
+      '计算机协会',
+      'club_leader',
+      ['club:dashboard:view', 'club:member:view-self'],
+      'u1',
+      'mem-001',
+    )
+  })
+
+  // P2-3：跨社团切换后 session.permissions 若尚未经 mergeClubPermissions 收敛，平台全局权限也不得进入 workspace store
+  it('seed store 时即使 session.permissions 仅含 platform:*，workspace store 也得到空权限集（不污染）', async () => {
+    const session = makeSession({
+      isAuthenticated: true,
+      user: { id: 'u1' },
+      workspace: { clubId: 'club-002', clubName: '摄影协会', role: 'member' },
+      // 模拟：用户从 club-002 切到 club-001 之前，session.permissions 尚未刷新（仅含 platform:*）
+      permissions: ['platform:club:manage', 'platform:audit:view'],
+    })
+    const workspace = makeWorkspace()
+
+    await runNavigationGuard(makeTarget({ path: '/me', name: 'P-IDN-03' }), session, workspace, mockResolve('/me'))
+
+    expect(workspace.setWorkspace).toHaveBeenCalledWith(
+      'club-002',
+      '摄影协会',
+      'member',
+      [],
+      'u1',
+      null,
+    )
+  })
+
   it('会话有工作空间但 store 归属上一身份时重新初始化', async () => {
     const session = makeSession({
       isAuthenticated: true,
