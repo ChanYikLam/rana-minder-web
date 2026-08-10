@@ -76,8 +76,11 @@ describe('useUserMenu', () => {
   })
 
   it('PLATFORM_PERMISSIONS 与路由 ADMIN_PERMISSIONS 权限集合一致', () => {
+    // P2-4 一致性：联合/招新平台页细化为 platform:joint:manage / platform:recruitment:manage
     const adminPermissions = new Set([
       'platform:club:manage',
+      'platform:joint:manage',
+      'platform:recruitment:manage',
       'platform:form:design',
       'platform:config:manage',
       'platform:audit:view',

@@ -41,9 +41,13 @@ export const ADMIN_PERMISSIONS: Record<string, string> = {
   'P-FORM-01-admin': 'platform:form:design',
   // 填写页使用「可填写」权限而非「设计」权限（P2-2），与表单填写语义一致
   'P-FORM-02-admin': 'platform:form:fill',
-  'P-JNT-admin-list': 'platform:club:manage',
-  'P-JNT-05-admin': 'platform:club:manage',
-  'P-REC-admin-list': 'platform:club:manage',
+  // P2-4 一致性：联合/招新平台页不再归口到 platform:club:manage，
+  // 改为各自的细粒度权限（platform:joint:manage / platform:recruitment:manage），
+  // 与工作空间侧 club:joint:manage / club:recruitment:manage 的语义对齐。
+  'P-JNT-admin-list': 'platform:joint:manage',
+  'P-JNT-05-admin': 'platform:joint:manage',
+  'P-REC-admin-list': 'platform:recruitment:manage',
+  // 社团接入/接入向导本身即为"社团管理"语义，归口 platform:club:manage 是最具体而非偏宽。
   'P-ORG-01': 'platform:club:manage',
   'P-ORG-01-wizard': 'platform:club:manage',
   'P-NTF-02-platform': 'platform:config:manage',
@@ -58,9 +62,32 @@ export const ADMIN_PERMISSIONS: Record<string, string> = {
   'P-OPS-01': 'platform:ops:view',
 }
 
+// P2-2 健壮性：显式声明作为前缀规则的 key。
+// 其余 key（如 P-REC-list / P-REC-02 / P-MEM-01 / P-MEM-03-manage 等）只参与精确匹配，
+// 不会被 startsWith 命中——避免"P-REC-02-applications 被 P-REC-02 误吞"。
+// 模块加载时一次性按 key 长度倒序排序（最长前缀优先），
+// 消除对 Object.keys 插入顺序的隐式依赖，使匹配行为可预测。
+const WORKSPACE_PREFIX_KEYS = new Set<string>([
+  'P-REC', 'P-JNT', 'P-MEM', 'P-FORM', 'P-STAT', 'P-EXP', 'P-NTF', 'P-AUD', 'P-CFG',
+])
+
+const WORKSPACE_PREFIX_KEYS_BY_LENGTH: readonly string[] = Array.from(WORKSPACE_PREFIX_KEYS).sort(
+  (a, b) => b.length - a.length,
+)
+
 export function workspacePermissionForRoute(routeName: string): string | string[] | null {
+  // 1. 精确匹配优先（最具体的情况，如 P-MEM-03-manage 命中自身而非 P-MEM）
   const exact = WORKSPACE_PERMISSIONS[routeName]
   if (exact) return exact
-  const prefix = Object.keys(WORKSPACE_PERMISSIONS).find((key) => routeName.startsWith(`${key}-`) || routeName === `${key}-list`)
-  return prefix ? WORKSPACE_PERMISSIONS[prefix] : null
+
+  // 2. 前缀匹配：仅遍历显式声明的前缀规则集，按 key 长度倒序（最长前缀优先）
+  //    - startsWith(`${key}-`) 命中如 P-REC-04-manage → P-REC
+  //    - 全等于 `${key}-list` 命中如 P-FORM-list → P-FORM（即使字典中无 P-FORM-list 精确键）
+  //    注意：精确键（P-REC-02 / P-MEM-01 等）不在此集中，不会被 startsWith 误吞
+  for (const key of WORKSPACE_PREFIX_KEYS_BY_LENGTH) {
+    if (routeName.startsWith(`${key}-`) || routeName === `${key}-list`) {
+      return WORKSPACE_PERMISSIONS[key]
+    }
+  }
+  return null
 }

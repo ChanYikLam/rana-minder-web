@@ -10,13 +10,13 @@
 
 | 分组 | 数量（实际统计） | 前缀 | 访问控制 |
 |---|---|---|---|
-| A. 公开路由 | 8 | `/login`、`/auth/*`、`/explore*`、`/activity/*`、`/service-unavailable` | `meta.public: true` |
-| B. 登录用户与本人参与 | 22 | `/me*` | `requiresAuth: true` |
+| A. 公开路由 | 9 | `/login`、`/auth/*`、`/explore*`、`/activity/*`、`/service-unavailable`、`/files/*` | `meta.public: true` |
+| B. 登录用户与本人参与 | 21 | `/me*` | `requiresAuth: true` |
 | C. 社团工作空间 | 31 | `/org/:clubId/*` | `requiresAuth + requiresWorkspace` |
 | D. 超级管理员 | 18 | `/admin/*` | `requiresAuth + requiresAdmin` |
 | 通用回退 | 2 | `/`、`/:pathMatch(.*)*` | 按会话状态解析落点 / 404 |
 
-> 表中数量按路由定义实际统计（总计 81 条）；源码内分组注释（8/22/31/18）为历史标注，以实际统计为准。路由名统一 `P-<DOMAIN>-<序号>` 规范（如 `P-ORG-02`、`P-REC-05`），是权限映射的键。
+> 表中数量按路由定义实际统计（总计 81 条）；源码内分组注释（9/21/31/18）为历史标注，以实际统计为准。路由名统一 `P-<DOMAIN>-<序号>` 规范（如 `P-ORG-02`、`P-REC-05`），是权限映射的键。
 
 ## 2. 路由守卫（guard.ts）
 
@@ -57,13 +57,21 @@
 
 | 路由名 | 权限 |
 |---|---|
-| `P-ORG-01` / `P-ORG-01-wizard` / `P-JNT-admin-list` / `P-JNT-05-admin` / `P-REC-admin-list` | `platform:club:manage` |
+| `P-ORG-01` / `P-ORG-01-wizard` | `platform:club:manage`（社团接入语义，最具体） |
+| `P-JNT-admin-list` / `P-JNT-05-admin` | `platform:joint:manage`（P2-4 一致性：从 `platform:club:manage` 细化） |
+| `P-REC-admin-list` | `platform:recruitment:manage`（P2-4 一致性：从 `platform:club:manage` 细化） |
 | `P-FORM-admin-list` / `P-FORM-01-admin` / `P-FORM-02-admin` | `platform:form:design` |
 | `P-AUD-01-admin` / `P-AUD-02-admin` | `platform:audit:view` |
 | `P-AUD-03` / `P-AUD-04` | `platform:delete:execute` |
 | `P-STAT-01-admin` / `P-EXP-01-admin` | `platform:export:execute` |
 | `P-CFG-01-admin` / `P-CFG-02` / `P-NTF-02-platform` | `platform:config:manage` |
 | `P-OPS-01` | `platform:ops:view` |
+
+> P2-4 一致性修订：`P-JNT-*` / `P-REC-admin-list` 不再归口到 `platform:club:manage`，
+> 改为各自的细粒度权限（`platform:joint:manage` / `platform:recruitment:manage`），
+> 与工作空间侧 `club:joint:manage` / `club:recruitment:manage` 语义对齐。
+> `P-ORG-01` / `P-ORG-01-wizard` 本身即为"社团接入"语义，归口 `platform:club:manage` 是最具体而非偏宽。
+> 详见 `src/router/permissions.ts` 的注释。
 
 ### 3.3 角色
 

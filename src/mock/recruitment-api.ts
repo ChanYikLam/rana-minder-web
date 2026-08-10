@@ -1849,6 +1849,58 @@ const jointHandlers: MockMethod[] = [
       return result(rdb.submitJointEndConfirm(query.jointId, query._mock_club || query.clubId, resolveMockUser(url).name))
     },
   },
+  // 平台结束确认视图（无 clubId，按 jointId 直接查询）
+  {
+    url: '/api/admin/joint/:jointId/close',
+    method: 'get',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      return ok({
+        id: ja.id, title: ja.title, status: ja.status,
+        participants: ja.clubs.map((c) => ({
+          clubId: c.clubId, clubName: c.clubName, status: c.status,
+          concludedCount: rdb.jointConclusions.filter((x) => x.jointId === ja.id && x.clubId === c.clubId && x.conclusion).length,
+          invitationSent: rdb.jointInvitations.filter((x) => x.jointId === ja.id && x.clubId === c.clubId && x.status !== 'withdrawn').length,
+          endConfirmed: !!ja.endConfirmations[c.clubId],
+        })),
+        totalApplicants: ja.applicantIds.length,
+        endConfirmRound: ja.endConfirmRound, endConfirmDeadline: ja.endConfirmDeadline,
+        canClose: ja.status === 'published' || ja.status === 'invite_phase',
+      })
+    },
+  },
+  // 平台触发进入结束确认（无 clubId）
+  {
+    url: '/api/admin/joint/:jointId/close/start',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      return result(rdb.startJointEndConfirm(query.jointId, '__platform__', resolveMockUser(url).name))
+    },
+  },
+  // 平台代全部社团提交结束确认（无 clubId）
+  {
+    url: '/api/admin/joint/:jointId/close',
+    method: 'post',
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const ja = rdb.findJoint(query.jointId)
+      if (!ja) return notFound('联合活动不存在')
+      if (ja.status !== 'closing_confirm') return businessError('当前不在结束确认阶段')
+      // 平台视角：按顺序代每个未确认的参与社团提交结束确认，
+      // 最后一个调用会触发全部确认后的 close 状态机迁移
+      const actor = resolveMockUser(url).name
+      let lastResult: { ok: boolean; error?: string } = { ok: true }
+      for (const c of ja.clubs) {
+        if (ja.endConfirmations[c.clubId]) continue
+        lastResult = rdb.submitJointEndConfirm(ja.id, c.clubId, `platform:${actor}`)
+        if (!lastResult.ok) return result(lastResult)
+      }
+      return result(lastResult)
+    },
+  },
   // 平台强制关闭（P1-011 高风险命令 joint_force_close：重认证 + 原因 + 审计）
   {
     url: '/api/admin/joint/:jointId/force-close',

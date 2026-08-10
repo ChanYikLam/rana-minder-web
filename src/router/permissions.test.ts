@@ -5,8 +5,13 @@ import router from '@/router'
 
 describe('ADMIN_PERMISSIONS', () => {
   it('maps all admin route names to a permission', () => {
-    expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:club:manage')
+    // P2-4 一致性：联合/招新平台页细化为各自细粒度权限，不再归口 platform:club:manage
+    expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:recruitment:manage')
+    expect(ADMIN_PERMISSIONS['P-JNT-admin-list']).toBe('platform:joint:manage')
+    expect(ADMIN_PERMISSIONS['P-JNT-05-admin']).toBe('platform:joint:manage')
+    // 社团接入/接入向导本身即为"社团管理"语义，归口 platform:club:manage 是最具体
     expect(ADMIN_PERMISSIONS['P-ORG-01']).toBe('platform:club:manage')
+    expect(ADMIN_PERMISSIONS['P-ORG-01-wizard']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-OPS-01']).toBe('platform:ops:view')
     // P2-2：表单填写页使用「可填写」权限而非「设计」权限
     expect(ADMIN_PERMISSIONS['P-FORM-02-admin']).toBe('platform:form:fill')
@@ -91,6 +96,20 @@ describe('workspacePermissionForRoute', () => {
   it('returns null for unknown route names', () => {
     expect(workspacePermissionForRoute('P-GEN-01')).toBeNull()
     expect(workspacePermissionForRoute('')).toBeNull()
+  })
+
+  // P2-2 健壮性：未声明的子键必须按"最长前缀"命中，且不依赖 Object.keys 顺序
+  it('matches longest prefix deterministically (no dependency on Object.keys order)', () => {
+    // P-REC-*（无精确键）→ P-REC 前缀 → club:recruitment:manage
+    expect(workspacePermissionForRoute('P-REC-99')).toBe('club:recruitment:manage')
+    // P-MEM-*（无精确键）→ P-MEM 前缀 → club:member:manage
+    expect(workspacePermissionForRoute('P-MEM-99')).toBe('club:member:manage')
+    // P-STAT-*（无精确键）→ P-STAT 前缀 → club:stats:view
+    expect(workspacePermissionForRoute('P-STAT-99')).toBe('club:stats:view')
+    // P-FORM-list 也走最长前缀命中（字典中无 P-FORM-list 精确键）
+    expect(workspacePermissionForRoute('P-FORM-list')).toBe('club:form:design')
+    // 精确键仍优先于任何前缀匹配
+    expect(workspacePermissionForRoute('P-MEM-03-manage')).toBe('club:invite:manage')
   })
 })
 

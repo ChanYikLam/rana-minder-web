@@ -5,7 +5,7 @@ import { resolveLoginTarget } from '@/pages/auth/loginTarget'
 import { runNavigationGuard } from './guard'
 
 const routes: RouteRecordRaw[] = [
-  // ========== A. 公开路由（8条） ==========
+  // ========== A. 公开路由（9条） ==========
   {
     path: '/login',
     name: 'P-IDN-01',
@@ -54,8 +54,14 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/generic/ServiceUnavailablePage.vue'),
     meta: { layout: 'public', public: true },
   },
+  {
+    path: '/files/:fileId',
+    name: 'P-FORM-03',
+    component: () => import('@/pages/form/FilePreviewPage.vue'),
+    meta: { layout: 'public', public: true },
+  },
 
-  // ========== B. 登录用户与本人参与路由（22条） ==========
+  // ========== B. 登录用户与本人参与路由（21条） ==========
   {
     path: '/me',
     name: 'P-IDN-03',
@@ -174,12 +180,6 @@ const routes: RouteRecordRaw[] = [
     path: '/activity/joint/:jointId/apply',
     name: 'P-JNT-02',
     component: () => import('@/pages/joint/JointApplyPage.vue'),
-    meta: { layout: 'default', requiresAuth: true },
-  },
-  {
-    path: '/files/:fileId',
-    name: 'P-FORM-03',
-    component: () => import('@/pages/form/FilePreviewPage.vue'),
     meta: { layout: 'default', requiresAuth: true },
   },
   {
