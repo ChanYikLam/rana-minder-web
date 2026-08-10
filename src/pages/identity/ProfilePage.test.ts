@@ -102,6 +102,60 @@ describe('ProfilePage 个人资料', () => {
     wrapper.unmount()
   })
 
+  it('加载失败（IFC-ERR-003 无权限）：进入 forbidden（P3-2 统一映射）', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-003', message: '无权限' } })
+    const wrapper = mount(ProfilePage, {
+      global: {
+        stubs: {
+          ...pageStubs,
+          PageStateBoundary: {
+            props: ['state'],
+            template: '<div class="psb" :data-state="state"><slot /></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('.psb').attributes('data-state')).toBe('forbidden')
+    wrapper.unmount()
+  })
+
+  it('加载失败（IFC-ERR-004 作用域外）：进入 forbidden（P3-2：不再手写集合遗漏）', async () => {
+    mockGet.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-004', message: '作用域外' } })
+    const wrapper = mount(ProfilePage, {
+      global: {
+        stubs: {
+          ...pageStubs,
+          PageStateBoundary: {
+            props: ['state'],
+            template: '<div class="psb" :data-state="state"><slot /></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('.psb').attributes('data-state')).toBe('forbidden')
+    wrapper.unmount()
+  })
+
+  it('加载失败（IFC-ERR-014 处理中）：进入 error 而非 loading（P2-2 不卡加载）', async () => {
+    mockGet.mockResolvedValue({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } })
+    const wrapper = mount(ProfilePage, {
+      global: {
+        stubs: {
+          ...pageStubs,
+          PageStateBoundary: {
+            props: ['state'],
+            template: '<div class="psb" :data-state="state"><slot /></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('.psb').attributes('data-state')).toBe('error')
+    wrapper.unmount()
+  })
+
   it('P0-3 sync-conflict 模式：拉取真实资料与冲突清单，不渲染硬编码占位数据', async () => {
     routeMeta.raw.mode = 'sync-conflict'
     // 首个 GET（/auth/profile）返回真实资料，第二个 GET（/auth/profile/sync-conflicts）返回真实冲突

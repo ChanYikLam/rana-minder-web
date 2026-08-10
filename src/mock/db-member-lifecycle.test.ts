@@ -544,18 +544,16 @@ describe('任期到期提醒（MEM-004）', () => {
         tenures: [], departmentHistory: [], anomalies: [],
       }) as unknown as void
     // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
-    // 排序断言改为校验 mem-t4(daysLeft 更小) 排在 mem-t1 之前，而非依赖 hits[0]，
-    // 避免与种子数据中固定日期（2026-08-20 等）的 daysLeft 撞期导致时钟相关失效
-    freshMember('mem-t1', '近任期', iso(5))
+    freshMember('mem-t0', '更近任期', iso(5))
+    freshMember('mem-t1', '近任期', iso(10))
     freshMember('mem-t2', '远任期', iso(300))
-    freshMember('mem-t3', '已结束', iso(5), 'ended')
-    freshMember('mem-t4', '更近任期', iso(1))
+    freshMember('mem-t3', '已结束', iso(10), 'ended')
     try {
       const hits = upcomingTermEnd('club-001', 30)
+      expect(hits.some((h) => h.memberId === 'mem-t0')).toBe(true)
       expect(hits.some((h) => h.memberId === 'mem-t1')).toBe(true)
       expect(hits.some((h) => h.memberId === 'mem-t2')).toBe(false)
       expect(hits.some((h) => h.memberId === 'mem-t3')).toBe(false)
-      expect(hits.some((h) => h.memberId === 'mem-t4')).toBe(true)
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
@@ -566,7 +564,7 @@ describe('任期到期提醒（MEM-004）', () => {
       }
       expect(hits[0].daysLeft).toBeLessThanOrEqual(30)
     } finally {
-      const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3', 'mem-t4'])
+      const ids = new Set(['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
         if (ids.has(members[i].id)) members.splice(i, 1)
       }

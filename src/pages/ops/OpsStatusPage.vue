@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { CheckCircle2, AlertTriangle, Server, Database, Cloud, Mail, Clock } from '@lucide/vue'
 
@@ -22,7 +23,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     data.value = result.data
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function formatCheck(iso: string): string {

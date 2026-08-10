@@ -5,6 +5,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
@@ -28,9 +29,7 @@ async function loadData() {
     items.value = result.data.items
     state.value = 'normal'
     void echoWizardSelection()
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 // ================= 接入向导 =================

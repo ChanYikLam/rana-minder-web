@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
@@ -52,7 +53,9 @@ async function loadData() {
     schedule.value = (scheduleRes as { kind: 'completed'; data: { items: ScheduleItem[] } }).data.items
     state.value = 'normal'
   } else {
-    state.value = 'error'
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败，任一失败结果都能代表本次失败）
+    const failed = [todoRes, ongoingRes, historyRes, scheduleRes].find((r) => r.kind !== 'completed')!
+    state.value = errorToPageState(errorCodeOf(failed))
   }
 }
 

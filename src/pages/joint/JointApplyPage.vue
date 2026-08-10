@@ -109,6 +109,7 @@ async function loadData() {
     // 只有申请状态解析成功（含未提交）才进入 normal，避免覆盖 loadMyApplication 设置的 error/forbidden
     if (appLoaded) state.value = 'normal'
   } else {
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败）
     const failed = detailRes.kind === 'completed' ? formRes : detailRes
     state.value = errorToPageState(errorCodeOf(failed))
   }

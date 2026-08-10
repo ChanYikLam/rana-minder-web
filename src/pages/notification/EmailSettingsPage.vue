@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { Banner, ErrorState } from '@/components/feedback'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { Save, Send } from '@lucide/vue'
@@ -76,7 +77,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     config.value = result.data
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function handleTest() {
