@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import type { FormField } from '@/types/domain/form'
 import type { DynamicFormValue } from '@/components/form/DynamicForm.vue'
@@ -41,9 +42,7 @@ async function loadForm() {
     if (currentVersion.value) {
       await loadMyRecord(formId, apiScope.prefix, currentVersion.value)
     }
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 /** P2-1：刷新/重进页面后恢复本人草稿/已提交记录（能存也能取） */

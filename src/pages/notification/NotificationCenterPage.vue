@@ -4,6 +4,7 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { NotificationBadge } from '@/components/feedback'
 import { NotificationDetail, type NotificationDetailData } from '@/components/feedback'
 import { useNotificationViewStore } from '@/state/notificationViewStore'
+import { errorToPageState } from '@/services/error-map'
 import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
 import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
@@ -64,7 +65,12 @@ const selected = computed<NotificationDetailData | null>(() => {
 function openDetail(id: string) {
   const item = notifStore.items.find((n) => n.id === id)
   if (!item) return
-  if (!item.read) notifStore.markRead(id)
+  if (!item.read) {
+    // 标记已读失败仅记录日志，不打断查看详情（避免 unhandled rejection）
+    void notifStore.markRead(id).then((code) => {
+      if (code) console.error('标记已读失败:', code)
+    })
+  }
   selectedId.value = id
 }
 
@@ -76,23 +82,25 @@ function onDetailAction(key: string) {
 
 async function loadNotifications() {
   state.value = 'loading'
-  try {
-    await notifStore.loadNotifications()
+  // P1-1：loadNotifications 直接返回错误码（null=成功），不再依赖 Store 内部可变 lastError，避免竞态导致错误码错配
+  const code = await notifStore.loadNotifications()
+  if (code) {
+    state.value = errorToPageState(code)
+    console.error('加载通知失败:', code)
+  } else {
     state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
-  } catch (error) {
-    state.value = 'error'
-    console.error('加载通知失败:', error)
   }
 }
 
 async function handleMarkAllRead() {
   state.value = 'loading'
-  try {
-    await notifStore.markAllRead()
-    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
-  } catch (error) {
+  // P2-1：写操作失败语义固定为 error（不区分 forbidden），返回错误码仅用于日志
+  const code = await notifStore.markAllRead()
+  if (code) {
     state.value = 'error'
-    console.error('标记已读失败:', error)
+    console.error('标记已读失败:', code)
+  } else {
+    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
   }
 }
 
