@@ -57,13 +57,21 @@
 
 | 路由名 | 权限 |
 |---|---|
-| `P-ORG-01` / `P-ORG-01-wizard` / `P-JNT-admin-list` / `P-JNT-05-admin` / `P-REC-admin-list` | `platform:club:manage` |
+| `P-ORG-01` / `P-ORG-01-wizard` | `platform:club:manage`（社团接入语义，最具体） |
+| `P-JNT-admin-list` / `P-JNT-05-admin` | `platform:joint:manage`（P2-4 一致性：从 `platform:club:manage` 细化） |
+| `P-REC-admin-list` | `platform:recruitment:manage`（P2-4 一致性：从 `platform:club:manage` 细化） |
 | `P-FORM-admin-list` / `P-FORM-01-admin` / `P-FORM-02-admin` | `platform:form:design` |
 | `P-AUD-01-admin` / `P-AUD-02-admin` | `platform:audit:view` |
 | `P-AUD-03` / `P-AUD-04` | `platform:delete:execute` |
 | `P-STAT-01-admin` / `P-EXP-01-admin` | `platform:export:execute` |
 | `P-CFG-01-admin` / `P-CFG-02` / `P-NTF-02-platform` | `platform:config:manage` |
 | `P-OPS-01` | `platform:ops:view` |
+
+> P2-4 一致性修订：`P-JNT-*` / `P-REC-admin-list` 不再归口到 `platform:club:manage`，
+> 改为各自的细粒度权限（`platform:joint:manage` / `platform:recruitment:manage`），
+> 与工作空间侧 `club:joint:manage` / `club:recruitment:manage` 语义对齐。
+> `P-ORG-01` / `P-ORG-01-wizard` 本身即为"社团接入"语义，归口 `platform:club:manage` 是最具体而非偏宽。
+> 详见 `src/router/permissions.ts` 的注释。
 
 ### 3.3 角色
 

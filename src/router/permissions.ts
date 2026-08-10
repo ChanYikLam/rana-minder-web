@@ -41,9 +41,13 @@ export const ADMIN_PERMISSIONS: Record<string, string> = {
   'P-FORM-01-admin': 'platform:form:design',
   // 填写页使用「可填写」权限而非「设计」权限（P2-2），与表单填写语义一致
   'P-FORM-02-admin': 'platform:form:fill',
-  'P-JNT-admin-list': 'platform:club:manage',
-  'P-JNT-05-admin': 'platform:club:manage',
-  'P-REC-admin-list': 'platform:club:manage',
+  // P2-4 一致性：联合/招新平台页不再归口到 platform:club:manage，
+  // 改为各自的细粒度权限（platform:joint:manage / platform:recruitment:manage），
+  // 与工作空间侧 club:joint:manage / club:recruitment:manage 的语义对齐。
+  'P-JNT-admin-list': 'platform:joint:manage',
+  'P-JNT-05-admin': 'platform:joint:manage',
+  'P-REC-admin-list': 'platform:recruitment:manage',
+  // 社团接入/接入向导本身即为"社团管理"语义，归口 platform:club:manage 是最具体而非偏宽。
   'P-ORG-01': 'platform:club:manage',
   'P-ORG-01-wizard': 'platform:club:manage',
   'P-NTF-02-platform': 'platform:config:manage',

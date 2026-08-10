@@ -5,8 +5,13 @@ import router from '@/router'
 
 describe('ADMIN_PERMISSIONS', () => {
   it('maps all admin route names to a permission', () => {
-    expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:club:manage')
+    // P2-4 一致性：联合/招新平台页细化为各自细粒度权限，不再归口 platform:club:manage
+    expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:recruitment:manage')
+    expect(ADMIN_PERMISSIONS['P-JNT-admin-list']).toBe('platform:joint:manage')
+    expect(ADMIN_PERMISSIONS['P-JNT-05-admin']).toBe('platform:joint:manage')
+    // 社团接入/接入向导本身即为"社团管理"语义，归口 platform:club:manage 是最具体
     expect(ADMIN_PERMISSIONS['P-ORG-01']).toBe('platform:club:manage')
+    expect(ADMIN_PERMISSIONS['P-ORG-01-wizard']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-OPS-01']).toBe('platform:ops:view')
     // P2-2：表单填写页使用「可填写」权限而非「设计」权限
     expect(ADMIN_PERMISSIONS['P-FORM-02-admin']).toBe('platform:form:fill')

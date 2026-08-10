@@ -47,6 +47,8 @@ const seedMockUsers: Record<string, MockUser> = {
         role: 'super_admin',
         permissions: [
           'platform:club:manage',
+          'platform:joint:manage',
+          'platform:recruitment:manage',
           'platform:form:design',
           'platform:form:fill',
           'platform:config:manage',
