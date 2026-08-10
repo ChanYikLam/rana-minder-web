@@ -36,7 +36,7 @@ describe('MRM-013 reset 补齐模块级可变状态重置（回归）', () => {
     expect(dynId).toMatch(/^u-auto-/)
     expect(Object.keys(APPLICANT_PROFILES)).toContain(dynId)
     // 已有种子档案也被改写（招生确认失败重试场景会临时改 studentId）
-    APPLICANT_PROFILES['u-002'] = { name: '陈雨桐', studentId: '' }
+    APPLICANT_PROFILES['u-002'] = { name: '陈雨彤', studentId: '' }
     // 面试官任务：活动级（act-001）与轮次级（jnt-001）各一
     const a = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })
     const b = assignInterviewerTask({ clubId: 'club-001', activityId: 'jnt-001', kind: 'joint', scope: 'round', roundId: 'rd-001', userId: 'user-member-002', userName: '陈雨桐' })
@@ -49,8 +49,8 @@ describe('MRM-013 reset 补齐模块级可变状态重置（回归）', () => {
 
     // 动态档案与种子改写全部还原
     expect(Object.keys(APPLICANT_PROFILES)).not.toContain(dynId)
-    expect(applicantNameOf('u-002')).toBe('陈雨桐')
-    expect(APPLICANT_PROFILES['u-002']).toEqual({ name: '陈雨桐', studentId: '20240002' })
+    expect(applicantNameOf('u-002')).toBe('陈雨彤')
+    expect(APPLICANT_PROFILES['u-002']).toEqual({ name: '陈雨彤', studentId: '20240002' })
     // 任务清空、序号归位（重跑首条任务 id 回到 itask-1，不会 id 膨胀）
     expect(interviewerTasks).toHaveLength(0)
     const again = assignInterviewerTask({ clubId: 'club-001', activityId: 'act-001', kind: 'recruitment', scope: 'activity', userId: 'user-member-002', userName: '陈雨桐' })

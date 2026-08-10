@@ -6,6 +6,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { ShieldAlert, CheckCircle2, Users, Mail, ArrowLeft, XCircle } from '@lucide/vue'
 
 const route = useRoute()
@@ -18,18 +19,16 @@ const detail = ref<{
   totalApplicants: number; totalConcluded: number; totalInvited: number; canClose: boolean
 } | null>(null)
 
-const clubId = computed(() => (route.params.clubId as string) || '')
-const jointId = computed(() => (route.params.jointId as string) || '')
-const isAdminScope = computed(() => !clubId.value)
-const closeBaseUrl = computed(() =>
-  isAdminScope.value
-    ? `/admin/joint/${jointId.value}/close`
-    : `/org/${clubId.value}/joint/${jointId.value}/close`
-)
-
 async function loadData() {
   state.value = 'loading'
-  const result = await get(closeBaseUrl.value)
+  const clubId = route.params.clubId as string
+  const jointId = route.params.jointId as string
+  // P1：#4 admin 路由 /admin/joint/:jointId/close 无 clubId，无法拼 /org/:clubId 请求，给出友好提示而非打 /org/undefined/...
+  if (!clubId) {
+    state.value = 'error'
+    return
+  }
+  const result = await get(`/org/${clubId}/joint/${jointId}/close`)
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value
     state.value = 'normal'
@@ -43,12 +42,16 @@ const allConfirmed = computed(() => {
 
 async function handleStartClose() {
   if (!detail.value || closing.value) return
+  const clubId = route.params.clubId as string
+  if (!clubId) { toast.error('管理端暂不支持结束确认操作，请在社团工作空间执行'); return }
   closing.value = true
-  const result = await post(`${closeBaseUrl.value}/start`, {})
+  const result = await post(`/org/${clubId}/joint/${detail.value.id}/close/start`, {})
   closing.value = false
   if (result.kind === 'completed') {
     toast.success('已进入结束确认阶段')
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '进入结束确认失败')
   }
@@ -56,12 +59,17 @@ async function handleStartClose() {
 
 async function handleClose() {
   if (!detail.value || closing.value) return
+  const clubId = route.params.clubId as string
+  if (!clubId) { toast.error('管理端暂不支持结束确认操作，请在社团工作空间执行'); return }
   closing.value = true
-  const result = await post(closeBaseUrl.value, {})
+  const jointId = route.params.jointId as string
+  const result = await post(`/org/${clubId}/joint/${jointId}/close`, {})
   closing.value = false
   if (result.kind === 'completed') {
     toast.success('本社团确认完成')
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('确认已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '确认失败')
   }

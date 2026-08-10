@@ -7,6 +7,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { identityApi } from '@/services/modules'
 import type { PageState } from '@/types/machine'
 import { Plus, Shield, Check, Minus, KeyRound } from '@lucide/vue'
@@ -33,9 +34,6 @@ const items = ref<Template[]>([])
 const selected = ref<Template | null>(null)
 const mode = ref<'edit' | 'create' | null>(null)
 const publishing = ref(false)
-const publishOpen = ref(false)
-const publishSucceeded = ref(false)
-const publishError = ref('')
 const draft = ref({ name: '', permissions: '' })
 const saving = ref(false)
 const creating = ref(false)
@@ -162,6 +160,9 @@ async function handlePublish() {
   if (result.kind === 'completed') {
     toast.success('模板已发布')
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('发布已受理，正在后台处理')
+    await loadData()
   } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
     toast.error('身份验证已失效，请重新认证后重试')
     reauthProof.value = ''
@@ -170,24 +171,6 @@ async function handlePublish() {
     diff.value = null
   } else {
     toastError(result, '发布失败，请重试')
-  }
-}
-
-async function handlePublishSimple() {
-  if (!selected.value || publishing.value) return
-  publishing.value = true
-  publishSucceeded.value = false
-  publishError.value = ''
-  const result = await post(`/admin/config/permission-templates/${selected.value.id}/publish`)
-  publishing.value = false
-  if (result.kind === 'completed') {
-    publishSucceeded.value = true
-    selected.value.status = 'published'
-    const idx = items.value.findIndex((t) => t.id === selected.value!.id)
-    if (idx >= 0) items.value[idx] = { ...selected.value }
-    toast.success('模板已发布')
-  } else {
-    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
   }
 }
 
@@ -290,6 +273,8 @@ onMounted(loadData)
             </template>
           </Card>
 
+          <!-- 权限详情（只读态由上方 mode 驱动卡片展示） -->
+
           <!-- 发布流程（仅草稿） -->
           <Card v-if="selected?.status === 'draft'" class="h-fit border-warning">
             <p class="text-sm font-medium text-warning mb-3 flex items-center gap-1.5"><KeyRound :size="14" /> 发布草稿（需重新认证）</p>
@@ -361,19 +346,5 @@ onMounted(loadData)
         @update:open="(v) => { if (!v) reauthConfirmOpen = false }"
       />
     </div>
-
-    <HighRiskConfirm
-      v-model:open="publishOpen"
-      title="发布权限模板"
-      description="发布后立即作用于全部关联成员并原子切换权限，此操作不可撤销。"
-      :targets="selected ? [{ id: selected.id, label: selected.name, detail: `${selected.permissions.length} 项权限 · v${selected.version}` }] : []"
-      impact-summary="发布失败时全部成员继续使用旧版本；权限缓存将按新版本刷新。"
-      confirm-label="确认发布"
-      reauth-required
-      :executing="publishing"
-      :succeeded="publishSucceeded"
-      :error-message="publishError"
-      @confirm="handlePublishSimple"
-    />
   </PageStateBoundary>
 </template>

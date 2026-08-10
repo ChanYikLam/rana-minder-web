@@ -67,14 +67,14 @@ describe('ClubSwitcher 社团切换', () => {
     workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
     mocks.getMyClubs.mockResolvedValue({
       kind: 'completed',
-      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '网络协会', role: 'hr' }] },
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' }] },
     })
 
     const wrapper = await mountSwitcher()
 
     expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
     const items = wrapper.findAll('.dd-item')
-    expect(items.some((i) => i.text().includes('网络协会'))).toBe(true)
+    expect(items.some((i) => i.text().includes('电子设计协会'))).toBe(true)
   })
 
   it('切换成功：同步会话工作空间与权限并跳转新社团看板', async () => {
@@ -83,16 +83,16 @@ describe('ClubSwitcher 社团切换', () => {
     const session = seedSession(['platform:club:manage', 'club:dashboard:view'])
     mocks.getMyClubs.mockResolvedValue({
       kind: 'completed',
-      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '网络协会', role: 'hr' }] },
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' }] },
     })
     // 新社团上下文：无成员身份（memberId=null），权限为社团级视图权限
     mocks.getContext.mockResolvedValue({
       kind: 'completed',
-      data: { clubId: 'club-002', clubName: '网络协会', role: 'hr', permissions: ['club:member:view-self'], memberId: null },
+      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'hr', permissions: ['club:member:view-self'], memberId: null },
     })
 
     const wrapper = await mountSwitcher()
-    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('网络协会'))!
+    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
     await item.trigger('click')
     await flushPromises()
 
@@ -100,7 +100,7 @@ describe('ClubSwitcher 社团切换', () => {
     // 会话工作空间同步为新社团上下文；memberId 不得沿用 club-001 的 mem-001（防串身份）
     expect(session.workspace).toEqual({
       clubId: 'club-002',
-      clubName: '网络协会',
+      clubName: '电子设计协会',
       role: 'hr',
       memberId: undefined,
     })
@@ -115,15 +115,15 @@ describe('ClubSwitcher 社团切换', () => {
     const session = seedSession()
     mocks.getMyClubs.mockResolvedValue({
       kind: 'completed',
-      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '网络协会', role: 'member' }] },
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '电子设计协会', role: 'member' }] },
     })
     mocks.getContext.mockResolvedValue({
       kind: 'completed',
-      data: { clubId: 'club-002', clubName: '网络协会', role: 'member', permissions: [], memberId: 'mem-020' },
+      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'member', permissions: [], memberId: 'mem-020' },
     })
 
     const wrapper = await mountSwitcher()
-    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('网络协会'))!
+    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
     await item.trigger('click')
     await flushPromises()
 
@@ -155,12 +155,12 @@ describe('ClubSwitcher 社团切换', () => {
     session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-001' }
     mocks.getMyClubs.mockResolvedValue({
       kind: 'completed',
-      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '网络协会', role: 'hr' }] },
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' }] },
     })
     mocks.getContext.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
 
     const wrapper = await mountSwitcher()
-    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('网络协会'))!
+    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
     await item.trigger('click')
     await flushPromises()
 
