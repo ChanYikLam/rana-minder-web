@@ -7,9 +7,15 @@ import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
  * 平台管理相关权限常量：
  * 与 DefaultLayout 的 ADMIN_NAV 平台分组（sideNav.ts）保持一致，
  * 任一命中即视为"平台管理员"（侧边栏展示"平台"分组）。
+ *
+ * P2-4 一致性：与 router/permissions.ts 的 ADMIN_PERMISSIONS 取并集。
+ * 联合 / 招新平台页已细化为 platform:joint:manage / platform:recruitment:manage，
+ * 也算作"平台管理员"可见入口。
  */
 export const PLATFORM_PERMISSIONS = [
   'platform:club:manage',
+  'platform:joint:manage',
+  'platform:recruitment:manage',
   'platform:form:design',
   'platform:config:manage',
   'platform:audit:view',
