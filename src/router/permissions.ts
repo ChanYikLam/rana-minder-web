@@ -58,9 +58,32 @@ export const ADMIN_PERMISSIONS: Record<string, string> = {
   'P-OPS-01': 'platform:ops:view',
 }
 
+// P2-2 健壮性：显式声明作为前缀规则的 key。
+// 其余 key（如 P-REC-list / P-REC-02 / P-MEM-01 / P-MEM-03-manage 等）只参与精确匹配，
+// 不会被 startsWith 命中——避免"P-REC-02-applications 被 P-REC-02 误吞"。
+// 模块加载时一次性按 key 长度倒序排序（最长前缀优先），
+// 消除对 Object.keys 插入顺序的隐式依赖，使匹配行为可预测。
+const WORKSPACE_PREFIX_KEYS = new Set<string>([
+  'P-REC', 'P-JNT', 'P-MEM', 'P-FORM', 'P-STAT', 'P-EXP', 'P-NTF', 'P-AUD', 'P-CFG',
+])
+
+const WORKSPACE_PREFIX_KEYS_BY_LENGTH: readonly string[] = Array.from(WORKSPACE_PREFIX_KEYS).sort(
+  (a, b) => b.length - a.length,
+)
+
 export function workspacePermissionForRoute(routeName: string): string | string[] | null {
+  // 1. 精确匹配优先（最具体的情况，如 P-MEM-03-manage 命中自身而非 P-MEM）
   const exact = WORKSPACE_PERMISSIONS[routeName]
   if (exact) return exact
-  const prefix = Object.keys(WORKSPACE_PERMISSIONS).find((key) => routeName.startsWith(`${key}-`) || routeName === `${key}-list`)
-  return prefix ? WORKSPACE_PERMISSIONS[prefix] : null
+
+  // 2. 前缀匹配：仅遍历显式声明的前缀规则集，按 key 长度倒序（最长前缀优先）
+  //    - startsWith(`${key}-`) 命中如 P-REC-04-manage → P-REC
+  //    - 全等于 `${key}-list` 命中如 P-FORM-list → P-FORM（即使字典中无 P-FORM-list 精确键）
+  //    注意：精确键（P-REC-02 / P-MEM-01 等）不在此集中，不会被 startsWith 误吞
+  for (const key of WORKSPACE_PREFIX_KEYS_BY_LENGTH) {
+    if (routeName.startsWith(`${key}-`) || routeName === `${key}-list`) {
+      return WORKSPACE_PERMISSIONS[key]
+    }
+  }
+  return null
 }

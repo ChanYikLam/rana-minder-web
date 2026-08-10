@@ -563,6 +563,10 @@ describe('任期到期提醒（MEM-004）', () => {
         expect(hits[i].daysLeft).toBeGreaterThanOrEqual(hits[i - 1].daysLeft)
       }
       expect(hits[0].daysLeft).toBeLessThanOrEqual(30)
+      // 宽窗口内 mem-t1(10 天) 必须排在 mem-t2(300 天) 之前，用相对顺序断言避免依赖固定日期种子数据
+      const wideOrder = wide.map((h) => h.memberId)
+      expect(wideOrder.indexOf('mem-t1')).toBeGreaterThanOrEqual(0)
+      expect(wideOrder.indexOf('mem-t1')).toBeLessThan(wideOrder.indexOf('mem-t2'))
     } finally {
       const ids = new Set(['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
