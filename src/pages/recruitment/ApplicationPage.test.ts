@@ -413,7 +413,7 @@ describe('ApplicationPage 交互流程', () => {
     await flushPromises()
     await nextTick()
 
-    expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/draft', { answers: {} })
+    expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/draft', { answers: {} }, { expectedVersion: undefined })
     expect(toast.success).toHaveBeenCalled()
   })
 
@@ -457,7 +457,7 @@ describe('ApplicationPage 交互流程', () => {
 
     expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/draft', {
       answers: { f1: '张三', f2: [{ ...checkingFile, status: 'uploaded', checkedAt: null }, approvedFile] },
-    })
+    }, { expectedVersion: undefined })
   })
 
   it('撤销提交：两段式确认，5 秒未确认自动复位且不发起请求', async () => {

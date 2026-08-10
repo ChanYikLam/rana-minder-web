@@ -11,7 +11,7 @@ import { createMemberFromAdmission, candidates } from './db'
  * 动态注册的 u-auto-* 档案由 ensureApplicantProfile 写入，resetRecruitmentDB 会还原种子 */
 export const APPLICANT_PROFILES: Record<string, { name: string; studentId: string }> = {
   'u-001': { name: '刘子豪', studentId: '20240001' },
-  'u-002': { name: '陈雨桐', studentId: '20240002' },
+  'u-002': { name: '陈雨彤', studentId: '20240002' },
   'u-003': { name: '王梓涵', studentId: '20240003' },
   'u-004': { name: '张博文', studentId: '20240004' },
   'u-005': { name: '李欣怡', studentId: '20240005' },
@@ -494,7 +494,7 @@ export const recruitmentApplications: RecApplication[] = [
   },
   {
     id: 'app-002', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐', studentId: '20240002',
+    applicantId: 'u-002', applicantName: '陈雨彤', studentId: '20240002',
     status: 'submitted',
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
@@ -553,7 +553,7 @@ export const recruitmentInterviews: RecInterview[] = [
   },
   {
     id: 'int-002', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐', roundId: 'rd-001',
+    applicantId: 'u-002', applicantName: '陈雨彤', roundId: 'rd-001',
     status: 'pending_selection', slotId: null, startAt: null, endAt: null,
     actualStartAt: null, actualEndAt: null, attendance: 'none',
     invalidReason: null, skipReason: null, cancelReason: null,
@@ -574,7 +574,7 @@ export const recruitmentReviews: RecReview[] = [
 export const recruitmentInvitations: RecInvitation[] = [
   {
     id: 'rinv-001', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐',
+    applicantId: 'u-002', applicantName: '陈雨彤',
     departmentId: 'dept-001', departmentName: '技术部',
     status: 'pending_acceptance', sentAt: daysFromNow(-22), expiredAt: daysFromNow(5),
     acceptedAt: null, casdoorSync: 'none', version: 1,
@@ -1002,6 +1002,14 @@ export function cancelActivity(activityId: string, reason: string, confirmAccept
     if (it.activityId === a.id && ['pending_selection', 'scheduled', 'leave', 'late', 'absent'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '活动取消'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markAttendance 约定一致）
+      if (it.slotId) {
+        const slot = a.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   expireActivityTasks(activityId)
@@ -1028,6 +1036,14 @@ export function forceCompleteActivity(activityId: string, reason: string): { ok:
     if (it.activityId === a.id && ['pending_selection', 'scheduled', 'leave', 'late', 'absent'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '活动强制完成'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markAttendance 约定一致）
+      if (it.slotId) {
+        const slot = a.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   for (const inv of recruitmentInvitations) {
@@ -1189,6 +1205,15 @@ export function invalidateInterview(interviewId: string, reason: string): { ok: 
   if (it.actualStartAt) return err('主观不同意评分不能作为作废理由；记录已开始需谨慎确认')
   it.status = 'invalidated'
   it.invalidReason = reason
+  // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用
+  if (it.slotId) {
+    const a = findAnyActivity(it.activityId)
+    const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+    if (slot) slot.taken = Math.max(0, slot.taken - 1)
+    it.slotId = null
+    it.startAt = null
+    it.endAt = null
+  }
   it.version += 1
   return ok(it)
 }
@@ -1218,7 +1243,7 @@ export function skipRoundInterview(activityId: string, applicantId: string, roun
 
 // ================= REC 申请 =================
 
-export function saveApplicationDraft(activityId: string, applicantId: string, input: { answers?: Record<string, unknown> }): { ok: boolean; error?: string; data?: RecApplication } {
+export function saveApplicationDraft(activityId: string, applicantId: string, input: { answers?: Record<string, unknown>; expectedVersion?: number }): { ok: boolean; error?: string; data?: RecApplication } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   let app = findApplication(activityId, applicantId)
@@ -1235,6 +1260,10 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     return err('申请已提交，请通过撤销提交回到草稿')
   } else if (app.status === 'identity_anomaly') {
     return err('账号身份异常，不能保存或修改报名')
+  }
+  // P2-8 乐观锁：已有草稿时比对 expectedVersion，防止多标签页/并发覆盖
+  if (input.expectedVersion !== undefined && app.version !== input.expectedVersion) {
+    return err('数据版本已变化，请刷新后重试')
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
   app.version += 1
@@ -1392,10 +1421,19 @@ export function withdrawApplication(activityId: string, applicantId: string, con
   if (!confirm) return err('请二次确认退出招新')
   app.status = 'exited'
   app.withdrawnAt = now()
+  const a = findAnyActivity(activityId)
   for (const it of recruitmentInterviews) {
     if (it.applicantId === applicantId && it.activityId === activityId && ['pending_selection', 'scheduled', 'leave', 'late', 'absent'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '申请人退出招新'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用
+      if (it.slotId) {
+        const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   for (const inv of recruitmentInvitations) {
@@ -1459,10 +1497,19 @@ export function publishNotQualified(activityId: string, applicantId: string, rea
   if (!t.ok) return err(t.reason || '当前申请不可发布资格失效结论')
   if (!reason.trim()) return err('必须填写结论原因')
   app.status = 'not_qualified'
+  const a = findAnyActivity(activityId)
   for (const it of recruitmentInterviews) {
     if (it.applicantId === applicantId && it.activityId === activityId && ['pending_selection', 'scheduled'].includes(it.status)) {
       it.status = 'cancelled'
       it.cancelReason = '资格失效'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用
+      if (it.slotId) {
+        const slot = a?.rounds.flatMap((r) => r.slots).find((s) => s.id === it.slotId)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   app.version += 1
@@ -1597,7 +1644,7 @@ export function setWaitlist(activityId: string, applicantId: string, departmentI
   return ok()
 }
 
-export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string; roundId?: string | null }): { ok: boolean; error?: string; data?: RecReview } {
+export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string; roundId?: string | null; expectedVersion?: number }): { ok: boolean; error?: string; data?: RecReview } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   if (a.status === 'completed' || a.status === 'cancelled' || a.status === 'force_completed') return err('活动已结束，普通评价编辑已锁定')
@@ -1607,6 +1654,10 @@ export function submitReview(activityId: string, applicantId: string, input: { c
   }
   let rev = recruitmentReviews.find((r) => r.activityId === activityId && r.applicantId === applicantId && r.authorId === input.authorId)
   if (rev) {
+    // P2-8 乐观锁：更新已有评价时比对 expectedVersion，防止多标签页/并发覆盖
+    if (input.expectedVersion !== undefined && rev.version !== input.expectedVersion) {
+      return err('数据版本已变化，请刷新后重试')
+    }
     rev.history = [
       ...(rev.history || []),
       { comment: rev.comment, version: rev.version, updatedAt: rev.updatedAt },
@@ -1750,7 +1801,7 @@ export function createJointActivity(clubId: string, clubName: string, actorName:
   if (!input.clubIds.includes(clubId)) return err('发起方社团必须包含在拟参与名单中')
   if (!input.title.trim()) return err('联合活动名称不能为空')
   if (new Date(input.confirmDeadline).getTime() <= Date.now()) return err('名单确认截止必须严格晚于当前时刻')
-  const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '羽毛球协会' }
+  const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会' }
   const ja: JointActivity = {
     id: 'jnt-' + Date.now(), title: input.title, description: input.description || '',
     status: 'draft',
@@ -1878,7 +1929,7 @@ export function saveJointApplicationDraft(
   applicantId: string,
   applicantName: string,
   studentId: string,
-  input?: { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[] },
+  input?: { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[]; expectedVersion?: number },
 ): { ok: boolean; error?: string; data?: JointApplication } {
   const ja = findJoint(jointId)
   if (!ja) return err('联合活动不存在')
@@ -1892,6 +1943,10 @@ export function saveJointApplicationDraft(
     }
     jointApplications.push(app)
     ja.applicantIds.push(app.id)
+  }
+  // P2-8 乐观锁：已有草稿时比对 expectedVersion，防止多标签页/并发覆盖
+  if (input?.expectedVersion !== undefined && app.version !== input.expectedVersion) {
+    return err('数据版本已变化，请刷新后重试')
   }
   app.consented = input?.consented ?? app.consented
   app.allowJointAdjustment = input?.allowJointAdjustment ?? app.allowJointAdjustment
@@ -2488,6 +2543,14 @@ export function cancelJointActivity(jointId: string, clubId: string, actorName: 
     for (const it of jointInterviews) {
       if (it.jointId === ja.id && ['pending_selection', 'scheduled'].includes(it.status)) {
         it.status = 'cancelled_archived'
+        // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markJointAttendance 约定一致）
+        if (it.slotId) {
+          const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === ja.id)
+          if (slot) slot.taken = Math.max(0, slot.taken - 1)
+          it.slotId = null
+          it.startAt = null
+          it.endAt = null
+        }
       }
     }
     expireActivityTasks(jointId)
@@ -2609,6 +2672,14 @@ export function forceCloseJointActivity(jointId: string, reason: string): { ok: 
   for (const it of jointInterviews) {
     if (it.jointId === ja.id && ['pending_selection', 'scheduled', 'in_progress'].includes(it.status)) {
       it.status = 'cancelled_archived'
+      // 仅当面试仍持有 slot 引用时释放容量，并同步清空引用（与 markJointAttendance 约定一致）
+      if (it.slotId) {
+        const slot = jointSlots.find((s) => s.id === it.slotId && s.jointId === ja.id)
+        if (slot) slot.taken = Math.max(0, slot.taken - 1)
+        it.slotId = null
+        it.startAt = null
+        it.endAt = null
+      }
     }
   }
   for (const con of jointConclusions) {

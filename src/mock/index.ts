@@ -3187,6 +3187,10 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reason?: string; reauthProof?: string; previewVersion?: number } } }) => {
       if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      if (query._mock_error === 'IFC-ERR-014') {
+        // P3-2：可注入的异步受理模拟（202/accepted），供联调与页面 accepted 分支验证
+        return { statusCode: 202, body: { code: 'IFC-ERR-014', message: '操作正在处理中，请勿重复提交', data: { taskId: 'mock-task-' + Date.now(), status: 'processing' } } }
+      }
       if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
@@ -3519,6 +3523,10 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, query, body }: { url: string; query: Record<string, string>; body: { input: { reauthProof?: string; previewVersion?: number; reason?: string } } }) => {
       if (!getPermissions(resolveMockUser(url), '').includes('platform:config:manage')) return forbidden()
+      if (query._mock_error === 'IFC-ERR-014') {
+        // P3-2：可注入的异步受理模拟（202/accepted），供联调与页面 accepted 分支验证
+        return { statusCode: 202, body: { code: 'IFC-ERR-014', message: '操作正在处理中，请勿重复提交', data: { taskId: 'mock-task-' + Date.now(), status: 'processing' } } }
+      }
       if (!consumeReauthProof(body.input?.reauthProof, resolveMockUser(url)?.id)) {
         return { statusCode: 401, body: { code: 'IFC-ERR-002', message: '请重新验证身份' } }
       }
@@ -4532,7 +4540,7 @@ const mockFileHandlers: MockMethod[] = [
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="${fileId}"`,
         },
-        body: '\uFEFF姓名,学号,部门,状态\n陈雨桐,20240002,技术部,成员\n刘子豪,20240001,技术部,候选人\n林婉婷,20240006,设计部,候选人\n',
+        body: '\uFEFF姓名,学号,部门,状态\n陈雨彤,20240002,技术部,成员\n刘子豪,20240001,技术部,候选人\n林婉婷,20240006,设计部,候选人\n',
       }
     },
   },

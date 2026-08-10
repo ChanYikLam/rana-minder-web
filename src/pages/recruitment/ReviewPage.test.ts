@@ -3,18 +3,19 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost, mockToastError, mockToastSuccess, mockUseRoute } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockToastError, mockToastSuccess, mockToastInfo, mockUseRoute } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockPost: vi.fn(),
   mockToastError: vi.fn(),
   mockToastSuccess: vi.fn(),
+  mockToastInfo: vi.fn(),
   mockUseRoute: vi.fn(() => ({ params: { clubId: 'club-001', activityId: 'act-1' }, query: {} })),
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => mockUseRoute(),
 }))
 vi.mock('vue-sonner', () => ({
-  toast: { success: (...a: unknown[]) => mockToastSuccess(...a), error: (...a: unknown[]) => mockToastError(...a) },
+  toast: { success: (...a: unknown[]) => mockToastSuccess(...a), error: (...a: unknown[]) => mockToastError(...a), info: (...a: unknown[]) => mockToastInfo(...a) },
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
@@ -27,7 +28,7 @@ const review = {
   id: 'app-1', applicantId: 'u-1', applicantName: '张三', departmentName: '技术部',
   status: 'in_progress', rating: null, comment: null, concludedAt: null, concludedBy: null,
   reviewId: 'rev-1', roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
-  myRating: null, myComment: null, peerViewLocked: false, reviews: [],
+  myRating: null, myComment: null, myReviewVersion: null, peerViewLocked: false, reviews: [],
 }
 
 /** 申请详情响应：含 answers（file 字段含 FileMeta） */
@@ -153,7 +154,7 @@ describe('ReviewPage 评审页', () => {
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
       rating: 4,
       comment: '',
-    })
+    }, { expectedVersion: undefined })
     // 失败不再静默：操作结果走向独立 Toast 层（不内联进评价正文）
     expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
     expect(wrapper.text()).not.toContain('申请人不存在')
@@ -175,7 +176,7 @@ describe('ReviewPage 评审页', () => {
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
       rating: 4,
       comment: '',
-    })
+    }, { expectedVersion: undefined })
     expect(mockToastSuccess).toHaveBeenCalledWith('评价已提交')
     expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews')
   })
@@ -191,5 +192,43 @@ describe('ReviewPage 评审页', () => {
     expect(wrapper.text()).toContain('张三')
     // 评价面板已展开（非"点击左侧申请人查看详情"占位）
     expect(wrapper.text()).not.toContain('点击左侧申请人查看详情')
+  })
+
+  it('提交评价被异步受理（accepted）：提示已受理且不误报失败', async () => {
+    setupGetRouter()
+    mockPost.mockResolvedValue({ kind: 'accepted', data: { taskId: 't-1', status: 'processing' } })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await clickReviewRow(wrapper)
+    await wrapper.find('button[aria-label="4 星"]').trigger('click')
+    const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交评价'))
+    expect(submitBtn, '未找到提交评价按钮').toBeTruthy()
+    await submitBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockToastInfo).toHaveBeenCalledWith('评价已受理，正在后台处理')
+    expect(mockToastError).not.toHaveBeenCalled()
+  })
+
+  it('统一发布结论被异步受理（accepted）：提示已受理且不误报失败', async () => {
+    setupGetRouter({ reviews: { kind: 'completed', data: { items: [{ ...review, status: 'concluded', myRating: 4 }] } } })
+    mockPost.mockResolvedValue({ kind: 'accepted', data: { taskId: 't-1', status: 'processing' } })
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 打开统一发布弹窗并确认
+    const publishBtn = wrapper.findAll('button').find((b) => b.text().includes('统一发布结论'))
+    expect(publishBtn, '未找到统一发布结论按钮').toBeTruthy()
+    await publishBtn!.trigger('click')
+    await flushPromises()
+    const hrcConfirm = wrapper.find('.hrc-confirm')
+    expect(hrcConfirm.exists(), '未找到 HighRiskConfirm 确认按钮').toBe(true)
+    await hrcConfirm.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/publish')
+    expect(mockToastInfo).toHaveBeenCalledWith('发布已受理，正在后台处理')
+    expect(mockToastError).not.toHaveBeenCalled()
   })
 })
