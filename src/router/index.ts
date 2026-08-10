@@ -489,6 +489,7 @@ const routes: RouteRecordRaw[] = [
   },
 
   // ========== 通用回退 ==========
+  // 根路径：仅作守卫落点载体（guard 对 `/` 必做重定向，页面本体不渲染）
   {
     path: '/',
     name: 'P-GEN-00-root',
@@ -499,7 +500,7 @@ const routes: RouteRecordRaw[] = [
     path: '/:pathMatch(.*)*',
     name: 'P-GEN-01',
     component: () => import('@/pages/generic/NotFoundPage.vue'),
-    meta: { layout: 'public', public: true },
+    meta: { layout: 'default', public: true },
   },
 ]
 
