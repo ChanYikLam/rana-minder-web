@@ -555,9 +555,13 @@ describe('任期到期提醒（MEM-004）', () => {
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
-      // daysLeft 升序（近任期在前）：mem-t1(10 天) 必须排在 mem-t2(300 天) 之前。
-      // 用相对顺序断言，避免依赖固定日期种子数据（如 mem-004 plannedEndDate=2026-08-20
-      // 会随真实时钟进入窗口且与 mem-t1 同为 10 天，导致 hits[0] 不稳定）。
+      // daysLeft 升序（近任期在前）：种子数据里 mem-004（2026-08-20 到期）等成员可能随
+      // 真实时钟进入同一窗口并与 mem-t1 并列，故只断言全局升序性质，不绑定具体成员位次
+      for (let i = 1; i < hits.length; i++) {
+        expect(hits[i].daysLeft).toBeGreaterThanOrEqual(hits[i - 1].daysLeft)
+      }
+      expect(hits[0].daysLeft).toBeLessThanOrEqual(30)
+      // 宽窗口内 mem-t1(10 天) 必须排在 mem-t2(300 天) 之前，用相对顺序断言避免依赖固定日期种子数据
       const wideOrder = wide.map((h) => h.memberId)
       expect(wideOrder.indexOf('mem-t1')).toBeGreaterThanOrEqual(0)
       expect(wideOrder.indexOf('mem-t1')).toBeLessThan(wideOrder.indexOf('mem-t2'))

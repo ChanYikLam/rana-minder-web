@@ -46,4 +46,18 @@ describe('JointConclusionPage 联合结论与邀请', () => {
     expect(wrapper.text()).not.toContain('张三')
     wrapper.unmount()
   })
+
+  it('非状态机状态（expired/rejected）不再走特殊分支，由兜底渲染（SM-JNT-005 无此二态）', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { items: [{ id: 'c-2', applicantName: '李四', departmentName: '技术部', status: 'expired', rating: null }] },
+    })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    // 不出现“逾期未处理”特殊文案
+    expect(wrapper.text()).not.toContain('逾期未处理')
+    // 状态经 StateTag 渲染（兜底），不崩溃
+    expect(wrapper.text()).toContain('李四')
+    wrapper.unmount()
+  })
 })

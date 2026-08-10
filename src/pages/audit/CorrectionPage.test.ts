@@ -4,8 +4,13 @@ import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
 const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({ mockToastSuccess: vi.fn(), mockToastError: vi.fn() }))
+// routeState 须在 hoisted 内定义，否则 vi.mock 提升时访问不到默认值
+const { routeState, defaultRouteState } = vi.hoisted(() => {
+  const defaultRouteState = { path: '/me/corrections', meta: { view: 'self' }, params: {} }
+  return { routeState: { value: { ...defaultRouteState } }, defaultRouteState }
+})
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ path: '/me/corrections', meta: { view: 'self' } }),
+  useRoute: () => routeState.value,
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
@@ -33,7 +38,11 @@ describe('CorrectionPage 事实纠错', () => {
     mockToastError.mockReset()
     vi.clearAllMocks()
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    // P3：统一复位 routeState，避免新增用例遗漏复位导致视角串扰
+    routeState.value = { ...defaultRouteState }
+  })
 
   it('个人视图：加载纠错列表', async () => {
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [correction] } })
@@ -91,6 +100,37 @@ describe('CorrectionPage 事实纠错', () => {
       targetType: '成员信息', targetId: 'mem-001', reason: '手机号有误', evidence: '截图',
     })
     expect(mockToastSuccess).toHaveBeenCalledWith('纠错申请已提交，等待审核')
+    wrapper.unmount()
+  })
+
+  it('overdue 状态：审批视角显示批准/拒绝按钮（SM-AUD-001 允许 overdue -> approve/reject）', async () => {
+    routeState.value = { path: '/org/club-001/corrections', meta: { view: 'manage' }, params: { clubId: 'club-001' } }
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ ...correction, status: 'overdue' }] } })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('批准'))).toBe(true)
+    expect(wrapper.findAll('button').some((b) => b.text().includes('拒绝'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('overdue 状态：本人视角显示撤回按钮（SM-AUD-001 允许 overdue -> withdraw）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ ...correction, status: 'overdue' }] } })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('撤回申请'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('审计轨迹：withdrawn 状态展示“已撤回”而非“已拒绝”（P2-2）', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { items: [{ ...correction, status: 'withdrawn', decidedBy: '张明远', decidedAt: '2026-08-02T04:00:00Z', withdrawnBy: '张三', withdrawnAt: '2026-08-03T04:00:00Z' }] },
+    })
+    const wrapper = mount(CorrectionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('审批人：张明远')
+    expect(wrapper.text()).toContain('已撤回')
+    expect(wrapper.text()).not.toContain('已拒绝')
     wrapper.unmount()
   })
 })
