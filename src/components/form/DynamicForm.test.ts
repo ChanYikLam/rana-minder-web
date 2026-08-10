@@ -270,6 +270,32 @@ describe('DynamicForm 版本横幅', () => {
     expect(btn.text()).toContain('刷新中...')
     expect(btn.attributes('disabled')).toBeDefined()
   })
+
+  it('P1-23：prop 置回 false 后按钮复位可用（不再永久"刷新中/迁移中"）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [], modelValue: {}, versionConflict: true, resolvingConflict: true },
+      global: { stubs: commonStubs },
+    })
+    expect(wrapper.find('button').text()).toContain('刷新中...')
+    await wrapper.setProps({ resolvingConflict: false })
+    const btn = wrapper.find('button')
+    expect(btn.text()).toContain('刷新数据')
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('P1-23：不传 prop 时点击不产生内部置位残留，可重复触发', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [], modelValue: {}, versionConflict: true },
+      global: { stubs: commonStubs },
+    })
+    const btn = wrapper.find('button')
+    await btn.trigger('click')
+    await btn.trigger('click')
+    expect(wrapper.emitted('resolveConflict')).toHaveLength(2)
+    // 按钮文案/可用性不因点击而停留
+    expect(btn.text()).toContain('刷新数据')
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
 })
 
 describe('DynamicForm array 字段', () => {

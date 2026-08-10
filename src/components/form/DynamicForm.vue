@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import FieldPermission from './FieldPermission.vue'
 import AttachmentUpload from './AttachmentUpload.vue'
 import DateTimePicker from './DateTimePicker.vue'
@@ -26,11 +26,10 @@ const emit = defineEmits<{
   'migrateVersion': []
 }>()
 
-const resolving = ref(false)
-const migrating = ref(false)
-
-const isResolving = computed(() => props.resolvingConflict ?? resolving.value)
-const isMigrating = computed(() => props.migratingVersion ?? migrating.value)
+// P1-23：进行中状态改为纯 prop 驱动（resolvingConflict/migratingVersion），
+// 父级完成/取消后置 false 即复位；删除内部置位 ref，避免"刷新中/迁移中"永久停留
+const isResolving = computed(() => props.resolvingConflict === true)
+const isMigrating = computed(() => props.migratingVersion === true)
 
 function fieldValue(field: FormField): unknown {
   return props.modelValue[field.id]
@@ -143,13 +142,11 @@ function arrayItemValue(field: FormField, index: number, childId: string): strin
 
 function handleResolveConflict() {
   if (isResolving.value) return
-  resolving.value = true
   emit('resolveConflict')
 }
 
 function handleMigrateVersion() {
   if (isMigrating.value) return
-  migrating.value = true
   emit('migrateVersion')
 }
 
