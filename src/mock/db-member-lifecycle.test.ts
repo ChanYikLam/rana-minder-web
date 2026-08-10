@@ -555,8 +555,9 @@ describe('任期到期提醒（MEM-004）', () => {
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
-      // daysLeft 升序（近任期在前）
-      expect(hits[0].memberId).toBe('mem-t1')
+      // daysLeft 升序（近任期在前）——仅对本次用例构造的成员断言，避免被种子成员（如 mem-004）干扰
+      const mine = hits.filter((h) => h.memberId.startsWith('mem-t'))
+      expect(mine[0].memberId).toBe('mem-t1')
     } finally {
       const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
