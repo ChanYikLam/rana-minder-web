@@ -10,14 +10,15 @@ import {
   resetMockDegraded,
   markProfileComplete,
   markEmailVerified,
+  getSchoolProfile,
   type MockUser,
 } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
 import * as db from './db'
 import * as orgdb from './db-organization'
-import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox, pushNotification, userIdOfMember } from './notifications'
+import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox, pushNotification, userIdOfMember, userIdOfName } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
-import { correctionsDb, type CorrectionRecord, type CorrectionAuditEntry } from './db-corrections'
+import { correctionsDb, deriveCorrectionStatus, type CorrectionRecord, type CorrectionAuditEntry } from './db-corrections'
 import { auditLogsDb, writeAuditLog } from './db-audit'
 import * as formdb from './db-forms'
 import {
@@ -57,6 +58,11 @@ function deliverTermEndReminders(clubId: string) {
 /** 纠错状态机守卫（SM-AUD-001）：仅 submitted（含 overdue 未处置）可被批准/拒绝/撤回， */
 function isCorrectionActable(record: CorrectionRecord): boolean {
   return record.status === 'submitted' || record.status === 'overdue'
+}
+
+/** 纠错提交人 → 可接收通知的前端用户 id（US-AUD-01 通知联动；mock 用户未知时返回 null） */
+function correctionSubmitterUserId(record: CorrectionRecord): string | null {
+  return userIdOfName(record.submitterName)
 }
 
 function correctionStateConflict(): { statusCode: number; body: { code: string; message: string; supportId: string } } {
@@ -851,6 +857,29 @@ const identityHandlers: MockMethod[] = [
       return { code: 0, data: { emailVerified: true } }
     },
   },
+  // 同步冲突清单（sync-conflict 模式）：本地档案 vs 学校侧（Casdoor 权威侧），仅返回不一致字段
+  {
+    url: '/api/auth/profile/sync-conflicts',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const user = resolveMockUser(url)
+      const school = getSchoolProfile(user.id)
+      const labels: Record<string, string> = { name: '姓名', studentId: '学号', email: '邮箱', phone: '手机号' }
+      const conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> = []
+      for (const field of ['name', 'studentId', 'email', 'phone'] as const) {
+        const local = String(user[field] ?? '')
+        const remote = String(school[field] ?? '')
+        if (local !== remote) {
+          conflicts.push({ field, label: labels[field], localValue: local, remoteValue: remote })
+        }
+      }
+      return { code: 0, data: { conflicts, local: { name: user.name, studentId: user.studentId, email: user.email, phone: user.phone } } }
+    },
+  },
   {
     url: '/api/auth/profile/sync-conflict',
     method: 'post',
@@ -860,6 +889,7 @@ const identityHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const field = body.input?.field
+      const chosenValue = body.input?.chosenValue
       if (!field || !['name', 'email', 'phone', 'studentId'].includes(field)) {
         return {
           statusCode: 422,
@@ -870,7 +900,62 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      // 写回前按字段类型做格式校验，与 PUT /auth/profile 保持一致（避免垃圾格式值经冲突解决落库）
+      if (typeof chosenValue === 'string' && chosenValue !== '') {
+        if (field === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(chosenValue)) {
+          return {
+            statusCode: 422,
+            body: {
+              code: 'IFC-ERR-006',
+              message: '邮箱格式不正确',
+              fieldErrors: { [field]: ['邮箱格式不正确'] },
+              supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+            },
+          }
+        }
+        if (field === 'phone' && !/^1[3-9]\d{9}$/.test(chosenValue)) {
+          return {
+            statusCode: 422,
+            body: {
+              code: 'IFC-ERR-006',
+              message: '手机号格式不正确',
+              fieldErrors: { [field]: ['手机号格式不正确'] },
+              supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+            },
+          }
+        }
+      }
+      // 空值或与本地当前值相同的提交不产生实际变更，直接返回当前资料
       const user = resolveMockUser(url)
+      const typedField = field as 'name' | 'email' | 'phone' | 'studentId'
+      // 防御性判断：目标字段不存在时拒绝写回，避免 String(undefined ?? '') 产生 'undefined' 字面量（审计 P3）
+      if (user[typedField] === undefined) {
+        return {
+          statusCode: 422,
+          body: {
+            code: 'IFC-ERR-006',
+            message: '不支持的冲突字段',
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          },
+        }
+      }
+      const currentValue = String(user[typedField])
+      if (typeof chosenValue !== 'string' || chosenValue === '' || chosenValue === currentValue) {
+        return {
+          code: 0,
+          data: {
+            studentId: user.studentId,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
+          },
+        }
+      }
+      // 真正写回本地档案（选择学校侧值时用学校侧值覆盖本地）
+      user[typedField] = chosenValue
+      markProfileComplete(user.id)
       return {
         code: 0,
         data: {
@@ -2831,7 +2916,10 @@ response: ({ url }: { url: string }) => {
       return {
         code: 0,
         data: {
-          items: [...correctionsDb].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+          // P2-1：读取时派生 overdue（submitted 超审批期限 → overdue），保证逾期纠错可见可处置
+          items: [...correctionsDb]
+            .map((c) => ({ ...c, status: deriveCorrectionStatus(c) }))
+            .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
           nextCursor: null,
         },
       }
@@ -2871,7 +2959,12 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
-      if (!isCorrectionActable(record)) return correctionStateConflict()
+      // US-AUD-01 自批校验：不能批准/拒绝自己提交的纠错
+      if (record.submitterName === user.name) {
+        return businessError('不能处理自己提交的纠错申请')
+      }
+      // SM-AUD-001：submitted/overdue 均可处置（overdue 可能由派生产生，未落库为 overdue）
+      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
@@ -2880,6 +2973,15 @@ response: ({ url }: { url: string }) => {
       const entry: CorrectionAuditEntry = { action: approved ? 'approve' : 'reject', actorName: user.name, at: decidedAt }
       appendCorrectionAudit(record, entry)
       writeCorrectionAuditLog(entry, record, 'org')
+      // US-AUD-01 通知联动：处置结果通知提交人
+      const submitterUid = correctionSubmitterUserId(record)
+      if (submitterUid) {
+        pushNotification(
+          [submitterUid], 'correction',
+          { body: `您提交的事实纠错（${record.targetType} #${record.targetId}）已被${user.name}${approved ? '批准' : '拒绝'}。` },
+          { clubId: query.clubId, link: '/me/corrections' },
+        )
+      }
       return { code: 0, data: { id: record.id, status: record.status, decidedAt, decidedBy: user.name } }
     },
   },
@@ -2894,7 +2996,8 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
-      if (!isCorrectionActable(record)) return correctionStateConflict()
+      // SM-AUD-001：submitted/overdue 均可撤回
+      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
@@ -2913,7 +3016,7 @@ response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       const items = correctionsDb
         .filter((c) => c.submitterName === user.name)
-        .map((c) => ({ ...c }))
+        .map((c) => ({ ...c, status: deriveCorrectionStatus(c) }))
       return {
         code: 0,
         data: { items, nextCursor: null },
@@ -2955,7 +3058,12 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
-      if (!isCorrectionActable(record)) return correctionStateConflict()
+      // US-AUD-01 自批校验：不能批准/拒绝自己提交的纠错
+      if (record.submitterName === user.name) {
+        return businessError('不能处理自己提交的纠错申请')
+      }
+      // SM-AUD-001：submitted/overdue 均可处置
+      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
@@ -2964,6 +3072,15 @@ response: ({ url }: { url: string }) => {
       const entry: CorrectionAuditEntry = { action: approved ? 'approve' : 'reject', actorName: user.name, at: decidedAt }
       appendCorrectionAudit(record, entry)
       writeCorrectionAuditLog(entry, record, 'org')
+      // US-AUD-01 通知联动：处置结果通知提交人
+      const submitterUid = correctionSubmitterUserId(record)
+      if (submitterUid) {
+        pushNotification(
+          [submitterUid], 'correction',
+          { body: `您提交的事实纠错（${record.targetType} #${record.targetId}）已被${user.name}${approved ? '批准' : '拒绝'}。` },
+          { clubId: wsClubId, link: '/me/corrections' },
+        )
+      }
       return { code: 0, data: { id: record.id, status: record.status, decidedAt, decidedBy: user.name } }
     },
   },
@@ -2978,7 +3095,8 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
-      if (!isCorrectionActable(record)) return correctionStateConflict()
+      // SM-AUD-001：submitted/overdue 均可撤回
+      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
@@ -3804,7 +3922,10 @@ response: ({ url }: { url: string }) => {
       return {
         code: 0,
         data: {
-          items: [...correctionsDb].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+          // P2-1：读取时派生 overdue，保证逾期纠错可见可处置
+          items: [...correctionsDb]
+            .map((c) => ({ ...c, status: deriveCorrectionStatus(c) }))
+            .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
           nextCursor: null,
         },
       }
@@ -3843,7 +3964,12 @@ response: ({ url }: { url: string }) => {
       if (!record) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
-      if (!isCorrectionActable(record)) return correctionStateConflict()
+      // US-AUD-01 自批校验：不能批准/拒绝自己提交的纠错
+      if (record.submitterName === user.name) {
+        return businessError('不能处理自己提交的纠错申请')
+      }
+      // SM-AUD-001：submitted/overdue 均可处置
+      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
@@ -3852,6 +3978,15 @@ response: ({ url }: { url: string }) => {
       const entry: CorrectionAuditEntry = { action: approved ? 'approve' : 'reject', actorName: user.name, at: decidedAt }
       appendCorrectionAudit(record, entry)
       writeCorrectionAuditLog(entry, record, 'platform')
+      // US-AUD-01 通知联动：处置结果通知提交人
+      const submitterUid = correctionSubmitterUserId(record)
+      if (submitterUid) {
+        pushNotification(
+          [submitterUid], 'correction',
+          { body: `您提交的事实纠错（${record.targetType} #${record.targetId}）已被${user.name}${approved ? '批准' : '拒绝'}。` },
+          { clubId: null, link: '/me/corrections' },
+        )
+      }
       return { code: 0, data: { id: record.id, status: record.status, decidedAt, decidedBy: user.name } }
     },
   },
@@ -3866,7 +4001,8 @@ response: ({ url }: { url: string }) => {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '纠错申请不存在', supportId: 'MOCK' } }
       }
       if (record.submitterName !== user.name) return forbidden()
-      if (!isCorrectionActable(record)) return correctionStateConflict()
+      // SM-AUD-001：submitted/overdue 均可撤回
+      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name

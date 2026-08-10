@@ -11,6 +11,7 @@ vi.mock('vue-sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
+import { toast } from 'vue-sonner'
 import RetentionPage from './RetentionPage.vue'
 
 // 在保留 pageStubs 其他项的同时，覆盖 HighRiskConfirm 以模拟失败/重试/关闭按钮，
@@ -54,6 +55,43 @@ describe('RetentionPage 数据保留策略', () => {
     const wrapper = mount(RetentionPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('180')
+  })
+
+  it('执行保留策略被 202 异步受理：提示已受理并关闭执行弹窗，不误报失败', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { policies: [{ id: 'rt-1', scope: 'application', retentionDays: 180, action: 'archive', status: 'draft', version: 1, updatedAt: '2026-08-01', publishedAt: null }] },
+    })
+    mockPost.mockResolvedValue({ kind: 'accepted', data: { taskId: 'task-1', status: 'pending' } })
+    const wrapper = mount(RetentionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('立即执行'))!.trigger('click')
+    expect(wrapper.find('.hrc').exists()).toBe(true)
+    await wrapper.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/retention/execute', expect.objectContaining({ reauthProof: 'mock-reauth-proof' }))
+    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('已受理'))
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(wrapper.find('.hrc').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('执行保留策略失败：错误传入弹窗展示而非永久卡“正在执行”', async () => {
+    mockGet.mockResolvedValue({
+      kind: 'completed',
+      data: { policies: [{ id: 'rt-1', scope: 'application', retentionDays: 180, action: 'archive', status: 'draft', version: 1, updatedAt: '2026-08-01', publishedAt: null }] },
+    })
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: '执行被中断' } })
+    const wrapper = mount(RetentionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('立即执行'))!.trigger('click')
+    await wrapper.find('.hrc-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.hrc').exists()).toBe(true)
+    expect(wrapper.find('.hrc').text()).toContain('执行被中断')
+    wrapper.unmount()
   })
 })
 

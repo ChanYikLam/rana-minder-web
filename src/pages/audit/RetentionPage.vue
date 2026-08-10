@@ -5,6 +5,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { identityApi } from '@/services/modules'
 import type { PageState } from '@/types/machine'
 import { Plus, ShieldAlert, Calendar, ArrowRight } from '@lucide/vue'
@@ -51,10 +52,6 @@ const reauthProof = ref('')
 const reauthenticating = ref(false)
 const confirmOpen = ref(false)
 const publishing = ref(false)
-
-// 发布（高风险：需重认证）
-const publishPolicy = ref<Policy | null>(null)
-const publishOpen = ref(false)
 const publishSucceeded = ref(false)
 const publishError = ref('')
 
@@ -149,6 +146,9 @@ async function handlePublish() {
     const data = result.data as { notice?: string | null; auditRef?: string }
     if (data.notice) toast.info(data.notice)
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('发布已受理，正在后台处理')
+    await loadData()
   } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
     publishSucceeded.value = false
     publishError.value = '身份验证已失效，请重新认证后重试'
@@ -161,30 +161,6 @@ async function handlePublish() {
     publishSucceeded.value = false
     publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
     toastError(result, '发布失败，请重试')
-  }
-}
-
-function openPublish(p: Policy) {
-  publishPolicy.value = p
-  publishOpen.value = true
-  publishSucceeded.value = false
-  publishError.value = ''
-}
-
-async function handlePublishSimple() {
-  if (!publishPolicy.value || publishing.value) return
-  publishing.value = true
-  publishSucceeded.value = false
-  publishError.value = ''
-  const result = await post(`/admin/retention/${publishPolicy.value.id}/publish`)
-  publishing.value = false
-  if (result.kind === 'completed') {
-    publishSucceeded.value = true
-    const target = policies.value.find((p) => p.id === publishPolicy.value!.id)
-    if (target) target.status = 'active'
-    toast.success('保留策略已发布并生效')
-  } else {
-    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
   }
 }
 
@@ -207,6 +183,10 @@ async function handleExecute(proof?: string) {
     const data = result.data as { totalExecuted: number }
     toast.success(`保留策略执行完成，共处置 ${data.totalExecuted} 条数据`)
     await loadData()
+  } else if (result.kind === 'accepted') {
+    // P1：#10 服务端 202/IFC-ERR-013/014 异步受理执行：统一提示已受理，避免误报"执行失败"
+    toastAcceptedAction('保留策略执行已受理，正在后台处理')
+    executeOpen.value = false
   } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
     toast.error('身份验证已失效，请重新认证后重试')
     executeOpen.value = false
@@ -345,14 +325,7 @@ onMounted(loadData)
             </div>
           </div>
 
-          <!-- 简单发布按钮（dev） -->
-          <button
-            v-if="p.status === 'draft'"
-            class="mt-3 px-3 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover"
-            @click="openPublish(p)"
-          >
-            发布策略
-          </button>
+          <!-- 简单发布按钮（dev）已移除：P1-9 防止旁路完整发布流程（预览影响→原因→版本锁→重认证） -->
         </Card>
       </div>
 
@@ -370,20 +343,6 @@ onMounted(loadData)
         @update:open="(v) => { if (!v) { confirmOpen = false; publishSucceeded = false; publishError = '' } }"
       />
     </div>
-
-    <HighRiskConfirm
-      v-model:open="publishOpen"
-      title="发布保留策略"
-      description="发布后新策略立即生效，此操作不可撤销。"
-      :targets="publishPolicy ? [{ id: publishPolicy.id, label: publishPolicy.scope, detail: `保留 ${publishPolicy.retentionDays} 天 · ${actionLabels[publishPolicy.action] || publishPolicy.action}` }] : []"
-      impact-summary="发布后对所有关联数据生效；如需变更请创建新策略并重新发布。"
-      confirm-label="确认发布"
-      reauth-required
-      :executing="publishing"
-      :succeeded="publishSucceeded"
-      :error-message="publishError"
-      @confirm="handlePublishSimple"
-    />
 
     <HighRiskConfirm
       v-model:open="executeOpen"

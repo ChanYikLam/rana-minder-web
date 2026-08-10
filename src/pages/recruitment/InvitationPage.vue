@@ -63,8 +63,9 @@ async function handleSyncConfirm() {
   const result = await post(`/me/invitations/recruitment/${detail.value.id}/sync-confirm`)
   syncing.value = false
   if (result.kind === 'completed') {
-    detail.value.casdoorSync = 'confirmed'
     toast.success('成员身份已生效')
+    // 重新拉取详情：sync_failed 重试成功后 status/casdoorSync 均由后端更新
+    await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
   }
@@ -146,20 +147,20 @@ onMounted(loadDetail)
       </template>
 
       <!-- 已响应 -->
-      <Card v-else-if="detail.status === 'accepted'" class="border-success">
-        <div class="flex items-center gap-2 text-success">
+      <Card v-else-if="detail.status === 'accepted' || detail.status === 'sync_failed'" class="border-success">
+        <div class="flex items-center gap-2" :class="detail.status === 'sync_failed' ? 'text-danger' : 'text-success'">
           <CheckCircle2 :size="20" />
-          <p class="text-sm font-medium">您已接受邀请</p>
+          <p class="text-sm font-medium">{{ detail.status === 'sync_failed' ? '您已接受邀请，但成员同步失败' : '您已接受邀请' }}</p>
         </div>
-        <p class="text-xs text-text-secondary mt-1">系统正在与统一身份认证同步，生效后您将成为正式成员</p>
+        <p class="text-xs text-text-secondary mt-1">{{ detail.status === 'sync_failed' ? '身份同步未完成，可点击下方按钮重新发起同步确认' : '系统正在与统一身份认证同步，生效后您将成为正式成员' }}</p>
         <!-- REC-028: 普通招新不提供"撤销已接受录取"操作 -->
         <p class="text-xs text-warning mt-2">已接受的录取邀请不可撤销</p>
 
-        <!-- 新-2：申请人侧确认生效入口（casdoorSync=processing 时） -->
-        <div v-if="detail.casdoorSync === 'processing'" class="mt-3">
+        <!-- 新-2：申请人侧确认生效入口（casdoorSync=processing 或 sync_failed 重试） -->
+        <div v-if="detail.casdoorSync === 'processing' || detail.status === 'sync_failed'" class="mt-3">
           <div class="rounded-lg bg-warning-subtle p-2.5 mb-3 flex items-center gap-2">
             <Clock :size="14" class="text-warning shrink-0" />
-            <p class="text-xs text-warning">已接受，正在等待成员身份生效确认</p>
+            <p class="text-xs text-warning">{{ detail.status === 'sync_failed' ? '成员同步失败，可点击重新确认生效' : '已接受，正在等待成员身份生效确认' }}</p>
           </div>
           <button
             class="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"

@@ -90,6 +90,14 @@ function formatDate(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
+/** 审计轨迹决策文案：approved→已批准 / rejected→已拒绝 / withdrawn→已撤回（P2-2） */
+function auditDecisionLabel(status: string): string {
+  if (status === 'approved') return '已批准'
+  if (status === 'rejected') return '已拒绝'
+  if (status === 'withdrawn') return '已撤回'
+  return '已处理'
+}
+
 onMounted(loadData)
 </script>
 
@@ -152,13 +160,13 @@ onMounted(loadData)
           <!-- 审计轨迹：审批/撤回闭环可追溯（P1-010） -->
           <p v-if="item.decidedBy && item.decidedAt" class="text-xs text-text-secondary mt-1">
             审批人：{{ item.decidedBy }} · {{ formatDate(item.decidedAt) }}
-            <span>（{{ item.status === 'approved' ? '已批准' : '已拒绝' }}）</span>
+            <span>（{{ auditDecisionLabel(item.status) }}）</span>
           </p>
           <p v-if="item.withdrawnBy && item.withdrawnAt" class="text-xs text-text-secondary mt-1">
             撤回人：{{ item.withdrawnBy }} · {{ formatDate(item.withdrawnAt) }}
           </p>
 
-          <div v-if="view !== 'self' && item.status === 'submitted'" class="mt-3 flex gap-2">
+          <div v-if="view !== 'self' && (item.status === 'submitted' || item.status === 'overdue')" class="mt-3 flex gap-2">
             <button
               class="px-3 py-1.5 rounded-md bg-success text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60"
               :disabled="actingId !== null"
@@ -174,7 +182,7 @@ onMounted(loadData)
               {{ actingId === item.id ? '处理中...' : '拒绝' }}
             </button>
           </div>
-          <div v-if="view === 'self' && item.status === 'submitted'" class="mt-3">
+          <div v-if="view === 'self' && (item.status === 'submitted' || item.status === 'overdue')" class="mt-3">
             <button
               class="text-xs text-danger hover:underline disabled:opacity-60"
               :disabled="actingId !== null"

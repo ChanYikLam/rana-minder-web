@@ -94,7 +94,7 @@ function formatTime(iso: string): string {
 
 const canWithdraw = (status: string) => status === 'pending_acceptance'
 const canReissue = (status: string) => ['rejected', 'withdrawn', 'expired'].includes(status)
-const canSync = (status: string) => status === 'accepted'
+const canSync = (status: string) => status === 'accepted' || status === 'sync_failed'
 
 onMounted(async () => {
   await loadInvitations()
@@ -213,7 +213,7 @@ onMounted(async () => {
               :disabled="actionLoading"
               @click="runAction((row as InvitationRow).id, 'sync')"
             >
-              <CheckCircle2 :size="12" /> 同步生效
+              <CheckCircle2 :size="12" /> {{ (row as InvitationRow).status === 'sync_failed' ? '重试同步' : '同步生效' }}
             </button>
           </div>
         </template>
