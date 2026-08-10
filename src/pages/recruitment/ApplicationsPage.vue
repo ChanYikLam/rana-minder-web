@@ -6,6 +6,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { ApplicantCard, type ApplicantEntry } from '@/components/display'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
@@ -59,7 +60,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: Application[] } }).data.items
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function switchStatus(s: string) {

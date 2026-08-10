@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { NameSearch, type SearchResult } from '@/components/form'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
@@ -93,7 +94,8 @@ async function loadInitial() {
     schedule('')
     state.value = 'normal'
   } else {
-    state.value = 'error'
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败）
+    state.value = errorToPageState(errorCodeOf(groups.kind === 'completed' ? clubs : groups))
   }
 }
 

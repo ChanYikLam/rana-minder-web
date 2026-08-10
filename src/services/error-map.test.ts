@@ -105,13 +105,13 @@ describe('errorToPageState', () => {
     expect(errorToPageState('IFC-ERR-015')).toBe('forbidden')
   })
 
-  it('maps uncertain and processing errors to loading', () => {
-    expect(errorToPageState('IFC-ERR-013')).toBe('loading')
-    expect(errorToPageState('IFC-ERR-014')).toBe('loading')
+  it('maps uncertain and processing errors to error（P2-2：加载场景不卡 loading）', () => {
+    expect(errorToPageState('IFC-ERR-013')).toBe('error')
+    expect(errorToPageState('IFC-ERR-014')).toBe('error')
   })
 
   it('maps all remaining errors to error', () => {
-    const errorCodes = ['IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008', 'IFC-ERR-009', 'IFC-ERR-010', 'IFC-ERR-012', 'IFC-ERR-016', 'IFC-ERR-017'] as const
+    const errorCodes = ['IFC-ERR-005', 'IFC-ERR-006', 'IFC-ERR-007', 'IFC-ERR-008', 'IFC-ERR-009', 'IFC-ERR-010', 'IFC-ERR-012', 'IFC-ERR-013', 'IFC-ERR-014', 'IFC-ERR-016', 'IFC-ERR-017'] as const
     for (const code of errorCodes) {
       expect(errorToPageState(code)).toBe('error')
     }

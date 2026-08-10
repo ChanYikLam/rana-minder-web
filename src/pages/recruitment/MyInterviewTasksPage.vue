@@ -4,6 +4,7 @@ import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { ScheduleView, type ScheduleSlot } from '@/components/display'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Calendar, Clock, AlertTriangle, User, Edit3 } from '@lucide/vue'
 
@@ -58,9 +59,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     tasks.value = result.data.items
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function formatTime(iso: string | null): string {

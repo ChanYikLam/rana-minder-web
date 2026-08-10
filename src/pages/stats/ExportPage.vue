@@ -6,6 +6,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Download, Plus, FileText, Clock, CheckCircle2 } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
@@ -48,7 +49,7 @@ async function loadData() {
         startPolling(t.id, apiScope.prefix)
       }
     })
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function startPolling(taskId: string, prefix: string) {

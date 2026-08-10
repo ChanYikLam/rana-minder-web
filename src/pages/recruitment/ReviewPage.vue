@@ -6,6 +6,7 @@ import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { useSessionViewStore } from '@/state/sessionViewStore'
@@ -94,9 +95,7 @@ async function loadReviews() {
       const target = reviews.value.find((r) => r.applicantId === anchor)
       if (target) handleRowClick(target)
     }
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 /** 加载活动报名表单定义（用于渲染 answers 的字段标签） */
