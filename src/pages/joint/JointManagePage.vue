@@ -132,6 +132,8 @@ async function handleCreate() {
   submitting.value = false
   if (result.kind === 'completed') {
     router.push(`/org/${clubId}/joint/${(result.data as { id: string }).id}`)
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '创建失败')
   }
 }
 
