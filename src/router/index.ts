@@ -5,7 +5,7 @@ import { resolveLoginTarget } from '@/pages/auth/loginTarget'
 import { runNavigationGuard } from './guard'
 
 const routes: RouteRecordRaw[] = [
-  // ========== A. 公开路由（7条） ==========
+  // ========== A. 公开路由（8条） ==========
   {
     path: '/login',
     name: 'P-IDN-01',
@@ -55,7 +55,7 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'public', public: true },
   },
 
-  // ========== B. 登录用户与本人参与路由（21条） ==========
+  // ========== B. 登录用户与本人参与路由（22条） ==========
   {
     path: '/me',
     name: 'P-IDN-03',
@@ -189,7 +189,7 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true },
   },
 
-  // ========== C. 社团工作空间路由（26条） ==========
+  // ========== C. 社团工作空间路由（31条） ==========
   // 注意：静态子路由优先于动态参数
   {
     path: '/org/:clubId/dashboard',
@@ -378,7 +378,7 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'default', requiresAuth: true, requiresWorkspace: true },
   },
 
-  // ========== D. 超级管理员路由（14条） ==========
+  // ========== D. 超级管理员路由（18条） ==========
   {
     path: '/admin/forms',
     name: 'P-FORM-admin-list',
