@@ -557,6 +557,10 @@ describe('任期到期提醒（MEM-004）', () => {
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
+      // daysLeft 升序（近任期在前）——只对本次动态创建的成员断言排序，
+      // 避免种子数据（mem-004 等）硬编码日期随真实时钟落入窗口而干扰 hits[0]
+      const testHits = hits.filter((h) => ['mem-t1', 'mem-t2', 'mem-t3'].includes(h.memberId))
+      expect(testHits.map((h) => h.memberId)).toEqual(['mem-t1'])
       // daysLeft 升序（近任期在前）：种子数据里 mem-004（2026-08-20 到期）等成员可能随
       // 真实时钟进入同一窗口并与 mem-t1 并列，故只断言全局升序性质，不绑定具体成员位次
       for (let i = 1; i < hits.length; i++) {
