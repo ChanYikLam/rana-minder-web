@@ -1,6 +1,6 @@
 /**
- * Mock 层 29 个状态机：单一事实来源 = ./transitions.ts 的精确转换表
- * （对应 docs/specification/SRS-状态机转换明细-v1.0.md，29 状态机）
+ * Mock 层 30 个状态机：单一事实来源 = ./transitions.ts 的精确转换表
+ * （对应 docs/specification/SRS-状态机转换明细-v1.0.md，29 状态机 + SM-MEM-005 辞职申请）
  *
  * 本模块不再维护第二套硬编码状态枚举，所有状态与转换均从 TRANSITIONS 表推导，
  * 避免三套词表漂移。事件级校验请使用 assertTransition（带事件），
@@ -34,6 +34,7 @@ export const MACHINE_NAMES: Record<StateMachineId, string> = {
   'SM-MEM-002': '部门/职位关系',
   'SM-MEM-003': '部门关系申请',
   'SM-MEM-004': '常规入社邀请',
+  'SM-MEM-005': '辞职申请',
   'SM-FORM-001': '表单定义/模板',
   'SM-FORM-002': '表单提交',
   'SM-FILE-001': '文件',
@@ -62,7 +63,7 @@ function deriveStates(machineId: StateMachineId): string[] {
   return [...set]
 }
 
-/** 29 个状态机元数据（词表唯一来源：transitions.ts） */
+/** 30 个状态机元数据（词表唯一来源：transitions.ts） */
 export const STATE_MACHINE_METAS: Record<StateMachineId, MachineMeta> =
   Object.fromEntries(
     (Object.keys(TRANSITIONS) as StateMachineId[]).map((id) => [
@@ -75,7 +76,7 @@ export const STATE_MACHINE_METAS: Record<StateMachineId, MachineMeta> =
 export const STATE_MACHINES: Record<string, { name: string; states: readonly string[] }> =
   STATE_MACHINE_METAS
 
-/** 全部 29 个状态机 ID（与 types/machine 的 StateMachineId 一致） */
+/** 全部 30 个状态机 ID（与 types/machine 的 StateMachineId 一致） */
 export const MACHINE_IDS: readonly StateMachineId[] = Object.keys(TRANSITIONS) as StateMachineId[]
 
 export type { StateMachineId }
@@ -118,7 +119,7 @@ export function transitionRuleCount(machineId: StateMachineId): number {
   return count
 }
 
-/** 全部 29 个状态机的精确规则总数（事件→目标对，306 规则集） */
+/** 全部 30 个状态机的精确规则总数（306 规则集） */
 export function totalTransitionRuleCount(): number {
   return MACHINE_IDS.reduce((acc, id) => acc + transitionRuleCount(id), 0)
 }

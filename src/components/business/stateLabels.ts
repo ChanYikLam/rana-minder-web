@@ -87,7 +87,6 @@ export const STATE_LABELS: Record<string, StatusLabel> = {
   submitted: { variant: 'info', label: '已提交' },
   under_review: { variant: 'info', label: '审核中' },
   revision_requested: { variant: 'warning', label: '需修订' },
-  revised: { variant: 'info', label: '已修订' },
   revision: { variant: 'warning', label: '修订中' },
   withdrawn: { variant: 'neutral', label: '已撤回' },
   rejected: { variant: 'danger', label: '已拒绝' },

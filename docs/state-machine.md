@@ -1,6 +1,6 @@
 # RanaMinder 状态机文档
 
-> 更新日期：2026-08-09（P2-5：SM-EXP-001 词表同步 processing / start_processing）
+> 更新日期：2026-08-10（P1-2：新增 SM-MEM-005 辞职申请；P3-8：移除 SM-REC-003 revised 死状态）
 > 上游基线：`docs/specification/SRS-状态机转换明细-v1.0.md`（29 个状态机、306 条转换规则，位于 main 设计基线，合并到 dev 后生效）
 > 代码实现：`src/mock/state-machines/transitions.ts`（精确转换表，唯一词表来源）
 
@@ -9,7 +9,7 @@
 ### 1.1 状态机定位
 
 - 前端 Mock 层以 `transitions.ts` 的**精确转换表**为唯一事实来源；`STATE_MACHINE_METAS` 从转换表推导状态集合，不维护第二套硬编码枚举（MRM-014 单源）。
-- `types/machine/index.ts` 定义 `StateMachineId`（29 个，`SM-xxx` 命名，对应规格的 `SRS-SM-xxx`）与转换类型。
+- `types/machine/index.ts` 定义 `StateMachineId`（30 个，`SM-xxx` 命名，对应规格的 `SRS-SM-xxx`）与转换类型。
 - 所有未列出的跳转一律拒绝并保持原状态；业务前置条件校验由 db 业务函数完成，转换表负责第一道闸。
 
 ### 1.2 核心接口
@@ -30,7 +30,7 @@
 3. db 层类型词表统一 `StatesOf<M>` 派生，禁止手写字面量联合，避免双轨漂移。
 4. 显示层 `components/business/stateLabels.ts` 负责 SM-* 词表与历史显示别名的中文映射。
 
-## 2. 29 个状态机定义
+## 2. 30 个状态机定义
 
 ### 2.1 身份与资料（3 个）
 
@@ -55,7 +55,7 @@
 |---|---|---|---|
 | `SM-REC-001` | 普通招新活动 | draft / in_progress / paused / completed / cancelled / force_completed / archived | publish、pause、resume、complete、cancel、force_complete、archive |
 | `SM-REC-002` | 普通报名通道 | not_open / open / paused / closed | open、pause、resume_with_deadline、close、deadline_reached、activity_final、reopen_with_deadline |
-| `SM-REC-003` | 申请与修订 | draft / submitted / revision_requested / revised / exited / adjustment_overdue / identity_anomaly / not_qualified | submit、withdraw_submission、request_supplement、rule_tightening、recovery_resubmit、not_qualified、recovered |
+| `SM-REC-003` | 申请与修订 | draft / submitted / revision_requested / exited / adjustment_overdue / identity_anomaly / not_qualified | submit、withdraw_submission、request_supplement、rule_tightening、recovery_resubmit、not_qualified、recovered |
 | `SM-REC-004` | 部门路径与结论 | pending / evaluating / hold / decided / waitlist / published | formal_volunteer、transfer_path、decide、set_label、clear_label、waitlist、publish、revise、promote_invite |
 | `SM-REC-005` | 面试记录 | pending_selection / scheduled / leave / late / absent / in_progress / completed / invalidated / cancelled | select、admin_arrange、reschedule、leave、late、absent、start、complete、invalidate、rearrange、skip_round |
 
@@ -70,7 +70,7 @@
 | `SM-JNT-005` | 参与社团结论 | pending / evaluating / invite_pending / accepted_locked / archived | create、modify、create_invite、invite_terminal、accepted、force_invalidated、activity_final |
 | `SM-JNT-006` | 联合报名通道 | not_open / open / paused / closed | first_open、extend、manual_close、deadline_reached、resume_with_deadline、reopen_with_deadline |
 
-### 2.5 邀请与成员（4 个）
+### 2.5 邀请与成员（5 个）
 
 | 状态机 | 对象 | 状态集 | 关键事件 |
 |---|---|---|---|
@@ -79,6 +79,7 @@
 | `SM-MEM-002` | 部门/职位关系 | active / transferring / ended / sync_anomaly | start_change、end_change、confirmed、failed_compensated、failed、external_change、manual_fix |
 | `SM-MEM-003` | 部门关系申请 | draft / under_review / withdrawn / rejected / approved_pending_exec / executing / effective / exec_failed | submit、withdraw、reject、approve、execute、confirmed、failed、retry |
 | `SM-MEM-004` | 常规入社邀请 | sent / pending_acceptance / accepted_pending_sync / effective / sync_failed / sync_anomaly / rejected / withdrawn / expired / target_already_member | send、accept、confirmed、retryable_fail、compensated、unrecoverable、reissue |
+| `SM-MEM-005` | 辞职申请 | under_review / approved / rejected / withdrawn | approve、reject、withdraw |
 
 ### 2.6 表单 / 文件 / 通知 / 审计 / 导出（5 个）
 
@@ -102,6 +103,6 @@
 
 ## 4. 验证
 
-- `src/mock/state-machines/spec-306.test.ts`：断言 29 个状态机存在、规则总数 ≥ 306、关键状态机规则数稳定、`isValidState/isValidTransition/assertTransition` 三方一致。
+- `src/mock/state-machines/spec-306.test.ts`：断言 30 个状态机存在、规则总数 ≥ 306、关键状态机规则数稳定、`isValidState/isValidTransition/assertTransition` 三方一致。
 - `src/mock/db-*.test.ts` 与 `recruitment-apply/review` 等测试覆盖各状态机的正向/负向转换。
 - 所有状态经 `stateLabels.ts` 提供中文显示与语义色（success/danger/warning/info/neutral）。

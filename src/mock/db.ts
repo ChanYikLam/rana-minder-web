@@ -505,11 +505,9 @@ export function withdrawInvitation(invitationId: string): { ok: boolean; error?:
   const inv = membershipInvitations.find((i) => i.id === invitationId)
   if (!inv) return { ok: false, error: '邀请不存在' }
   if (inv.status !== 'sent' && inv.status !== 'pending_acceptance') return { ok: false, error: '仅待处理的邀请可撤回' }
-  // SM-MEM-004 状态机仅定义 pending_acceptance --withdraw--> withdrawn（sent 为发出态，撤回属状态机外补充）
-  if (inv.status === 'pending_acceptance') {
-    const t = assertTransition('SM-MEM-004', inv.status, 'withdrawn', 'withdraw')
-    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可撤回' }
-  }
+  // SM-MEM-004：sent / pending_acceptance --withdraw--> withdrawn（状态机唯一责任，不再有状态机外补充）
+  const t = assertTransition('SM-MEM-004', inv.status, 'withdrawn', 'withdraw')
+  if (!t.ok) return { ok: false, error: t.reason || '当前状态不可撤回' }
   inv.status = 'withdrawn'
   inv.withdrawnAt = now
   return { ok: true, invitation: inv }
@@ -733,12 +731,14 @@ export function createResignationRequest(clubId: string, memberId: string, membe
   return req
 }
 
-/** 撤回辞职申请：仅审批前可撤回，撤回后不影响任何职位/任期（MEM-002） */
+/** 撤回辞职申请：仅审批前可撤回（SM-MEM-005 withdraw），撤回后不影响任何职位/任期（MEM-002） */
 export function withdrawResignationRequest(requestId: string, actorMemberId: string): { ok: boolean; error?: string; request?: MockResignationRequest } {
   const req = resignationRequests.find((r) => r.id === requestId)
   if (!req) return { ok: false, error: '申请不存在' }
   if (req.status !== 'under_review') return { ok: false, error: '仅待审批的辞职申请可撤回' }
   if (req.memberId !== actorMemberId) return { ok: false, error: '只能撤回自己的辞职申请' }
+  const t = assertTransition('SM-MEM-005', req.status, 'withdrawn', 'withdraw')
+  if (!t.ok) return { ok: false, error: t.reason || '仅待审批的辞职申请可撤回' }
   req.status = 'withdrawn'
   return { ok: true, request: req }
 }
@@ -871,12 +871,16 @@ export function decideResignationRequest(requestId: string, decision: 'approve' 
   if (!req) return { ok: false, error: '申请不存在' }
   if (req.status !== 'under_review') return { ok: false, error: '该申请已处理' }
   if (decision === 'reject') {
+    const t = assertTransition('SM-MEM-005', req.status, 'rejected', 'reject')
+    if (!t.ok) return { ok: false, error: t.reason || '该申请已处理' }
     req.status = 'rejected'
     req.decidedAt = now
     req.decidedBy = actorName
     return { ok: true }
   }
   if (isLastLeader(req.clubId, req.memberId)) return { ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' }
+  const ta = assertTransition('SM-MEM-005', req.status, 'approved', 'approve')
+  if (!ta.ok) return { ok: false, error: ta.reason || '该申请已处理' }
   req.status = 'approved'
   req.decidedAt = now
   req.decidedBy = actorName
@@ -1017,7 +1021,8 @@ export function directRemoveMember(clubId: string, byMemberId: string, memberId:
 
 /**
  * 管理员标记成员退出（软退出，与「移除」语义区分）：
- * - 只记录退出时间（exitedAt），保留成员/部门/职位档案（职位不结束、状态机不流转）
+ * - 状态仍走 SM-MEM-001（active --removed--> exiting --confirmed--> exited），不允许跳过状态机直写
+ * - 与 remove 的差异：只记录退出时间（exitedAt），保留成员/部门/职位档案（职位不结束、不落 tenure/离职历史）
  * - 不触发「被移出」通知、不做角色白名单硬移除，供审计回溯主动退出路径
  * - 与 remove 共用管理端入口（action=mark_exit），但行为、文案、通知均不同
  */
@@ -1037,6 +1042,16 @@ export function markMemberExit(clubId: string, byMemberId: string, memberId: str
   const hasOtherLeader = leaders.filter((m) => m.id !== byMemberId).length > 0
   const gate = canRemoveMember(actorLevel, targetLevel, actorIsLeader && hasOtherLeader)
   if (!gate.ok) return { ok: false, error: gate.reason || '无权标记该成员退出' }
+  const t1 = assertTransition('SM-MEM-001', target.status, 'exiting', 'removed')
+  if (!t1.ok) return { ok: false, error: t1.reason || '当前成员状态不可标记退出' }
+  const prevStatus = target.status
+  target.status = 'exiting'
+  const t2 = assertTransition('SM-MEM-001', target.status, 'exited', 'confirmed')
+  if (!t2.ok) {
+    // 防御：exiting → exited 二次确认不被状态机允许时回滚，避免产生假成功的中间态
+    target.status = prevStatus
+    return { ok: false, error: t2.reason || '标记退出流程中断，请重试' }
+  }
   target.status = 'exited'
   target.exitedAt = new Date().toISOString()
   return { ok: true, member: target }
