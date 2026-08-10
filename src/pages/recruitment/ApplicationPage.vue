@@ -59,7 +59,8 @@ async function loadData() {
     const versions = (formRes as { kind: 'completed'; data: { versions: { fields: FormField[] }[] } }).data.versions
     formFields.value = versions[0]?.fields || []
     await loadMyApplication()
-    state.value = 'normal'
+    // loadMyApplication 异常时已置 error 态，勿覆盖
+    if (state.value === 'loading') state.value = 'normal'
   } else {
     // P3-3：取首个失败请求的错误码（任一失败即整页失败）
     state.value = errorToPageState(errorCodeOf(actRes.kind === 'completed' ? formRes : actRes))
@@ -175,10 +176,11 @@ async function loadMyApplication() {
       applyDenied.value = true
       return
     }
-    // 其他拒绝/错误不影响表单填写
-    myApplication.value = null
+    // 网络/服务端异常等其余错误：不得静默当作"无申请"（避免覆盖已有草稿/申请），整页降级为可重试错误态
+    state.value = errorToPageState(errorCodeOf(result))
   } catch {
-    // 忽略：草稿恢复失败不影响表单填写
+    // 网络层异常：同样降级为可重试错误态，避免误判"无申请"
+    state.value = 'error'
   }
 }
 

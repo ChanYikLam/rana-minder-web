@@ -3,9 +3,13 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, mockRoute } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockRoute: { path: '/org/club-001/notifications/email-config', params: { clubId: 'club-001' }, meta: { scope: 'club' } },
+}))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ path: '/org/club-001/notifications/email-config', params: { clubId: 'club-001' }, meta: { scope: 'club' } }),
+  useRoute: () => mockRoute,
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
@@ -55,5 +59,47 @@ describe('EmailSettingsPage 邮件设置', () => {
     const wrapper = mount(EmailSettingsPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(wrapper.text()).not.toContain('smtp.example.com')
+  })
+
+  it('密钥输入框可编辑且随保存提交（P1-14）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { smtpHost: 'smtp.example.com', smtpPort: 465, smtpUser: 'no-reply', smtpPassword: '', fromName: '电子设计协会', encryption: 'ssl', verified: false } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: { smtpHost: 'smtp.example.com', smtpPort: 465, smtpUser: 'no-reply', fromName: '电子设计协会', encryption: 'ssl', verified: true } })
+    const wrapper = mount(EmailSettingsPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    const pwdInput = wrapper.find('input[type="password"]')
+    expect(pwdInput.exists()).toBe(true)
+    expect(pwdInput.attributes('readonly')).toBeUndefined()
+    await pwdInput.setValue('secret-key-123')
+
+    const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存配置'))
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    const body = mockPost.mock.calls[0][1]
+    expect(body.smtpPassword).toBe('secret-key-123')
+  })
+
+  it('保存配置客户端校验：host 为空/端口非法时拦截不发请求（P2-55）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { smtpHost: '', smtpPort: 0, smtpUser: '', fromName: '', encryption: 'ssl', verified: false } })
+    const wrapper = mount(EmailSettingsPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存配置'))
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).not.toHaveBeenCalled()
+  })
+
+  it('个人偏好加载失败：整页错误态而非静默（P1-15）', async () => {
+    mockRoute.meta.scope = 'personal'
+    vi.mocked(mockGet).mockReset()
+    vi.mocked(mockGet).mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    const wrapper = mount(EmailSettingsPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    // 错误态（PageStateBoundary 收到 error 渲染重试按钮），而非静默进入 normal
+    expect(wrapper.find('.psb-retry').exists()).toBe(true)
+    mockRoute.meta.scope = 'club'
   })
 })

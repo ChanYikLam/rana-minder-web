@@ -54,12 +54,13 @@ function setupGetMocks(applicationStatus: string | null, applicationExtra: Recor
   if (applicationStatus) {
     mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: mockApplication(applicationStatus, applicationExtra) })
   } else {
-    mockGet.mockRejectedValueOnce(new Error('not found'))
+    // 无申请记录：契约为 IFC-ERR-015（rejected 结果），而非网络异常
+    mockGet.mockResolvedValueOnce({ kind: 'rejected' as const, error: { code: 'IFC-ERR-015', message: '未找到报名记录' } })
   }
 }
 
 const commonStubs = {
-  PageStateBoundary: { template: '<div><slot /></div>' },
+  PageStateBoundary: { template: '<div v-if="state !== \'error\' && state !== \'loading\'"><slot /></div>', props: ['state'] },
   Card: { template: '<div class="card"><slot /></div>' },
   Button: { template: '<button><slot /></button>' },
   ResponsiveActionRegion: { template: '<div class="actions"><slot /></div>' },
@@ -146,6 +147,23 @@ describe('ApplicationPage 状态渲染', () => {
     // 操作按钮可见
     expect(wrapper.text()).toContain('保存草稿')
     expect(wrapper.text()).toContain('提交报名')
+  })
+
+  it('加载申请记录遇网络异常：整页降级错误态，不当作"无申请"（P1-21）', async () => {
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: mockActivity })
+    mockGet.mockResolvedValueOnce({ kind: 'completed' as const, data: { versions: [{ fields: mockFormFields }] } })
+    mockGet.mockRejectedValueOnce(new Error('network down'))
+
+    const wrapper = mount(ApplicationPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 未确认无申请前不得展示可提交表单，防止覆盖已有草稿/申请
+    expect(wrapper.text()).not.toContain('意向方向')
+    expect(wrapper.text()).not.toContain('报名表单')
+    expect(wrapper.text()).not.toContain('保存草稿')
+    expect(wrapper.text()).not.toContain('提交报名')
   })
 
   it('无报名资格（403）：展示阻断提示，隐藏表单与操作按钮（Issue-4.0-2）', async () => {

@@ -390,6 +390,7 @@ export interface EmailConfigState {
   smtpHost: string
   smtpPort: number
   smtpUser: string
+  smtpPassword: string
   fromName: string
   encryption: 'ssl' | 'tls' | 'none'
   verified: boolean
@@ -402,6 +403,7 @@ function defaultEmailConfig(fromName: string): EmailConfigState {
     smtpHost: 'smtp.example.edu.cn',
     smtpPort: 465,
     smtpUser: 'noreply@example.edu.cn',
+    smtpPassword: '',
     fromName,
     encryption: 'ssl',
     verified: false,
@@ -426,7 +428,9 @@ export function saveEmailConfig(key: string, input: Partial<EmailConfigState>): 
   if (!current.verified && !input.verified) {
     return { ok: false, config: { ...current, ...input, verified: false } }
   }
-  const next = { ...current, ...input, verified: current.verified || input.verified === true }
+  // 未传入新密钥（置空）时保留现有密钥，避免保存其他字段误清空密码
+  const password = typeof input.smtpPassword === 'string' && input.smtpPassword !== '' ? input.smtpPassword : current.smtpPassword
+  const next = { ...current, ...input, smtpPassword: password, verified: current.verified || input.verified === true }
   emailConfigs.set(key, next)
   return { ok: true, config: next }
 }

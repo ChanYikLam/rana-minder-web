@@ -186,6 +186,15 @@ describe('任命命令（create / cancel / execute）', () => {
     expect(createAppointmentCommand('club-001', { action: 'dismiss', memberId: 'mem-002', memberName: '王浩然', departmentId: null, departmentName: null, title: null, scheduledAt: null, actorName: '系统' }).ok).toBe(true)
   })
 
+  it('transfer/appoint 末位负责人改任普通职位同样被守卫拒绝；保留负责人级职位可放行', () => {
+    // mem-004 是 club-001 唯一负责人，改任干事 → 零负责人窗口，拒绝
+    expect(createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-004', memberName: '张明远', departmentId: 'dept-002', departmentName: '人事部', title: '干事', scheduledAt: null, actorName: '系统' })).toMatchObject({ ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' })
+    // appoint 到普通职位同样拒绝
+    expect(createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-004', memberName: '张明远', departmentId: 'dept-002', departmentName: '人事部', title: '干事', scheduledAt: null, actorName: '系统' }).ok).toBe(false)
+    // 保留负责人级职位（title 仍为负责人）可放行
+    expect(createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-004', memberName: '张明远', departmentId: 'dept-002', departmentName: '人事部', title: '负责人', scheduledAt: null, actorName: '系统' }).ok).toBe(true)
+  })
+
   it('executeAppointmentCommand：首败演示 → exec_failed → 重试成功（appoint 写职位与 join 历史）', () => {
     const created = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-003', memberName: '李思颖', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
     const cmdId = created.command!.id

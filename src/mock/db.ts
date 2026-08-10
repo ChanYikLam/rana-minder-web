@@ -604,10 +604,14 @@ export function createAppointmentCommand(clubId: string, input: { action: Appoin
     if (input.action !== 'appoint') return { ok: false, error: '非成员仅可发起任命，不支持调岗/免职' }
     if (!input.departmentId || !input.title) return { ok: false, error: '非成员任命必须指定部门与职位' }
   }
-  if (input.action === 'dismiss' && input.memberId) {
+  if (input.memberId) {
     const member = findMember(clubId, input.memberId)
     const isLeader = !!member?.positions.find((p) => p.status === 'active' && p.title === '负责人')
-    if (isLeader && isLastLeader(clubId, input.memberId)) return { ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' }
+    // 末位负责人守卫：免职直接拒绝；任命/调岗改任到非负责人级职位同样会产生零负责人窗口，一并拦截
+    if (isLeader && isLastLeader(clubId, input.memberId)) {
+      const removed = input.action === 'dismiss' || (input.title ?? '') !== '负责人'
+      if (removed) return { ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' }
+    }
   }
   const command: MockAppointmentCommand = {
     id: 'apc-' + Date.now(), clubId, action: input.action,

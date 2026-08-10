@@ -170,7 +170,7 @@ function closeMobileNav() {
     <!-- Body: Sidebar + Content -->
     <div class="flex flex-1">
       <aside
-        class="flex flex-col w-56 border-r bg-elevated overflow-y-auto"
+        class="hidden lg:flex flex-col w-56 border-r bg-elevated overflow-y-auto"
         role="complementary"
         aria-label="主导航"
       >
