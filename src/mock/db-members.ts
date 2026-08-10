@@ -108,7 +108,7 @@ export const members: MockMember[] = [
     name: '张明远', email: 'leader@example.edu.cn', phone: '13800000002',
     status: 'active', joinedAt: '2022-09-01T00:00:00+08:00', exitedAt: null,
     positions: [
-      { id: 'pos-004', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', startDate: '2024-09-01', endDate: null, plannedEndDate: '2026-08-20', status: 'active' },
+      { id: 'pos-004', departmentId: 'dept-001', departmentName: '技术部', title: '负责人', startDate: '2024-09-01', endDate: null, plannedEndDate: '2027-08-20', status: 'active' },
     ],
     tenures: [
       { id: 'ten-005', departmentName: '管理', title: '负责人', startDate: '2024-09-01', endDate: null, endReason: null },
