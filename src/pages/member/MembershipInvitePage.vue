@@ -77,7 +77,9 @@ async function loadData() {
       if (result.data.departments) departments.value = result.data.departments
       state.value = 'normal'
     } else if (result.kind === 'accepted') {
-      state.value = 'loading'
+      // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
+      state.value = 'error'
+      pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
     } else {
       const code = result.error.code as ErrorCode
       pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -93,7 +95,9 @@ async function loadData() {
       items.value = [result.data]
       state.value = 'normal'
     } else if (result.kind === 'accepted') {
-      state.value = 'loading'
+      // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
+      state.value = 'error'
+      pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
     } else {
       const code = result.error.code as ErrorCode
       pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -107,7 +111,9 @@ async function loadData() {
     if (result.data.departments) departments.value = result.data.departments
     state.value = 'normal'
   } else if (result.kind === 'accepted') {
-    state.value = 'loading'
+    // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
+    state.value = 'error'
+    pageError.value = { code: 'IFC-ERR-014', message: '数据正在生成中，请稍后重试' }
   } else {
     const code = result.error.code as ErrorCode
     pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
@@ -326,10 +332,10 @@ onMounted(loadData)
           </div>
 
           <!-- 已接受待回读确认：Casdoor 同步确认 -->
-          <div v-if="!isManageView && inv.status === 'accepted_pending_sync'" class="mt-3">
+          <div v-if="!isManageView && (inv.status === 'accepted_pending_sync' || inv.status === 'sync_failed')" class="mt-3">
             <div class="rounded-lg bg-warning-subtle p-2.5 mb-3 flex items-center gap-2">
               <RefreshCw :size="14" class="text-warning" />
-              <p class="text-xs text-warning">已接受，正在等待成员身份生效确认</p>
+              <p class="text-xs text-warning">{{ inv.status === 'sync_failed' ? '成员同步失败，可点击重新确认生效' : '已接受，正在等待成员身份生效确认' }}</p>
             </div>
             <button class="px-3 py-1.5 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover" :disabled="actingId === inv.id" @click="handleSyncConfirm(inv)">{{ actingId === inv.id ? '确认中...' : '确认生效' }}</button>
           </div>

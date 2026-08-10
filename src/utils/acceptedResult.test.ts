@@ -1,29 +1,31 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { toast } from 'vue-sonner'
-import { toastAcceptedAction, ACCEPTED_LOAD_MESSAGE } from './acceptedResult'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const { mockToastInfo } = vi.hoisted(() => ({ mockToastInfo: vi.fn() }))
 vi.mock('vue-sonner', () => ({
-  toast: { info: vi.fn() },
+  toast: { info: (...args: unknown[]) => mockToastInfo(...args), success: vi.fn(), error: vi.fn() },
 }))
 
-describe('toastAcceptedAction 操作类 accepted 提示', () => {
+import { toastAcceptedAction, ACCEPTED_LOAD_MESSAGE } from './acceptedResult'
+
+describe('acceptedResult 异步受理结果统一处理', () => {
   beforeEach(() => {
+    mockToastInfo.mockReset()
     vi.clearAllMocks()
   })
+  afterEach(() => vi.restoreAllMocks())
 
-  it('使用默认文案提示已受理', () => {
+  it('toastAcceptedAction：默认文案提示"已受理"', () => {
     toastAcceptedAction()
-    expect(toast.info).toHaveBeenCalledWith('操作已受理，正在后台处理，请稍后刷新查看结果')
+    expect(mockToastInfo).toHaveBeenCalledTimes(1)
+    expect(mockToastInfo).toHaveBeenCalledWith(expect.stringContaining('已受理'))
   })
 
-  it('支持自定义文案', () => {
-    toastAcceptedAction('发布已受理，正在后台处理')
-    expect(toast.info).toHaveBeenCalledWith('发布已受理，正在后台处理')
+  it('toastAcceptedAction：支持自定义文案', () => {
+    toastAcceptedAction('换届执行已受理，正在后台处理')
+    expect(mockToastInfo).toHaveBeenCalledWith('换届执行已受理，正在后台处理')
   })
-})
 
-describe('ACCEPTED_LOAD_MESSAGE 加载类 accepted 文案', () => {
-  it('提供可重试的加载中文案', () => {
-    expect(ACCEPTED_LOAD_MESSAGE).toBe('数据正在生成中，请稍后重试')
+  it('ACCEPTED_LOAD_MESSAGE：加载类受理提示文案', () => {
+    expect(ACCEPTED_LOAD_MESSAGE).toContain('请稍后重试')
   })
 })

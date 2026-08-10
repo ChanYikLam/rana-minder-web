@@ -6,6 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import PermissionGuard from '@/components/business/PermissionGuard.vue'
 import { get, post, put } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { Calendar, MapPin, User, Play, CheckCircle2, XCircle, Clock3, Layers, Plus, RefreshCw, Users } from '@lucide/vue'
 
@@ -127,6 +128,8 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadInterviews()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败')
   }
@@ -619,11 +622,17 @@ watch(
           empty-title="暂无面试安排"
           @row-click="handleRowClick"
         >
-          <template #default="{ row }">
-            <td class="px-3 py-2.5 text-sm">{{ (row as InterviewRow).applicantName }}</td>
-            <td class="px-3 py-2.5 text-sm">{{ (row as InterviewRow).roundName }}</td>
-            <td class="px-3 py-2.5"><StateTag :status="(row as InterviewRow).status" /></td>
-            <td class="px-3 py-2.5 text-sm text-text-secondary">{{ formatTime((row as InterviewRow).scheduledTime) }}</td>
+          <template #cell-applicantName="{ row }">
+            <span class="text-sm">{{ (row as InterviewRow).applicantName }}</span>
+          </template>
+          <template #cell-roundName="{ row }">
+            <span class="text-sm">{{ (row as InterviewRow).roundName }}</span>
+          </template>
+          <template #cell-status="{ row }">
+            <StateTag :status="(row as InterviewRow).status" />
+          </template>
+          <template #cell-scheduledTime="{ row }">
+            <span class="text-sm text-text-secondary">{{ formatTime((row as InterviewRow).scheduledTime) }}</span>
           </template>
         </DataTable>
 

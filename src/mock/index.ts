@@ -10,6 +10,7 @@ import {
   resetMockDegraded,
   markProfileComplete,
   markEmailVerified,
+  getSchoolProfile,
   type MockUser,
 } from './auth'
 import { resolveMockError, mockErrorBody, MOCK_ERROR_HTTP } from './errors'
@@ -102,6 +103,20 @@ function businessError(message: string) {
   }
 }
 
+/** 表单提交/草稿结果统一响应：
+ * - IFC-ERR-009（相同操作标识对应不同内容）→ 409，与 error-map 幂等冲突语义对齐（P3-1）
+ * - 其余错误 → 422 业务拒绝 */
+function formResult(result: { ok: boolean; error?: string; data?: unknown }) {
+  if (result.ok) return { code: 0, data: result.data }
+  if (result.error && result.error.includes('相同操作标识')) {
+    return {
+      statusCode: 409,
+      body: { code: 'IFC-ERR-009', message: result.error, supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` },
+    }
+  }
+  return businessError(result.error || '操作不符合业务规则')
+}
+
 /** 无权限（HTTP 403 + IFC-ERR-003）。传入 url 时向 GOV-006 异常访问检测采集事件 */
 function forbidden(url?: string, method: string = 'post') {
   if (url) {
@@ -152,6 +167,11 @@ function actorCandidateId(user: { id: string }): string | null {
 /** 管理类操作权限边界（双保险之一：mock 层按权限拦截） */
 function canManageMembers(user: MockUser, clubId: string): boolean {
   return getPermissions(user, clubId).includes('club:member:manage')
+}
+
+/** 成员列表/详情可见性：本社团成员（含普通 member）可查看；平台管理员跨社团可查看 */
+function canViewClubMembers(user: MockUser, clubId: string): boolean {
+  return actorMemberId(user, clubId) !== null || getPermissions(user, '').includes('platform:club:manage')
 }
 
 /** 部门负责人的数据范围：其当前任职部门名；其余角色返回 null（全社团） */
@@ -832,6 +852,29 @@ const identityHandlers: MockMethod[] = [
       return { code: 0, data: { emailVerified: true } }
     },
   },
+  // 同步冲突清单（sync-conflict 模式）：本地档案 vs 学校侧（Casdoor 权威侧），仅返回不一致字段
+  {
+    url: '/api/auth/profile/sync-conflicts',
+    method: 'get',
+    response: ({ url }: { url: string }) => {
+      const error = resolveMockError(url)
+      if (error) {
+        return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
+      }
+      const user = resolveMockUser(url)
+      const school = getSchoolProfile(user.id)
+      const labels: Record<string, string> = { name: '姓名', studentId: '学号', email: '邮箱', phone: '手机号' }
+      const conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> = []
+      for (const field of ['name', 'studentId', 'email', 'phone'] as const) {
+        const local = String(user[field] ?? '')
+        const remote = String(school[field] ?? '')
+        if (local !== remote) {
+          conflicts.push({ field, label: labels[field], localValue: local, remoteValue: remote })
+        }
+      }
+      return { code: 0, data: { conflicts, local: { name: user.name, studentId: user.studentId, email: user.email, phone: user.phone } } }
+    },
+  },
   {
     url: '/api/auth/profile/sync-conflict',
     method: 'post',
@@ -841,6 +884,7 @@ const identityHandlers: MockMethod[] = [
         return { statusCode: MOCK_ERROR_HTTP[error], body: mockErrorBody(error) }
       }
       const field = body.input?.field
+      const chosenValue = body.input?.chosenValue
       if (!field || !['name', 'email', 'phone', 'studentId'].includes(field)) {
         return {
           statusCode: 422,
@@ -851,7 +895,62 @@ const identityHandlers: MockMethod[] = [
           },
         }
       }
+      // 写回前按字段类型做格式校验，与 PUT /auth/profile 保持一致（避免垃圾格式值经冲突解决落库）
+      if (typeof chosenValue === 'string' && chosenValue !== '') {
+        if (field === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(chosenValue)) {
+          return {
+            statusCode: 422,
+            body: {
+              code: 'IFC-ERR-006',
+              message: '邮箱格式不正确',
+              fieldErrors: { [field]: ['邮箱格式不正确'] },
+              supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+            },
+          }
+        }
+        if (field === 'phone' && !/^1[3-9]\d{9}$/.test(chosenValue)) {
+          return {
+            statusCode: 422,
+            body: {
+              code: 'IFC-ERR-006',
+              message: '手机号格式不正确',
+              fieldErrors: { [field]: ['手机号格式不正确'] },
+              supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+            },
+          }
+        }
+      }
+      // 空值或与本地当前值相同的提交不产生实际变更，直接返回当前资料
       const user = resolveMockUser(url)
+      const typedField = field as 'name' | 'email' | 'phone' | 'studentId'
+      // 防御性判断：目标字段不存在时拒绝写回，避免 String(undefined ?? '') 产生 'undefined' 字面量（审计 P3）
+      if (user[typedField] === undefined) {
+        return {
+          statusCode: 422,
+          body: {
+            code: 'IFC-ERR-006',
+            message: '不支持的冲突字段',
+            supportId: `MOCK-${Date.now().toString(36).toUpperCase()}`,
+          },
+        }
+      }
+      const currentValue = String(user[typedField])
+      if (typeof chosenValue !== 'string' || chosenValue === '' || chosenValue === currentValue) {
+        return {
+          code: 0,
+          data: {
+            studentId: user.studentId,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            emailVerified: user.emailVerified,
+            profileComplete: user.profileComplete,
+          },
+        }
+      }
+      // 真正写回本地档案（选择学校侧值时用学校侧值覆盖本地）
+      user[typedField] = chosenValue
+      markProfileComplete(user.id)
       return {
         code: 0,
         data: {
@@ -1461,6 +1560,9 @@ const memberHandlers: MockMethod[] = [
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      // 仅本社团成员可查看成员列表（普通成员多社团时按目标社团判定；非本社团成员 403）
+      if (!canViewClubMembers(user, query.clubId)) return forbidden()
+      const isManager = canManageMembers(user, query.clubId)
       const scope = departmentScopeFor(user, query.clubId)
       // MEM-004：任期到期提醒（派生投递，interval 桶去重——模拟时钟驱动，管理端拉取时交付）
       deliverTermEndReminders(query.clubId)
@@ -1488,11 +1590,12 @@ const memberHandlers: MockMethod[] = [
         count: activeMembers.filter((m) => m.positions.some((p) => p.departmentId === d.id && p.status === 'active')).length,
       }))
       const zeroDeptCount = activeMembers.filter((m) => !m.positions.some((p) => p.status === 'active')).length
-      const pendingCounts = {
+      // 管理待办仅管理角色可见；普通成员只读列表不暴露管理数据
+      const pendingCounts = isManager ? {
         departmentApply: db.departmentApplications.filter((a) => a.clubId === query.clubId && a.status === 'under_review' && (!scope || a.targetDeptName === scope)).length,
         appointments: db.appointmentCommands.filter((c) => c.clubId === query.clubId && (c.status === 'pending_exec' || c.status === 'initiator_lost_rights' || c.status === 'reconfirmed') && (!scope || c.departmentName === scope)).length,
         transition: !scope && db.transitionState.candidates.length + db.transitionState.appointments.length > 0 && db.transitionState.executedAt === null ? 1 : 0,
-      }
+      } : null
       return {
         code: 0,
         data: {
@@ -1500,7 +1603,9 @@ const memberHandlers: MockMethod[] = [
             const activePositions = m.positions.filter((p) => p.status === 'active')
             return {
               id: m.id, name: m.name, studentId: m.studentId,
-              email: m.email, phone: m.phone,
+              // 普通成员只读：不返回联系方式
+              email: isManager ? m.email : null,
+              phone: isManager ? m.phone : null,
               positions: activePositions.map((p) => ({
                 departmentId: p.departmentId,
                 departmentName: p.departmentName,
@@ -2274,17 +2379,23 @@ if (!r.ok) return businessError(r.error || '操作失败')
     method: 'get',
     response: ({ query, url }: { query: Record<string, string>; url: string }) => {
       const user = resolveMockUser(url)
+      // 仅本社团成员可查看成员详情（普通成员多社团时按目标社团判定；非本社团成员 403）
+      if (!canViewClubMembers(user, query.clubId)) return forbidden()
       const member = db.getMemberProfile(query.clubId, query.memberId)
       if (!member) return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       const scope = departmentScopeFor(user, query.clubId)
       if (scope && !member.positions.some((p) => p.departmentName === scope)) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '成员不存在', supportId: 'MOCK' } }
       }
+      const isManager = canManageMembers(user, query.clubId)
       return {
         code: 0,
         data: {
           id: member.id, clubId: member.clubId, studentId: member.studentId,
-          name: member.name, email: member.email, phone: member.phone,
+          name: member.name,
+          // 普通成员只读：不返回联系方式
+          email: isManager ? member.email : null,
+          phone: isManager ? member.phone : null,
           status: member.status, joinedAt: member.joinedAt, exitedAt: member.exitedAt,
           positions: member.positions,
           tenures: member.tenures,
@@ -4021,23 +4132,52 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/admin/forms/:formId',
     method: 'get',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
       const result = formdb.getFormDetail(query.formId)
       if (!result.ok) return businessError(result.error)
       return { code: 0, data: result.data }
+    },
+  },
+  // 平台表单版本草稿保存（SM-FORM-002：仅落库 draft，保存用户填写数据，不推进状态机）
+  {
+    url: '/api/admin/forms/versions/:formId/draft',
+    method: 'post',
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
+      const result = formdb.saveFormSubmissionDraft(query.formId, {
+        version: Number(input.version) || 1,
+        formData: (input.formData || {}) as Record<string, unknown>,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
+      })
+      return formResult(result)
     },
   },
   // 平台表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/admin/forms/versions/:formId/submit',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
       const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
       const result = formdb.submitFormSubmission(query.formId, {
         version: Number(input.version) || 1,
         formData: (input.formData || {}) as Record<string, unknown>,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
+      return formResult(result)
+    },
+  },
+  // 平台表单版本：读取当前用户的草稿/已提交记录（P2-1 草稿恢复）
+  {
+    url: '/api/admin/forms/versions/:formId/my-draft',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      if (!isPlatformAdmin(url)) return forbidden(url)
+      const result = formdb.getMyFormSubmission(query.formId, resolveMockUser(url).id, Number(query.version) || 1)
       if (!result.ok) return businessError(result.error)
       return { code: 0, data: result.data }
     },
@@ -4182,17 +4322,42 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: { items: Object.values(notificationTemplates) } }
     },
   },
+  // 工作空间：表单版本草稿保存（SM-FORM-002：仅落库 draft，保存用户填写数据，不推进状态机）
+  {
+    url: '/api/org/:clubId/forms/versions/:formId/draft',
+    method: 'post',
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
+      const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
+      const result = formdb.saveFormSubmissionDraft(query.formId, {
+        version: Number(input.version) || 1,
+        formData: (input.formData || {}) as Record<string, unknown>,
+        idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
+      })
+      return formResult(result)
+    },
+  },
   // 工作空间：表单版本提交（SM-FORM-002：draft→checking→submitted，幂等，快照还原）
   {
     url: '/api/org/:clubId/forms/versions/:formId/submit',
     method: 'post',
-    response: ({ query, body }: { query: Record<string, string>; body: { input: Record<string, unknown> } }) => {
+    response: ({ query, url, body }: { query: Record<string, string>; url: string; body: { input: Record<string, unknown> } }) => {
       const input = body.input as { formData?: Record<string, unknown>; version?: number; idempotencyKey?: string }
       const result = formdb.submitFormSubmission(query.formId, {
         version: Number(input.version) || 1,
         formData: (input.formData || {}) as Record<string, unknown>,
         idempotencyKey: String(input.idempotencyKey || `k-${Date.now()}-${query.formId}-${input.version}`),
+        ownerId: resolveMockUser(url).id,
       })
+      return formResult(result)
+    },
+  },
+  // 工作空间：表单版本读取当前用户的草稿/已提交记录（P2-1 草稿恢复）
+  {
+    url: '/api/org/:clubId/forms/versions/:formId/my-draft',
+    method: 'get',
+    response: ({ query, url }: { query: Record<string, string>; url: string }) => {
+      const result = formdb.getMyFormSubmission(query.formId, resolveMockUser(url).id, Number(query.version) || 1)
       if (!result.ok) return businessError(result.error)
       return { code: 0, data: result.data }
     },

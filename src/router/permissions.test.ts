@@ -8,6 +8,9 @@ describe('ADMIN_PERMISSIONS', () => {
     expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-ORG-01']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-OPS-01']).toBe('platform:ops:view')
+    // P2-2：表单填写页使用「可填写」权限而非「设计」权限
+    expect(ADMIN_PERMISSIONS['P-FORM-02-admin']).toBe('platform:form:fill')
+    expect(ADMIN_PERMISSIONS['P-FORM-01-admin']).toBe('platform:form:design')
   })
 
   it('covers every requiresAdmin route (guard rejects missing keys unconditionally)', () => {
@@ -34,10 +37,13 @@ describe('ADMIN_PERMISSIONS', () => {
 })
 
 describe('workspacePermissionForRoute', () => {
-  it('maps member routes to club:member:manage', () => {
-    expect(workspacePermissionForRoute('P-MEM-list')).toBe('club:member:manage')
+  it('maps member list/detail to manage or view-self (ordinary members can browse)', () => {
+    expect(workspacePermissionForRoute('P-MEM-list')).toEqual(['club:member:manage', 'club:member:view-self'])
+    expect(workspacePermissionForRoute('P-MEM-01')).toEqual(['club:member:manage', 'club:member:view-self'])
+  })
+
+  it('maps department-apply route to club:member:manage only', () => {
     expect(workspacePermissionForRoute('P-MEM-02')).toBe('club:member:manage')
-    expect(workspacePermissionForRoute('P-MEM-01')).toBe('club:member:manage')
   })
 
   it('maps exit route to member:manage or view-self (self-exit accessible to ordinary members)', () => {
