@@ -6,6 +6,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { ShieldAlert, CheckCircle2, Users, Mail, ArrowLeft, XCircle } from '@lucide/vue'
 
 const route = useRoute()
@@ -29,6 +30,8 @@ const closeBaseUrl = computed(() =>
 
 async function loadData() {
   state.value = 'loading'
+  // P1：#4 admin 路由 /admin/joint/:jointId/close 无 clubId 时由 closeBaseUrl 拼接 admin 路径，
+  // 避免打 /org/undefined/...
   const result = await get(closeBaseUrl.value)
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value
@@ -49,6 +52,8 @@ async function handleStartClose() {
   if (result.kind === 'completed') {
     toast.success('已进入结束确认阶段')
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('操作已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '进入结束确认失败')
   }
@@ -62,6 +67,8 @@ async function handleClose() {
   if (result.kind === 'completed') {
     toast.success('本社团确认完成')
     await loadData()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('确认已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '确认失败')
   }
