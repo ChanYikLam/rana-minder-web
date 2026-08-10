@@ -10,13 +10,13 @@
 
 | 分组 | 数量（实际统计） | 前缀 | 访问控制 |
 |---|---|---|---|
-| A. 公开路由 | 8 | `/login`、`/auth/*`、`/explore*`、`/activity/*`、`/service-unavailable` | `meta.public: true` |
-| B. 登录用户与本人参与 | 22 | `/me*` | `requiresAuth: true` |
+| A. 公开路由 | 9 | `/login`、`/auth/*`、`/explore*`、`/activity/*`、`/service-unavailable`、`/files/*` | `meta.public: true` |
+| B. 登录用户与本人参与 | 21 | `/me*` | `requiresAuth: true` |
 | C. 社团工作空间 | 31 | `/org/:clubId/*` | `requiresAuth + requiresWorkspace` |
 | D. 超级管理员 | 18 | `/admin/*` | `requiresAuth + requiresAdmin` |
 | 通用回退 | 2 | `/`、`/:pathMatch(.*)*` | 按会话状态解析落点 / 404 |
 
-> 表中数量按路由定义实际统计（总计 81 条）；源码内分组注释（8/22/31/18）为历史标注，以实际统计为准。路由名统一 `P-<DOMAIN>-<序号>` 规范（如 `P-ORG-02`、`P-REC-05`），是权限映射的键。
+> 表中数量按路由定义实际统计（总计 81 条）；源码内分组注释（9/21/31/18）为历史标注，以实际统计为准。路由名统一 `P-<DOMAIN>-<序号>` 规范（如 `P-ORG-02`、`P-REC-05`），是权限映射的键。
 
 ## 2. 路由守卫（guard.ts）
 
