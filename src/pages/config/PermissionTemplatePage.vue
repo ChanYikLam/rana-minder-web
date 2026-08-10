@@ -32,7 +32,6 @@ const state = ref<PageState>('loading')
 const items = ref<Template[]>([])
 const selected = ref<Template | null>(null)
 const mode = ref<'edit' | 'create' | null>(null)
-const editing = ref(false)
 const publishing = ref(false)
 const publishOpen = ref(false)
 const publishSucceeded = ref(false)
@@ -57,8 +56,15 @@ async function loadData() {
     diff.value = null
     publishReason.value = ''
     reauthProof.value = ''
+    mode.value = null
+    draft.value = { name: '', permissions: '' }
     state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
+}
+
+function resetEditor() {
+  mode.value = null
+  draft.value = { name: '', permissions: '' }
 }
 
 function startCreate() {
@@ -69,15 +75,6 @@ function startCreate() {
 function startEdit() {
   if (!selected.value) return
   mode.value = 'edit'
-  draft.value = {
-    name: selected.value.name,
-    permissions: selected.value.permissions.join('\n'),
-  }
-}
-
-function startEditInline() {
-  if (!selected.value) return
-  editing.value = true
   draft.value = {
     name: selected.value.name,
     permissions: selected.value.permissions.join('\n'),
@@ -96,7 +93,7 @@ async function handleSave() {
     creating.value = false
     if (result.kind === 'completed') {
       toast.success('模板已创建（草稿）')
-      mode.value = null
+      resetEditor()
       await loadData()
       selected.value = result.data
       return
@@ -115,7 +112,7 @@ async function handleSave() {
   }
   await loadData()
   selected.value = items.value.find((t) => t.id === result.data.id) ?? null
-  mode.value = null
+  resetEditor()
   toast.success('草稿已保存')
 }
 
@@ -215,7 +212,7 @@ onMounted(loadData)
             :key="tpl.id"
             class="cursor-pointer"
             :selected="selected?.id === tpl.id"
-            @click="selected = tpl; mode = null; diff = null"
+            @click="selected = tpl; resetEditor(); diff = null"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
@@ -247,7 +244,7 @@ onMounted(loadData)
                 </div>
               </div>
               <div class="mt-4 pt-3 border-t border-border flex gap-2">
-                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="mode = null">取消</button>
+                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="resetEditor">取消</button>
                 <button class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60" :disabled="creating" @click="handleSave">{{ creating ? '创建中...' : '创建草稿' }}</button>
               </div>
             </template>
@@ -266,7 +263,7 @@ onMounted(loadData)
                 </div>
               </div>
               <div class="mt-4 pt-3 border-t border-border flex gap-2">
-                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="mode = null">取消</button>
+                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="resetEditor">取消</button>
                 <button class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60" :disabled="saving" @click="handleSave">{{ saving ? '保存中...' : '保存草稿' }}</button>
               </div>
             </template>
@@ -291,38 +288,6 @@ onMounted(loadData)
                 </button>
               </div>
             </template>
-          </Card>
-
-          <!-- 权限详情（dev 分支：editing 驱动） -->
-          <Card v-if="selected && mode !== 'create'" class="h-fit">
-            <p class="text-sm font-medium text-text-primary mb-3">{{ selected.name }}</p>
-            <div v-if="!editing" class="space-y-1.5 max-h-80 overflow-y-auto">
-              <div v-for="perm in selected.permissions" :key="perm" class="flex items-center gap-2 text-sm">
-                <Check :size="14" class="text-success shrink-0" />
-                <span class="text-text-primary font-mono text-xs">{{ perm }}</span>
-              </div>
-            </div>
-            <div v-else class="space-y-3">
-              <div>
-                <label class="block text-xs font-medium text-text-primary mb-1">模板名称</label>
-                <input v-model="draft.name" type="text" class="w-full h-9 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" />
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-text-primary mb-1">权限（每行一条）</label>
-                <textarea v-model="draft.permissions" rows="8" class="w-full px-3 py-2 rounded-md border border-border bg-elevated font-mono text-xs text-text-primary focus:outline-2 focus:outline-primary" />
-              </div>
-            </div>
-            <div class="mt-4 pt-3 border-t border-border flex gap-2">
-              <template v-if="!editing">
-                <button class="flex-1 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle" @click="startEditInline">编辑</button>
-                <button
-                  class="flex-1 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
-                  @click="publishOpen = true"
-                >
-                  发布
-                </button>
-              </template>
-            </div>
           </Card>
 
           <!-- 发布流程（仅草稿） -->
