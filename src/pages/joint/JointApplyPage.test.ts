@@ -233,7 +233,7 @@ describe('JointApplyPage 交互流程', () => {
       preferences: [],
       allowJointAdjustment: true,
       consented: true,
-    })
+    }, { expectedVersion: undefined })
   })
 
   it('通道关闭态展示关闭提示（danger 色调类）', async () => {
