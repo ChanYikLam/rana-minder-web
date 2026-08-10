@@ -273,6 +273,8 @@ onMounted(loadData)
             </template>
           </Card>
 
+          <!-- 权限详情（只读态由上方 mode 驱动卡片展示） -->
+
           <!-- 发布流程（仅草稿） -->
           <Card v-if="selected?.status === 'draft'" class="h-fit border-warning">
             <p class="text-sm font-medium text-warning mb-3 flex items-center gap-1.5"><KeyRound :size="14" /> 发布草稿（需重新认证）</p>
