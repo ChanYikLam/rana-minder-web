@@ -232,6 +232,37 @@ describe('runNavigationGuard 公开路由', () => {
     expect(decision).toBe(true)
     expect(session.loadSession).not.toHaveBeenCalled()
   })
+
+  it('404 页（P-GEN-01）未登录时仍加载会话但不重定向，以支持按登录态动态布局', async () => {
+    const session = makeSession({ isAuthenticated: false })
+    const workspace = makeWorkspace()
+
+    const decision = await runNavigationGuard(
+      makeTarget({ path: '/no-such-page', name: 'P-GEN-01', meta: { public: true } }),
+      session,
+      workspace,
+      mockResolve('/me'),
+    )
+
+    // 未登录仍可直接访问 404（不跳登录），但会加载会话供 App 动态布局判断
+    expect(decision).toBe(true)
+    expect(session.loadSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('404 页（P-GEN-01）已登录时不重复加载会话，直接放行', async () => {
+    const session = makeSession({ isAuthenticated: true, user: { id: 'u1' } })
+    const workspace = makeWorkspace()
+
+    const decision = await runNavigationGuard(
+      makeTarget({ path: '/no-such-page', name: 'P-GEN-01', meta: { public: true } }),
+      session,
+      workspace,
+      mockResolve('/me'),
+    )
+
+    expect(decision).toBe(true)
+    expect(session.loadSession).not.toHaveBeenCalled()
+  })
 })
 
 describe('runNavigationGuard 认证与资料门禁', () => {

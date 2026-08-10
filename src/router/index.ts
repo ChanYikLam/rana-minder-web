@@ -489,6 +489,7 @@ const routes: RouteRecordRaw[] = [
   },
 
   // ========== 通用回退 ==========
+  // 根路径：仅作守卫落点载体（guard 对 `/` 必做重定向，页面本体不渲染）
   {
     path: '/',
     name: 'P-GEN-00-root',
@@ -499,6 +500,8 @@ const routes: RouteRecordRaw[] = [
     path: '/:pathMatch(.*)*',
     name: 'P-GEN-01',
     component: () => import('@/pages/generic/NotFoundPage.vue'),
+    // 404 为公开可访问页（未登录不重定向）；布局由 App.vue 按登录态动态决定
+    // （已登录 DefaultLayout 保留导航，游客 PublicLayout），此处静态 meta 仅作默认。
     meta: { layout: 'public', public: true },
   },
 ]
