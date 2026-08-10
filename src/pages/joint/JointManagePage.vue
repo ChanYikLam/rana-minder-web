@@ -151,7 +151,7 @@ async function handleCreate() {
   } else if (result.kind === 'accepted') {
     toastAcceptedAction('创建已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '创建失败')
+    toast.error((result.error as { message?: string }).message || '创建失败，请稍后重试')
   } else {
     // P1：#6 创建活动失败不再完全静默，给出明确错误提示
     toast.error((result as { error?: { message?: string } }).error?.message || '创建失败，请稍后重试')
