@@ -555,8 +555,13 @@ describe('任期到期提醒（MEM-004）', () => {
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
-      // daysLeft 升序（近任期在前）
-      expect(hits[0].memberId).toBe('mem-t1')
+      // daysLeft 升序（近任期在前）——只断言新增成员的相对顺序，
+      // 避免被种子数据（如 mem-004 plannedEndDate=2026-08-20）随真实时钟落入窗口而破坏 hits[0] 位置
+      const idxT1 = wide.findIndex((h) => h.memberId === 'mem-t1')
+      const idxT2 = wide.findIndex((h) => h.memberId === 'mem-t2')
+      expect(idxT1).toBeGreaterThanOrEqual(0)
+      expect(idxT2).toBeGreaterThanOrEqual(0)
+      expect(idxT1).toBeLessThan(idxT2)
     } finally {
       const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
