@@ -6,6 +6,7 @@ import { PartialSuccess, type PartialResult } from '@/components/operation'
 import DangerButton from '@/components/operation/DangerButton.vue'
 import { ConfirmScope } from '@/components/operation'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { ShieldAlert, Trash2, AlertTriangle, Database } from '@lucide/vue'
@@ -48,7 +49,7 @@ async function loadData() {
     reason.value = ''
     reauthProof.value = ''
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function reauthenticate() {

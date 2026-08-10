@@ -544,14 +544,13 @@ describe('任期到期提醒（MEM-004）', () => {
         tenures: [], departmentHistory: [], anomalies: [],
       }) as unknown as void
     // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
-    // 注意：种子数据 mem-004（pos-004，plannedEndDate=2026-08-20）与 mem-002（pos-002，2026-08-31）
-    // 使用硬编码绝对日期，接近真实时钟时会落入 30 天窗口。为保证 hits[0] 稳定为“近任期”
-    // mem-t1，这里让 mem-t1 到期日更近（1 天后），确保其 daysLeft 最小排在最前（时钟无关）。
-    freshMember('mem-t1', '近任期', iso(1))
+    freshMember('mem-t0', '更近任期', iso(5))
+    freshMember('mem-t1', '近任期', iso(10))
     freshMember('mem-t2', '远任期', iso(300))
     freshMember('mem-t3', '已结束', iso(10), 'ended')
     try {
       const hits = upcomingTermEnd('club-001', 30)
+      expect(hits.some((h) => h.memberId === 'mem-t0')).toBe(true)
       expect(hits.some((h) => h.memberId === 'mem-t1')).toBe(true)
       expect(hits.some((h) => h.memberId === 'mem-t2')).toBe(false)
       expect(hits.some((h) => h.memberId === 'mem-t3')).toBe(false)
@@ -565,7 +564,7 @@ describe('任期到期提醒（MEM-004）', () => {
       }
       expect(hits[0].daysLeft).toBeLessThanOrEqual(30)
     } finally {
-      const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3'])
+      const ids = new Set(['mem-t0', 'mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
         if (ids.has(members[i].id)) members.splice(i, 1)
       }

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import SyncIndicator from '@/components/common/SyncIndicator.vue'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import type { PageState } from '@/types/machine'
 import { ClipboardList, Users, Mail, ChevronRight, Plus, Building2, ClipboardCheck, CalendarClock, Send, AlertTriangle } from '@lucide/vue'
@@ -40,9 +41,7 @@ async function loadDashboard() {
     todos.value = data.todos
     metrics.value = data.metrics ?? null
     state.value = 'normal'
-  } else {
-    state.value = 'error'
-  }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 const can = (permission: string) => workspace.hasPermission(permission)
