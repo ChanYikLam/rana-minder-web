@@ -545,6 +545,13 @@ export function respondInvitation(invitationId: string, action: 'accept' | 'reje
 export function confirmInvitationSync(invitationId: string): { ok: boolean; error?: string; invitation?: MockMembershipInvitation } {
   const inv = membershipInvitations.find((i) => i.id === invitationId)
   if (!inv) return { ok: false, error: '邀请不存在' }
+  if (inv.status === 'sync_failed') {
+    // P2-3：同步失败后可重试（SM-MEM-004 sync_failed --retry--> accepted_pending_sync），再走确认生效链路
+    const t = assertTransition('SM-MEM-004', inv.status, 'accepted_pending_sync', 'retry')
+    if (!t.ok) return { ok: false, error: t.reason || '当前状态不可重试' }
+    inv.status = 'accepted_pending_sync'
+    return confirmInvitationSync(invitationId)
+  }
   if (inv.status === 'accepted_pending_sync') {
     const t = assertTransition('SM-MEM-004', inv.status, 'effective', 'confirmed')
     if (!t.ok) return { ok: false, error: t.reason || '当前状态不可确认生效' }
