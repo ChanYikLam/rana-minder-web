@@ -22,7 +22,7 @@ const routes: RouteRecordRaw[] = [
     path: '/explore',
     name: 'P-REC-07-clubs',
     component: () => import('@/pages/recruitment/PublicCatalogPage.vue'),
-    meta: { layout: 'public', public: true },
+    meta: { layout: 'public', public: true, tab: 'clubs' },
   },
   {
     path: '/explore/clubs',
