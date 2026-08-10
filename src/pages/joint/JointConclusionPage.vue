@@ -220,15 +220,7 @@ onMounted(async () => {
                       </div>
                     </template>
                   </template>
-                  <!-- JNT-014: 过期与拒绝是不同状态，不得混用 -->
-                  <template v-else-if="c.status === 'expired'">
-                    <StateTag status="expired" />
-                    <span class="text-xs text-text-secondary">逾期未处理（非主动拒绝）</span>
-                  </template>
-                  <template v-else-if="c.status === 'rejected'">
-                    <StateTag status="rejected" />
-                  </template>
-                  <!-- JNT-014: 过期与拒绝是不同状态，不得混用（mock 不产生此二态，状态机 SM-JNT-005 亦无） -->
+                  <!-- 仅 SM-JNT-005 合法状态分支；expired/rejected 不在状态机中（mock 不产生），由 else 兜底渲染 -->
                   <template v-else-if="c.status === 'pending'">
                     <template v-if="c.myClub">
                       <div v-if="c.clubId === clubId" class="flex items-center gap-1.5">
