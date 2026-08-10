@@ -29,7 +29,7 @@ describe('EmailSettingsPage 邮件设置', () => {
   it('社团作用域：加载发信配置并渲染', async () => {
     mockGet.mockResolvedValue({
       kind: 'completed',
-      data: { smtpHost: 'smtp.example.com', smtpPort: 465, smtpUser: 'no-reply', fromName: '网络协会', encryption: 'ssl', verified: false },
+      data: { smtpHost: 'smtp.example.com', smtpPort: 465, smtpUser: 'no-reply', fromName: '电子设计协会', encryption: 'ssl', verified: false },
     })
     const wrapper = mount(EmailSettingsPage, { global: { stubs: pageStubs } })
     await flushPromises()

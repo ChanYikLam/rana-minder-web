@@ -971,3 +971,82 @@ describe('公开活动详情', () => {
     expect((out.body.data as Record<string, unknown>)).toMatchObject({ id: 'act-002', allowAdjustmentDefault: true })
   })
 })
+
+/** P2-8：有 version 字段的实体编辑操作补乐观锁（expectedVersion 不一致 → 409 + IFC-ERR-008） */
+describe('P2-8 乐观锁', () => {
+  beforeEach(() => {
+    clearMockSession()
+    resetRecruitmentDB()
+    resetNotifications()
+  })
+
+  it('活动更新：expectedVersion 与当前版本一致则更新成功，不一致返回 409 + IFC-ERR-008', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=club_leader')
+    const act = rdb.findAnyActivity('act-001')!
+    const currentVersion = act.version
+    // 携带正确版本 → 更新成功
+    const okRes = await invokeHandler(
+      '/api/org/:clubId/recruitment/:activityId',
+      '/api/org/club-001/recruitment/act-001',
+      { title: '改名', description: '新描述', expectedVersion: currentVersion },
+      'put',
+    )
+    expect(okRes.statusCode, JSON.stringify(okRes.body)).toBe(200)
+    expect(rdb.findAnyActivity('act-001')!.version).toBe(currentVersion + 1)
+    // 携带过期版本 → 409 + IFC-ERR-008，数据不被覆盖
+    const stale = await invokeHandler(
+      '/api/org/:clubId/recruitment/:activityId',
+      '/api/org/club-001/recruitment/act-001',
+      { title: '不应覆盖', description: 'x', expectedVersion: currentVersion },
+      'put',
+    )
+    expect(stale.statusCode).toBe(409)
+    expect(stale.body.code).toBe('IFC-ERR-008')
+    expect(rdb.findAnyActivity('act-001')!.title).toBe('改名')
+  })
+
+  it('普通招新草稿：expectedVersion 过期时拒绝保存（409 + IFC-ERR-008）', async () => {
+    resolveMockUser(`/api/auth/session?_mock_user=${MEMBER_KEY}`)
+    const draftUrl2 = '/api/activity/recruitment/:activityId/draft'
+    // member 在 club-001，act-002 属 club-002（可正常报名）
+    const first = await invokeHandler(draftUrl2, '/api/activity/recruitment/act-002/draft', { answers: { f1: 'v1' } })
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200)
+    const app = rdb.recruitmentApplications.find((a) => a.activityId === 'act-002')
+    const current = app!.version
+    const stale = await invokeHandler(draftUrl2, '/api/activity/recruitment/act-002/draft', {
+      answers: { f1: 'v2-过期' },
+      expectedVersion: current - 1,
+    })
+    expect(stale.statusCode).toBe(409)
+    expect(stale.body.code).toBe('IFC-ERR-008')
+    expect(app!.answers.f1).toBe('v1')
+    // 正确版本 → 成功
+    const ok = await invokeHandler(draftUrl2, '/api/activity/recruitment/act-002/draft', {
+      answers: { f1: 'v2' },
+      expectedVersion: current,
+    })
+    expect(ok.statusCode, JSON.stringify(ok.body)).toBe(200)
+    expect(app!.answers.f1).toBe('v2')
+  })
+
+  it('评价更新：expectedVersion 过期时拒绝提交（409 + IFC-ERR-008）', async () => {
+    resolveMockUser('/api/auth/session?_mock_user=interviewer')
+    const concludeUrl = '/api/org/:clubId/recruitment/:activityId/reviews/:applicantId/conclude'
+    const first = await invokeHandler(
+      concludeUrl,
+      '/api/org/club-001/recruitment/act-001/reviews/u-001/conclude',
+      { rating: 4, comment: '初评' },
+    )
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200)
+    const rev = rdb.recruitmentReviews.find((r) => r.applicantId === 'u-001' && r.activityId === 'act-001')
+    const current = rev!.version
+    const stale = await invokeHandler(
+      concludeUrl,
+      '/api/org/club-001/recruitment/act-001/reviews/u-001/conclude',
+      { rating: 2, comment: '过期改评', expectedVersion: current - 1 },
+    )
+    expect(stale.statusCode).toBe(409)
+    expect(stale.body.code).toBe('IFC-ERR-008')
+    expect(rev!.rating).toBe(4)
+  })
+})
