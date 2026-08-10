@@ -382,10 +382,11 @@ onMounted(loadData)
               :results="groupResults"
               :loading="groupSearching"
               placeholder="输入 Group 名称 / 稳定标识，至少 3 个有效字符"
+              empty-text="未找到匹配的 Group"
+              :failed="groupSearchFailed"
               @update:model-value="onGroupInput"
               @select="onGroupSelect"
             />
-            <p v-if="groupKeyword.trim() && !groupSearching && groupResults.length === 0 && !groupSearchFailed" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的 Group</p>
             <p v-if="selectedGroup" class="mt-2 flex items-center gap-1.5 text-xs" :class="wizardBindingWarning.ok ? 'text-success' : 'text-danger'">
               <CheckCircle2 v-if="wizardBindingWarning.ok" :size="14" />
               <Info v-else :size="14" />

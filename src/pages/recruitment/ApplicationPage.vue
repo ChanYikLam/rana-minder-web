@@ -157,6 +157,8 @@ async function handleWithdraw() {
 /** 加载已有申请记录，恢复草稿或展示已提交/已归档状态 */
 async function loadMyApplication() {
   try {
+    // P2-34：重试/权限恢复后复位阻断态，避免表单永久隐藏
+    applyDenied.value = false
     const result = await get<MyApplication>(`/activity/recruitment/${route.params.activityId}/apply`)
     if (result.kind === 'completed') {
       myApplication.value = result.data

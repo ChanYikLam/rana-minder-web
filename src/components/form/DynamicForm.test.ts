@@ -35,8 +35,23 @@ describe('DynamicForm multi_select 契约', () => {
       },
     })
     const options = wrapper.find('select').findAll('option')
-    expect(options[1].attributes('selected')).toBeDefined()
-    expect(options[2].attributes('selected')).toBeUndefined()
+    // P2-8：选中态由 select :value 响应式驱动，而非 option :selected 一次性属性
+    expect((options[1].element as HTMLOptionElement).selected).toBe(true)
+    expect((options[2].element as HTMLOptionElement).selected).toBe(false)
+  })
+
+  it('外部重置模型后选中态同步（:value 响应式而非 option :selected）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: {
+        fields: [field({ id: 'ms', type: 'multi_select' })],
+        modelValue: { ms: ['A'] },
+      },
+    })
+    expect((wrapper.find('select').element as HTMLSelectElement).selectedOptions.length).toBe(1)
+    await wrapper.setProps({ modelValue: { ms: ['C'] } })
+    const options = wrapper.find('select').findAll('option')
+    expect((options[3].element as HTMLOptionElement).selected).toBe(true)
+    expect((options[1].element as HTMLOptionElement).selected).toBe(false)
   })
 
   it('多选 change 提交 string[]，未选提交 []（空值语义与 schema 对齐）', async () => {

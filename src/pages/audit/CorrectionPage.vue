@@ -137,7 +137,7 @@ onMounted(loadData)
           </div>
           <button
             class="w-full h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
-            :disabled="creating || !form.targetType || !form.targetId || !form.reason"
+            :disabled="creating || !form.targetType.trim() || !form.targetId.trim() || !form.reason.trim()"
             @click="handleCreate"
           >
             {{ creating ? '提交中...' : '提交纠错' }}

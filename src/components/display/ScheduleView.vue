@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { CalendarDays, List, AlertTriangle } from '@lucide/vue'
-import { formatDateCn, formatDateKey, formatTimeCn, formatWeekdayCn } from '@/lib/date'
+import { formatDateCn, formatDateKey, formatTimeCn, formatWeekdayFromDayKey } from '@/lib/date'
 
 export interface ScheduleSlot {
   id: string
@@ -19,6 +19,14 @@ const props = defineProps<{
 }>()
 
 const mode = ref<'calendar' | 'list'>(props.mode || 'list')
+
+// P2-13：mode prop 外部切换时同步内部状态，避免父级切换失效
+watch(
+  () => props.mode,
+  (v) => {
+    if (v) mode.value = v
+  }
+)
 
 interface NormalizedSlot extends ScheduleSlot {
   start: Date
@@ -120,7 +128,7 @@ const weekDays = computed(() => {
     <div v-else class="space-y-3">
       <div v-for="[day, slots] in weekDays" :key="day" class="rounded-md border border-border">
         <p class="px-3 py-1.5 text-xs font-medium text-text-secondary bg-subtle border-b border-border">
-          {{ formatWeekdayCn(`${day}T12:00:00+08:00`) }}
+          {{ formatWeekdayFromDayKey(day) }}
         </p>
         <div class="p-2 space-y-1.5">
           <div

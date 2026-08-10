@@ -25,7 +25,8 @@ const state = ref<PageState>('loading')
 const interviews = ref<JointInterview[]>([])
 const applications = ref<JointApp[]>([])
 const slots = ref<Slot[]>([])
-const invalidReason = ref('')
+// P2-35：作废原因按申请人隔离（Record<applicantId, reason>），A 卡输入不残留到 B 卡
+const invalidReasons = ref<Record<string, string>>({})
 const actionLoading = ref(false)
 const bookOpen = ref(false)
 const bookForm = ref({ applicantId: '', slotId: '' })
@@ -386,14 +387,14 @@ onMounted(async () => {
                 </button>
                 <template v-if="canInvalidate(iv.status)">
                   <input
-                    v-model="invalidReason"
+                    v-model="invalidReasons[iv.applicantId]"
                     class="flex-1 max-w-52 px-2 h-8 rounded-md border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
                     placeholder="作废原因（必填）"
                   />
                   <button
                     class="flex items-center gap-1 px-3 h-8 rounded-md bg-destructive text-text-on-primary text-xs font-medium hover:opacity-90 disabled:opacity-60"
-                    :disabled="actionLoading || !invalidReason.trim()"
-                    @click="runAction(iv.applicantId, 'invalidate', { reason: invalidReason })"
+                    :disabled="actionLoading || !(invalidReasons[iv.applicantId] ?? '').trim()"
+                    @click="runAction(iv.applicantId, 'invalidate', { reason: invalidReasons[iv.applicantId] ?? '' })"
                   >
                     <XCircle :size="13" /> 作废
                   </button>

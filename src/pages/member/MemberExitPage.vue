@@ -588,6 +588,8 @@ onMounted(loadData)
         :succeeded="removeSucceeded"
         :error-message="removeError"
         @confirm="handleConfirmRemove"
+        @update:error-message="(v) => removeError = v"
+        @retry="removeError = ''"
       >
         <template #extra>
           <textarea

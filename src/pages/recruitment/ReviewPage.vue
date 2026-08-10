@@ -453,6 +453,8 @@ onMounted(() => {
       :succeeded="publishSucceeded"
       :error-message="publishError"
       @confirm="handlePublishAll"
+      @update:error-message="(v) => publishError = v"
+      @retry="publishError = ''"
     />
   </PageStateBoundary>
 </template>

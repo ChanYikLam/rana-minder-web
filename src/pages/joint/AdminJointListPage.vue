@@ -130,6 +130,8 @@ onMounted(loadData)
         :executing="busy"
         :error-message="closeError || undefined"
         @confirm="handleForceClose"
+        @update:error-message="(v) => closeError = v"
+        @retry="closeError = ''"
       >
         <template #extra>
           <input

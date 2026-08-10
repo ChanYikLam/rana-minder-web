@@ -39,7 +39,7 @@ function go(p: number) {
       >
         <ChevronLeft :size="14" /> 上一页
       </button>
-      <span class="text-xs text-text-secondary">{{ page }} / {{ totalPages }}</span>
+      <span class="text-xs text-text-secondary">{{ pageClamped }} / {{ totalPages }}</span>
       <button
         class="flex items-center gap-1 px-2.5 h-8 rounded-md border border-border text-xs text-text-primary hover:bg-subtle disabled:opacity-40 disabled:cursor-not-allowed"
         :disabled="page >= totalPages"

@@ -59,4 +59,11 @@ describe('PreferenceSorter 意向排序', () => {
       { id: 'd3', label: '设计部' },
     ])
   })
+
+  it('P2-10：max 生效——显示剩余名额，达上限提示', async () => {
+    const wrapper = mountSorter(items.slice(0, 2), { max: 3 })
+    expect(wrapper.text()).toContain('还可添加 1 项志愿')
+    await wrapper.setProps({ modelValue: items })
+    expect(wrapper.text()).toContain('已达到上限，不再接受新的志愿')
+  })
 })

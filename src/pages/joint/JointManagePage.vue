@@ -411,6 +411,8 @@ onMounted(loadDetail)
         :succeeded="riskSucceeded"
         :error-message="riskError"
         @confirm="runAction('cancel', { confirm: true, reason: '发起方取消联合活动' })"
+        @update:error-message="(v) => riskError = v"
+        @retry="riskError = ''"
       />
     </div>
   </PageStateBoundary>

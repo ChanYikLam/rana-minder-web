@@ -11,6 +11,7 @@ import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
 
 const notifStore = useNotificationViewStore()
 const state = ref<PageState>('loading')
+const markingAll = ref(false)
 const selectedId = ref<string | null>(null)
 const clubFilter = ref('all')
 const typeFilter = ref('all')
@@ -93,14 +94,17 @@ async function loadNotifications() {
 }
 
 async function handleMarkAllRead() {
-  state.value = 'loading'
-  // P2-1：写操作失败语义固定为 error（不区分 forbidden），返回错误码仅用于日志
-  const code = await notifStore.markAllRead()
-  if (code) {
-    state.value = 'error'
-    console.error('标记已读失败:', code)
-  } else {
-    state.value = notifStore.items.length === 0 ? 'empty' : 'normal'
+  if (markingAll.value) return
+  markingAll.value = true
+  try {
+    // P2-1：写操作失败语义固定为 error（不区分 forbidden），返回错误码仅用于日志
+    // 不整页 loading：保留列表可见，仅按钮局部禁用
+    const code = await notifStore.markAllRead()
+    if (code) {
+      console.error('标记已读失败:', code)
+    }
+  } finally {
+    markingAll.value = false
   }
 }
 
@@ -127,10 +131,11 @@ onMounted(loadNotifications)
         </div>
         <button
           v-if="notifStore.hasUnread"
-          class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle"
+          class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle disabled:opacity-60"
+          :disabled="markingAll"
           @click="handleMarkAllRead"
         >
-          <CheckCheck :size="16" /> 全部已读
+          <CheckCheck :size="16" /> {{ markingAll ? '处理中...' : '全部已读' }}
         </button>
       </div>
 

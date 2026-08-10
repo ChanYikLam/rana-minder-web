@@ -120,6 +120,8 @@ async function loadMyApplication(): Promise<boolean> {
   const jointId = route.params.jointId
   if (typeof jointId !== 'string') return true
   try {
+    // P2-34：重试/权限恢复后复位阻断态，避免表单永久隐藏
+    applyDenied.value = false
     const result = await get<MyApplication>(`/activity/joint/${jointId}/apply`)
     if (result.kind === 'completed') {
       myApplication.value = result.data

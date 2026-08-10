@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ChevronUp, ChevronDown } from '@lucide/vue'
 
 export interface PreferenceEntry {
@@ -15,6 +16,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [items: PreferenceEntry[]]
 }>()
+
+/** P2-10：max 上限生效——剩余可添加数提示（达上限时置灰入口由调用方决定，此处仅反馈状态） */
+const remainingSlots = computed(() =>
+  props.max === undefined ? null : Math.max(0, props.max - props.modelValue.length)
+)
 
 function move(index: number, delta: -1 | 1) {
   const items = [...props.modelValue]
@@ -89,6 +95,13 @@ function onKeydown(event: KeyboardEvent, index: number) {
     </li>
     <li v-if="props.modelValue.length === 0" class="text-sm text-text-secondary py-4 text-center border border-dashed border-border-strong rounded-md">
       暂无志愿，从上方的部门列表添加
+    </li>
+    <li
+      v-if="remainingSlots !== null"
+      class="text-xs text-text-secondary px-1"
+      role="status"
+    >
+      {{ remainingSlots === 0 ? '已达到上限，不再接受新的志愿' : `还可添加 ${remainingSlots} 项志愿` }}
     </li>
   </ol>
 </template>

@@ -77,7 +77,7 @@ describe('NotificationCenterPage 通知中心', () => {
     expect(wrapper.find('.psb').attributes('data-state')).toBe('error')
   })
 
-  it('全部已读失败：进入 error 而非 forbidden（写操作语义固定为 error）', async () => {
+  it('全部已读失败：页面不整页 loading、列表保持可见（写操作仅记日志）', async () => {
     mocks.list.mockResolvedValue({
       kind: 'completed',
       data: { items: [{ id: 'n1', type: 'application', title: '报名状态更新', body: '你的报名已通过', read: false, createdAt: '2026-08-01T04:00:00Z', link: null, clubName: '计算机协会' }], nextCursor: null },
@@ -102,7 +102,9 @@ describe('NotificationCenterPage 通知中心', () => {
     expect(btn).toBeTruthy()
     await btn!.trigger('click')
     await flushPromises()
-    expect(wrapper.find('.psb').attributes('data-state')).toBe('error')
+    // P2-54：写操作不整页 loading，列表保持可见
+    expect(wrapper.find('.psb').attributes('data-state')).toBe('normal')
+    expect(wrapper.text()).toContain('报名状态更新')
   })
 
   it('markRead 失败：不打断查看详情且无 unhandled rejection（openDetail 不依赖 throw）', async () => {

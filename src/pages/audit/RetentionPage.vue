@@ -357,6 +357,8 @@ onMounted(loadData)
       :succeeded="executeSucceeded"
       :error-message="executeError"
       @confirm="handleExecute"
+      @update:error-message="(v) => executeError = v"
+      @retry="executeError = ''"
     />
   </PageStateBoundary>
 </template>

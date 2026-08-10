@@ -359,10 +359,11 @@ onMounted(loadData)
                 :results="searchResults"
                 :loading="candidateSearching"
                 placeholder="姓名或学号..."
+                empty-text="未找到匹配的候选人"
+                :failed="searchFailed"
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0 && !searchFailed" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
@@ -397,6 +398,8 @@ onMounted(loadData)
         @confirm="acceptTarget && handleRespond(acceptTarget, 'accept')"
         @update:open="(v) => { if (!v) { acceptTarget = null; resetAcceptState() } }"
         @cancel="resetAcceptState"
+        @update:error-message="(v) => acceptError = v"
+        @retry="resetAcceptState"
       />
     </div>
   </PageStateBoundary>

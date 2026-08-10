@@ -274,6 +274,8 @@ onBeforeUnmount(stopAllPolling)
       :error-message="errorMessage"
       @confirm="handleCreate"
       @cancel="resetConfirmState"
+      @update:error-message="(v) => errorMessage = v"
+      @retry="resetConfirmState"
     />
 
     <HighRiskConfirm
@@ -287,6 +289,8 @@ onBeforeUnmount(stopAllPolling)
       :executing="downloading"
       :error-message="downloadError"
       @confirm="confirmDownload"
+      @update:error-message="(v) => downloadError = v"
+      @retry="downloadError = ''"
     >
       <template #extra>
         <label class="block text-sm font-medium text-text-primary mb-1.5">下载原因（必填，至少 5 字，用于审计）</label>

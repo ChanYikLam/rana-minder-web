@@ -55,3 +55,11 @@ export function formatTimeCn(value: string | Date): string {
 export function formatWeekdayCn(value: string | Date): string {
   return weekdayFmt.format(new Date(value))
 }
+
+/** 由 formatDateKey 产出的平台时区自然日键（YYYY-MM-DD）渲染星期文案，不硬编码时区偏移 */
+export function formatWeekdayFromDayKey(dayKey: string): string {
+  const [y, m, d] = dayKey.split('-').map(Number)
+  if (!y || !m || !d) return dayKey
+  const instant = Date.UTC(y, m - 1, d, 4, 0, 0)
+  return weekdayFmt.format(new Date(instant))
+}

@@ -24,13 +24,15 @@ async function loadData() {
     summary.value = result.data.summary
     deptDist.value = result.data.departmentDistribution
     state.value = 'normal'
+    // P2-64：数据刷新后同步重算条形图基准，重试后 maxCount 不再陈旧
+    updateMax()
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 const maxCount = ref(0)
 function updateMax() { maxCount.value = Math.max(...deptDist.value.map((d) => d.count), 1) }
 
-onMounted(async () => { await loadData(); updateMax() })
+onMounted(loadData)
 </script>
 
 <template>

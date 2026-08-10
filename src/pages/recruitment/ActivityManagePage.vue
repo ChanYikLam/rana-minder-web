@@ -478,6 +478,8 @@ onMounted(loadDetail)
         :succeeded="riskSucceeded"
         :error-message="riskError"
         @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
+        @update:error-message="(v) => riskError = v"
+        @retry="riskError = ''"
       />
     </div>
   </PageStateBoundary>

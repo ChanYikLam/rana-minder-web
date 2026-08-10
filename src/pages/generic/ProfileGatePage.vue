@@ -21,8 +21,12 @@ if (!session.profileGate.emailVerified) {
 async function handleRecheck() {
   if (rechecking.value) return
   rechecking.value = true
-  await session.loadSession()
-  rechecking.value = false
+  try {
+    // P2-15：try/finally 保证异常时 rechecking 复位，按钮不永久卡"检查中"
+    await session.loadSession()
+  } finally {
+    rechecking.value = false
+  }
   if (!session.needsProfileGate) {
     router.push('/me')
   }

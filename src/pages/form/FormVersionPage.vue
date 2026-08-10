@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -26,6 +26,10 @@ const formErrors = ref<Record<string, string[]>>({})
 const submitting = ref(false)
 const saving = ref(false)
 const hasMyRecord = ref(false)
+
+const hasAttachmentFields = computed(() =>
+  (currentVersion.value?.fields || []).some((f) => f.type === 'file' || f.type === 'image')
+)
 
 async function loadForm() {
   state.value = 'loading'
@@ -203,8 +207,8 @@ onMounted(loadForm)
         <DynamicForm v-model="formData" :fields="currentVersion.fields" :field-errors="formErrors" />
       </Card>
 
-      <!-- FORM-007: 文件检查状态提示 -->
-      <div class="mb-4 rounded-lg bg-warning-subtle p-3 flex items-center gap-2">
+      <!-- FORM-007: 文件检查状态提示（仅当版本存在附件字段时展示，P2-66） -->
+      <div v-if="hasAttachmentFields" class="mb-4 rounded-lg bg-warning-subtle p-3 flex items-center gap-2">
         <FileWarning :size="16" class="text-warning" />
         <p class="text-xs text-warning">附件正在安全检查中时不可正式提交，但可保存草稿。检查完成后方可提交。</p>
       </div>
