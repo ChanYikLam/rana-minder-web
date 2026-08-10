@@ -41,7 +41,15 @@ export interface ExportTask {
   downloadUrl: string | null
 }
 
-export type ExportTaskStatus = 'pending' | 'generating' | 'processing' | 'completed' | 'failed' | 'expired' | 'downloaded'
+export type ExportTaskStatus =
+  | 'pending'
+  | 'generating'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'denied'
+  | 'expired'
+  | 'deleted'
 
 export interface StatItem {
   label: string

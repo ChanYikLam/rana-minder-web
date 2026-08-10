@@ -1,6 +1,6 @@
 # RanaMinder 状态机文档
 
-> 更新日期：2026-08-08
+> 更新日期：2026-08-09（P2-5：SM-EXP-001 词表同步 processing / start_processing）
 > 上游基线：`docs/specification/SRS-状态机转换明细-v1.0.md`（29 个状态机、306 条转换规则，位于 main 设计基线，合并到 dev 后生效）
 > 代码实现：`src/mock/state-machines/transitions.ts`（精确转换表，唯一词表来源）
 

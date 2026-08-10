@@ -8,6 +8,9 @@ describe('ADMIN_PERMISSIONS', () => {
     expect(ADMIN_PERMISSIONS['P-REC-admin-list']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-ORG-01']).toBe('platform:club:manage')
     expect(ADMIN_PERMISSIONS['P-OPS-01']).toBe('platform:ops:view')
+    // P2-2：表单填写页使用「可填写」权限而非「设计」权限
+    expect(ADMIN_PERMISSIONS['P-FORM-02-admin']).toBe('platform:form:fill')
+    expect(ADMIN_PERMISSIONS['P-FORM-01-admin']).toBe('platform:form:design')
   })
 
   it('covers every requiresAdmin route (guard rejects missing keys unconditionally)', () => {

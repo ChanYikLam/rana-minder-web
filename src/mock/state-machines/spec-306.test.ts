@@ -84,10 +84,11 @@ describe('状态机 spec-306 精确转换表', () => {
     // 实现层 settleExportTask/ExportPage 使用 processing 生成中间态，转换表必须包含
     expect(statesOf('SM-EXP-001')).toContain('processing')
     // 真实可达路径：pending --start--> generating --start_processing--> processing --success--> completed
-    expect(isValidTransition('SM-EXP-001', 'pending', 'generating')).toBe(true)
-    expect(isValidTransition('SM-EXP-001', 'generating', 'processing')).toBe(true)
+    expect(assertTransition('SM-EXP-001', 'pending', 'generating', 'start').ok).toBe(true)
     expect(assertTransition('SM-EXP-001', 'generating', 'processing', 'start_processing').ok).toBe(true)
     expect(assertTransition('SM-EXP-001', 'processing', 'completed', 'success').ok).toBe(true)
+    // processing 无直达入边：必须经 generating 中间态（防退化为直跳语义）
+    expect(isValidTransition('SM-EXP-001', 'pending', 'processing')).toBe(false)
     // processing 为真实状态：不是死状态（有出边），也不是孤立状态（有入边）
     expect(assertTransition('SM-EXP-001', 'processing', 'failed', 'fail').ok).toBe(true)
     expect(assertTransition('SM-EXP-001', 'processing', 'expired', 'expire').ok).toBe(true)

@@ -11,7 +11,7 @@ vi.mock('@/services/client', () => ({
 import AdminJointListPage from './AdminJointListPage.vue'
 
 const joint = {
-  id: 'jnt-1', title: '联合招新', status: 'recruiting', participants: ['网络协会'],
+  id: 'jnt-1', title: '联合招新', status: 'recruiting', participants: ['电子设计协会'],
   applicantCount: 10, canForceClose: true, clubs: [{ clubId: 'club-001', clubName: '计算机协会', suspended: false }],
 }
 
