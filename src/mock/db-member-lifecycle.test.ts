@@ -555,8 +555,11 @@ describe('任期到期提醒（MEM-004）', () => {
       // 宽窗口覆盖更远任期
       const wide = upcomingTermEnd('club-001', 2000)
       expect(wide.some((h) => h.memberId === 'mem-t2' && h.daysLeft > 30)).toBe(true)
-      // daysLeft 升序（近任期在前）
-      expect(hits[0].memberId).toBe('mem-t1')
+      // daysLeft 升序（近任期在前）：仅对比本测试动态创建的成员，
+      // 避免种子数据（如 mem-004 硬编码 plannedEndDate）随时间过期进入窗口后干扰全局首位排序
+      // mem-t2 为 300 天后到期，不在 30 天窗口内；窗口内本测试成员仅 mem-t1，应排在最前
+      const own = hits.filter((h) => h.memberId.startsWith('mem-t'))
+      expect(own.map((h) => h.memberId)).toEqual(['mem-t1'])
     } finally {
       const ids = new Set(['mem-t1', 'mem-t2', 'mem-t3'])
       for (let i = members.length - 1; i >= 0; i--) {
