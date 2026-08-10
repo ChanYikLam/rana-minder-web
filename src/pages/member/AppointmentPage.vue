@@ -349,11 +349,14 @@ onMounted(loadData)
                 <p v-if="cmd.status === 'initiator_lost_rights'" class="text-xs text-warning mt-0.5 flex items-center gap-1">
                   <AlertTriangle :size="12" /> 发起人已失去操作权限，需重新确认后执行
                 </p>
+                <p v-if="cmd.status === 'precondition_failed'" class="text-xs text-warning mt-0.5 flex items-center gap-1">
+                  <AlertTriangle :size="12" /> 前置条件未满足，可调整执行时间后重新确认或取消
+                </p>
               </div>
               <div class="flex items-center gap-2">
                 <StateTag :status="cmd.status" />
-                <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed' || cmd.status === 'initiator_lost_rights'" class="text-xs text-danger hover:underline" :disabled="actingId === cmd.id" @click="handleCancel(cmd)">取消</button>
-                <button v-if="cmd.status === 'initiator_lost_rights'" class="text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleReconfirm(cmd)">重新确认</button>
+                <button v-if="cmd.status === 'pending_exec' || cmd.status === 'initiator_lost_rights' || cmd.status === 'precondition_failed'" class="text-xs text-danger hover:underline" :disabled="actingId === cmd.id" @click="handleCancel(cmd)">取消</button>
+                <button v-if="cmd.status === 'initiator_lost_rights' || cmd.status === 'precondition_failed'" class="text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleReconfirm(cmd)">重新确认</button>
                 <button v-if="cmd.status === 'pending_exec' || cmd.status === 'reconfirmed' || cmd.status === 'exec_failed'" class="flex items-center gap-1 text-xs text-primary hover:underline" :disabled="actingId === cmd.id" @click="handleExecuteCommand(cmd)">
                   <RefreshCw :size="12" /> {{ cmd.status === 'exec_failed' ? '重试' : '执行' }}
                 </button>

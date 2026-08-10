@@ -23,7 +23,7 @@ describe('JointListPage 联合活动列表', () => {
   it('加载成功：渲染联合活动列表', async () => {
     mockGet.mockResolvedValue({
       kind: 'completed',
-      data: { items: [{ id: 'jnt-1', title: '联合招新', status: 'recruiting', channelStatus: 'open', participants: ['网络协会'], applicantCount: 5, createdAt: '2026-08-01T00:00:00Z' }] },
+      data: { items: [{ id: 'jnt-1', title: '联合招新', status: 'recruiting', channelStatus: 'open', participants: ['电子设计协会'], applicantCount: 5, createdAt: '2026-08-01T00:00:00Z' }] },
     })
     const wrapper = mount(JointListPage, { global: { stubs: pageStubs } })
     await flushPromises()

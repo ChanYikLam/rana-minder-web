@@ -7,6 +7,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import type { PageState } from '@/types/machine'
 import { Crown, ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, Users, Plus, Trash2, RefreshCw } from '@lucide/vue'
 
@@ -28,6 +29,8 @@ const pageError = ref<{ code: string; message: string; supportId?: string } | nu
 const data = ref<TransitionData | null>(null)
 const members = ref<Member[]>([])
 const executing = ref(false)
+const executeSucceeded = ref(false)
+const executeError = ref('')
 const saving = ref(false)
 const showEditor = ref(false)
 const showExecuteConfirm = ref(false)
@@ -119,6 +122,8 @@ async function handleExecute(proof?: string) {
     return
   }
   executing.value = true
+  executeSucceeded.value = false
+  executeError.value = ''
   const clubId = route.params.clubId as string
   const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition`, {
     reason: executeReason.value.trim(),
@@ -130,8 +135,18 @@ async function handleExecute(proof?: string) {
     data.value.executedAt = new Date().toISOString()
     data.value.canExecute = false
     const failed = r.data.results.filter((x) => !x.success)
+    executeSucceeded.value = true
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
+    showExecuteConfirm.value = false
+    executeReason.value = ''
+  } else if (r.kind === 'accepted') {
+    // P1：#8 服务端 202/IFC-ERR-013/014 异步受理换届：统一提示已受理，避免误报"执行失败"
+    toastAcceptedAction('换届执行已受理，正在后台处理')
+    showExecuteConfirm.value = false
+    executeReason.value = ''
   } else {
+    // P1：#8 执行失败时把错误传给 HighRiskConfirm，避免弹窗永久卡“正在执行...”
+    executeError.value = (r as { error?: { message?: string } }).error?.message || '换届执行失败，请重试'
     toastError(r, '换届执行失败，请重试')
   }
 }
@@ -317,7 +332,11 @@ onMounted(async () => {
         confirm-label="确认执行换届"
         reauth-required
         :executing="executing"
-        @confirm="showExecuteConfirm = false; handleExecute($event)"
+        :succeeded="executeSucceeded"
+        :error-message="executeError || undefined"
+        @confirm="handleExecute($event)"
+        @retry="executeError = ''"
+        @update:errorMessage="(v) => executeError = v"
         @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = '' } }"
       >
         <template #extra>

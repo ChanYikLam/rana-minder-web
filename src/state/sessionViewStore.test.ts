@@ -35,7 +35,7 @@ describe('sessionViewStore 工作空间与权限同步（社团切换）', () =>
     session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-004' }
 
     // ClubSwitcher 切到 club-002（getContext 返回 memberId=null）：不得保留 club-001 的 mem-004
-    session.setWorkspaceInfo({ clubId: 'club-002', clubName: '网络协会', role: 'hr', memberId: undefined })
+    session.setWorkspaceInfo({ clubId: 'club-002', clubName: '电子设计协会', role: 'hr', memberId: undefined })
 
     expect(session.workspace?.clubId).toBe('club-002')
     expect(session.workspace?.memberId).toBeUndefined()
@@ -45,7 +45,7 @@ describe('sessionViewStore 工作空间与权限同步（社团切换）', () =>
     const session = seedLoggedInUser()
     session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-004' }
 
-    session.setWorkspaceInfo({ clubId: 'club-002', clubName: '网络协会', role: 'hr', memberId: 'mem-020' })
+    session.setWorkspaceInfo({ clubId: 'club-002', clubName: '电子设计协会', role: 'hr', memberId: 'mem-020' })
 
     expect(session.workspace?.memberId).toBe('mem-020')
   })
