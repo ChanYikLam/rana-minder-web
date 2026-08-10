@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, Button, ResponsiveActionRegion } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
@@ -60,7 +61,8 @@ async function loadData() {
     await loadMyApplication()
     state.value = 'normal'
   } else {
-    state.value = 'error'
+    // P3-3：取首个失败请求的错误码（任一失败即整页失败）
+    state.value = errorToPageState(errorCodeOf(actRes.kind === 'completed' ? formRes : actRes))
   }
 }
 

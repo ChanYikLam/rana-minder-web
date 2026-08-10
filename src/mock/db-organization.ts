@@ -105,7 +105,7 @@ const groups: GroupSeed[] = [
   },
   {
     id: 'grp-002', name: '电子设计协会', stableId: 'G-ELEC-CLUB', path: '/学校学生组织/电子设计协会',
-    parentId: 'grp-root', purpose: 'club', boundClubId: 'club-002', leaderGroupId: 'grp-lead-002', members: ['mem-101', 'mem-102'],
+    parentId: 'grp-root', purpose: 'club', boundClubId: 'club-002', leaderGroupId: 'grp-lead-002', members: ['mem-101'],
   },
   {
     id: 'grp-003', name: '数学建模协会', stableId: 'G-MATH-CLUB', path: '/学校学生组织/数学建模协会',
@@ -152,7 +152,7 @@ const groups: GroupSeed[] = [
 
 const memberNames: Record<string, string> = {
   'mem-004': '张明远', 'mem-001': '陈雨桐', 'mem-002': '王浩然', 'mem-003': '李思颖', 'mem-006': '林晓薇',
-  'mem-101': '赵子涵', 'mem-102': '孙嘉怡', 'mem-201': '郑浩宇', 'mem-202': '周嘉怡', 'mem-203': '黄志强',
+  'mem-101': '赵子涵', 'mem-201': '郑浩宇', 'mem-202': '陈雨桐', 'mem-203': '黄志强',
   'mem-301': '吴思远', 'mem-401': '孙欣怡', 'mem-402': '周嘉诚', 'mem-403': '徐静怡',
 }
 
