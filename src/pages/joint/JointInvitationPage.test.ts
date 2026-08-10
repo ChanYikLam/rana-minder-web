@@ -24,7 +24,7 @@ function makeDetail(): {
   reviewFlag: boolean; casdoorSync: string | null
 } {
   return {
-    id: 'jinv-1', jointId: 'jnt-1', jointTitle: '联合招新', clubName: '网络协会',
+    id: 'jinv-1', jointId: 'jnt-1', jointTitle: '联合招新', clubName: '电子设计协会',
     applicantName: '张三', type: 'joint', status: 'sent', sentAt: '2026-08-01T04:00:00Z',
     expiredAt: '2026-08-08T04:00:00Z', reviewFlag: false, casdoorSync: null,
   }

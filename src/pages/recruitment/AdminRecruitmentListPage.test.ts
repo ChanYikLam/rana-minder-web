@@ -17,19 +17,19 @@ describe('AdminRecruitmentListPage 平台招新列表', () => {
   it('加载成功：渲染跨社团招新列表', async () => {
     mockGet.mockResolvedValue({
       kind: 'completed',
-      data: { items: [{ id: 'act-1', title: '联合招新', clubName: '网络协会', status: 'recruiting', applicantCount: 20, canForceComplete: true }] },
+      data: { items: [{ id: 'act-1', title: '联合招新', clubName: '电子设计协会', status: 'recruiting', applicantCount: 20, canForceComplete: true }] },
     })
     const wrapper = mount(AdminRecruitmentListPage, { global: { stubs: pageStubs } })
     await flushPromises()
     expect(mockGet).toHaveBeenCalledWith('/admin/recruitment')
     expect(wrapper.text()).toContain('联合招新')
-    expect(wrapper.text()).toContain('网络协会')
+    expect(wrapper.text()).toContain('电子设计协会')
   })
 
   it('强制结束：空原因点确认被拦截并提示', async () => {
     mockGet.mockResolvedValue({
       kind: 'completed',
-      data: { items: [{ id: 'act-1', title: '联合招新', clubName: '网络协会', status: 'recruiting', applicantCount: 1, canForceComplete: true }] },
+      data: { items: [{ id: 'act-1', title: '联合招新', clubName: '电子设计协会', status: 'recruiting', applicantCount: 1, canForceComplete: true }] },
     })
     const wrapper = mount(AdminRecruitmentListPage, { global: { stubs: pageStubs } })
     await flushPromises()
@@ -51,7 +51,7 @@ describe('AdminRecruitmentListPage 平台招新列表', () => {
   it('强制结束：填写原因后提交并关闭弹窗', async () => {
     mockGet.mockResolvedValue({
       kind: 'completed',
-      data: { items: [{ id: 'act-1', title: '联合招新', clubName: '网络协会', status: 'recruiting', applicantCount: 1, canForceComplete: true }] },
+      data: { items: [{ id: 'act-1', title: '联合招新', clubName: '电子设计协会', status: 'recruiting', applicantCount: 1, canForceComplete: true }] },
     })
     mockPost.mockResolvedValue({ kind: 'completed', data: {} })
     const wrapper = mount(AdminRecruitmentListPage, { global: { stubs: pageStubs } })
