@@ -544,6 +544,7 @@ describe('任期到期提醒（MEM-004）', () => {
         tenures: [], departmentHistory: [], anomalies: [],
       }) as unknown as void
     // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
+    // mem-t0 更近任期 5 天；mem-t1 近任期取 1 天：确保其 daysLeft 严格小于种子成员（如 mem-004 的 2026-08-20）及 mem-t0，稳定排序首位必为 mem-t1
     freshMember('mem-t0', '更近任期', iso(5))
     freshMember('mem-t1', '近任期', iso(1))
     freshMember('mem-t2', '远任期', iso(300))
