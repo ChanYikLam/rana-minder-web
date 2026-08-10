@@ -131,14 +131,18 @@ async function handlePublish() {
     return
   }
   publishing.value = true
+  publishSucceeded.value = false
+  publishError.value = ''
   const result = await post(`/admin/retention/${p.id}/publish`, {
     reason: publishReason.value.trim(),
     reauthProof: reauthProof.value,
     previewVersion: pv.previewVersion,
   })
   publishing.value = false
-  confirmOpen.value = false
   if (result.kind === 'completed') {
+    publishSucceeded.value = true
+    publishError.value = ''
+    confirmOpen.value = false
     toast.success('策略已发布')
     const data = result.data as { notice?: string | null; auditRef?: string }
     if (data.notice) toast.info(data.notice)
@@ -147,12 +151,16 @@ async function handlePublish() {
     toastAcceptedAction('发布已受理，正在后台处理')
     await loadData()
   } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
-    toast.error('身份验证已失效，请重新认证后重试')
+    publishSucceeded.value = false
+    publishError.value = '身份验证已失效，请重新认证后重试'
     reauthProof.value = ''
   } else if (result.kind === 'concurrency_conflict') {
-    toast.error('影响预览已过期，请重新预览后发布')
+    publishSucceeded.value = false
+    publishError.value = '影响预览已过期，请重新预览后发布'
     preview.value = null
   } else {
+    publishSucceeded.value = false
+    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
     toastError(result, '发布失败，请重试')
   }
 }

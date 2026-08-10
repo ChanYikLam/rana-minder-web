@@ -76,4 +76,25 @@ describe('JointClosePage 联合活动关闭', () => {
     expect(wrapper.text()).not.toContain('联合招新')
     wrapper.unmount()
   })
+
+  it('admin 路由（无 clubId）改用 jointId 拼接请求：GET/POST 均走 /admin/joint/:jointId/close', async () => {
+    mockRouteParams.value = { jointId: 'jnt-1' }
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: closableDetail })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: closableDetail })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(JointClosePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(mockGet).toHaveBeenCalledWith('/admin/joint/jnt-1/close')
+    expect(wrapper.text()).toContain('联合招新')
+
+    const startBtn = wrapper.findAll('button').find((b) => b.text().includes('进入结束确认'))
+    expect(startBtn, 'admin 场景下应渲染"进入结束确认"按钮').toBeTruthy()
+    await startBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/admin/joint/jnt-1/close/start', {})
+
+    expect(mockGet).not.toHaveBeenCalledWith(expect.stringContaining('/org/undefined/'))
+    expect(mockPost).not.toHaveBeenCalledWith(expect.stringContaining('/org/undefined/'))
+  })
 })
