@@ -38,6 +38,8 @@ export default defineConfig({
         'src/mock/recruitment-api.ts',
         'src/router/index.ts',
         'src/components/ui/**',
+        // 排除文档/非源码文件，避免被 v8 当作 JS 解析报 PARSE_ERROR
+        'src/**/*.md',
       ],
       // 基线防倒退门槛（2026-08-07 实测 lines 73.7/stmts 68.5/funcs 76.9/branches 60.4）。
       // CI 已改为 test:coverage，此门槛在 PR 上强制拦截。

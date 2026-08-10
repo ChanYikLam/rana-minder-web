@@ -30,8 +30,6 @@ const closeBaseUrl = computed(() =>
 
 async function loadData() {
   state.value = 'loading'
-  // P1：#4 admin 路由 /admin/joint/:jointId/close 无 clubId 时由 closeBaseUrl 拼接 admin 路径，
-  // 避免打 /org/undefined/...
   const result = await get(closeBaseUrl.value)
   if (result.kind === 'completed') {
     detail.value = result.data as typeof detail.value

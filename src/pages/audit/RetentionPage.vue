@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { PageStateBoundary, Card, HighRiskConfirm } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
@@ -52,7 +53,6 @@ const reauthProof = ref('')
 const reauthenticating = ref(false)
 const confirmOpen = ref(false)
 const publishing = ref(false)
-// 正式发布（P1：#X）：补传 succeeded/error-message，失败时可关闭，不再永久卡“正在执行”
 const publishSucceeded = ref(false)
 const publishError = ref('')
 
@@ -75,7 +75,7 @@ async function loadData() {
     publishReason.value = ''
     reauthProof.value = ''
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 async function handleCreate() {

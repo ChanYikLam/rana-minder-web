@@ -201,7 +201,7 @@ describe('JointManagePage 联合活动管理', () => {
     wrapper.unmount()
   })
 
-  it('创建失败：服务端 message 缺失时回退到「创建失败」', async () => {
+  it('创建失败：服务端 message 缺失时回退到「创建失败，请稍后重试」', async () => {
     mockRoute.meta.mode = 'create'
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'JNT-001' } })
     const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
@@ -216,7 +216,7 @@ describe('JointManagePage 联合活动管理', () => {
     await createBtn!.trigger('click')
     await flushPromises()
 
-    expect(mockToastError).toHaveBeenCalledWith('创建失败')
+    expect(mockToastError).toHaveBeenCalledWith('创建失败，请稍后重试')
     expect(mockPush).not.toHaveBeenCalled()
     wrapper.unmount()
   })

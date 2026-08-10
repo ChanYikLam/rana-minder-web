@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { Timeline, type TimelineEntry } from '@/components/display'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Search } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
@@ -44,7 +45,7 @@ const { seq, schedule } = useDebouncedSearch({
     } else {
       // 失败时清空旧结果，避免残留误导（与 ClubManage/ClubAccessWizard 语义一致）
       items.value = []
-      state.value = 'error'
+      state.value = errorToPageState(errorCodeOf(result))
     }
   },
 })
