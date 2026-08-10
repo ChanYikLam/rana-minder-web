@@ -138,7 +138,7 @@ describe('ActivityManagePage 招新活动管理', () => {
     await descTextarea.setValue('新描述')
     await wrapper.findAll('button').find((b) => b.text().includes('保存修改'))!.trigger('click')
     await flushPromises()
-    expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '新描述' })
+    expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '新描述' }, { expectedVersion: 2 })
     wrapper.unmount()
   })
 
@@ -153,7 +153,7 @@ describe('ActivityManagePage 招新活动管理', () => {
     await titleInput.setValue('秋季招新 2026')
     await wrapper.findAll('button').find((b) => b.text().includes('保存修改'))!.trigger('click')
     await flushPromises()
-    expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '面向全校招新' })
+    expect(mockPut).toHaveBeenCalledWith('/org/club-001/recruitment/act-1', { title: '秋季招新 2026', description: '面向全校招新' }, { expectedVersion: 2 })
     expect(toast.error).toHaveBeenCalledWith('数据版本已过期')
     expect(wrapper.text()).not.toContain('数据版本已过期')
     expect(wrapper.text()).toContain('保存修改')

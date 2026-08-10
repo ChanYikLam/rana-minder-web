@@ -41,7 +41,19 @@ export interface ExportTask {
   downloadUrl: string | null
 }
 
-export type ExportTaskStatus = 'pending' | 'generating' | 'completed' | 'failed' | 'expired' | 'downloaded'
+/**
+ * MRM-014：导出任务状态词表与 SM-EXP-001 状态机一致
+ * （来源：state-machines/transitions.ts 转换表；不含文件下载接口返回的展示状态 downloaded）
+ */
+export type ExportTaskStatus =
+  | 'pending'
+  | 'generating'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'denied'
+  | 'expired'
+  | 'deleted'
 
 export interface StatItem {
   label: string

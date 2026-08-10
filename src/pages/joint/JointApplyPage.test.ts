@@ -27,7 +27,7 @@ import JointApplyPage from './JointApplyPage.vue'
 
 const mockDetail = {
   title: '联合招新',
-  clubName: '网络协会',
+  clubName: '电子设计协会',
   participants: [{ id: 'club-001', name: '计算机协会' }],
   clubs: [{ id: 'club-001', name: '计算机协会', departments: [{ id: 'dept-1', name: '技术部' }] }],
   description: '跨社团联合招新',
@@ -233,7 +233,7 @@ describe('JointApplyPage 交互流程', () => {
       preferences: [],
       allowJointAdjustment: true,
       consented: true,
-    })
+    }, { expectedVersion: undefined })
   })
 
   it('通道关闭态展示关闭提示（danger 色调类）', async () => {

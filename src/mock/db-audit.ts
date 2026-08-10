@@ -25,7 +25,7 @@ export const auditLogsDb: AuditLogEntry[] = [
   { id: 'log-001', actorName: '张明远', action: '发布招新活动', targetType: '活动', targetId: 'act-001', detail: '2025 秋季招新', createdAt: '2025-08-01T10:30:00+08:00', scope: 'org' },
   { id: 'log-002', actorName: '李思颖', action: '审批部门申请', targetType: '成员', targetId: 'mem-001', detail: '陈雨桐 技术->运营', createdAt: '2025-07-29T14:00:00+08:00', scope: 'org' },
   { id: 'log-003', actorName: '王浩然', action: '提交评价', targetType: '申请', targetId: 'app-003', detail: '王梓涵 4分', createdAt: '2025-08-04T11:00:00+08:00', scope: 'org' },
-  { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'rinv-001', detail: '陈雨桐 技术部', createdAt: '2025-08-04T12:00:00+08:00', scope: 'org' },
+  { id: 'log-004', actorName: '张明远', action: '发送邀请', targetType: '邀请', targetId: 'rinv-001', detail: '陈雨彤 技术部', createdAt: '2025-08-04T12:00:00+08:00', scope: 'org' },
   // ---- 平台域种子 ----
   { id: 'log-101', actorName: '超级管理员', action: '强制关闭联合活动', targetType: '联合活动', targetId: 'jnt-001', detail: '计算机+电子联合招新', createdAt: '2025-08-01T09:00:00+08:00', scope: 'platform' },
   { id: 'log-102', actorName: '超级管理员', action: '批准社团接入', targetType: '社团', targetId: 'club-001', detail: '计算机协会', createdAt: '2025-07-01T10:00:00+08:00', scope: 'platform' },
