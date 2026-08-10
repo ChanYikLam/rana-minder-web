@@ -544,7 +544,7 @@ describe('任期到期提醒（MEM-004）', () => {
         tenures: [], departmentHistory: [], anomalies: [],
       }) as unknown as void
     // 30 天内到期 → 窗口内命中；300 天后到期 → 窗口外；已 ended → 不参与
-    freshMember('mem-t1', '近任期', iso(10))
+    freshMember('mem-t1', '近任期', iso(1))
     freshMember('mem-t2', '远任期', iso(300))
     freshMember('mem-t3', '已结束', iso(10), 'ended')
     try {
