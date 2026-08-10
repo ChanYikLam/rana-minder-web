@@ -11,7 +11,7 @@ import { createMemberFromAdmission, candidates } from './db'
  * 动态注册的 u-auto-* 档案由 ensureApplicantProfile 写入，resetRecruitmentDB 会还原种子 */
 export const APPLICANT_PROFILES: Record<string, { name: string; studentId: string }> = {
   'u-001': { name: '刘子豪', studentId: '20240001' },
-  'u-002': { name: '陈雨桐', studentId: '20240002' },
+  'u-002': { name: '陈雨彤', studentId: '20240002' },
   'u-003': { name: '王梓涵', studentId: '20240003' },
   'u-004': { name: '张博文', studentId: '20240004' },
   'u-005': { name: '李欣怡', studentId: '20240005' },
@@ -494,7 +494,7 @@ export const recruitmentApplications: RecApplication[] = [
   },
   {
     id: 'app-002', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐', studentId: '20240002',
+    applicantId: 'u-002', applicantName: '陈雨彤', studentId: '20240002',
     status: 'submitted',
     preferences: [{ order: 1, departmentId: 'dept-002', departmentName: '运营部' }],
     allowAdjustment: true, formVersion: 1, answers: {},
@@ -553,7 +553,7 @@ export const recruitmentInterviews: RecInterview[] = [
   },
   {
     id: 'int-002', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐', roundId: 'rd-001',
+    applicantId: 'u-002', applicantName: '陈雨彤', roundId: 'rd-001',
     status: 'pending_selection', slotId: null, startAt: null, endAt: null,
     actualStartAt: null, actualEndAt: null, attendance: 'none',
     invalidReason: null, skipReason: null, cancelReason: null,
@@ -574,7 +574,7 @@ export const recruitmentReviews: RecReview[] = [
 export const recruitmentInvitations: RecInvitation[] = [
   {
     id: 'rinv-001', activityId: 'act-001', clubId: 'club-001',
-    applicantId: 'u-002', applicantName: '陈雨桐',
+    applicantId: 'u-002', applicantName: '陈雨彤',
     departmentId: 'dept-001', departmentName: '技术部',
     status: 'pending_acceptance', sentAt: daysFromNow(-22), expiredAt: daysFromNow(5),
     acceptedAt: null, casdoorSync: 'none', version: 1,
@@ -1243,7 +1243,7 @@ export function skipRoundInterview(activityId: string, applicantId: string, roun
 
 // ================= REC 申请 =================
 
-export function saveApplicationDraft(activityId: string, applicantId: string, input: { answers?: Record<string, unknown> }): { ok: boolean; error?: string; data?: RecApplication } {
+export function saveApplicationDraft(activityId: string, applicantId: string, input: { answers?: Record<string, unknown>; expectedVersion?: number }): { ok: boolean; error?: string; data?: RecApplication } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   let app = findApplication(activityId, applicantId)
@@ -1260,6 +1260,10 @@ export function saveApplicationDraft(activityId: string, applicantId: string, in
     return err('申请已提交，请通过撤销提交回到草稿')
   } else if (app.status === 'identity_anomaly') {
     return err('账号身份异常，不能保存或修改报名')
+  }
+  // P2-8 乐观锁：已有草稿时比对 expectedVersion，防止多标签页/并发覆盖
+  if (input.expectedVersion !== undefined && app.version !== input.expectedVersion) {
+    return err('数据版本已变化，请刷新后重试')
   }
   app.answers = { ...app.answers, ...(input.answers || {}) }
   app.version += 1
@@ -1640,7 +1644,7 @@ export function setWaitlist(activityId: string, applicantId: string, departmentI
   return ok()
 }
 
-export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string; roundId?: string | null }): { ok: boolean; error?: string; data?: RecReview } {
+export function submitReview(activityId: string, applicantId: string, input: { comment: string; rating: number; authorId: string; authorName: string; authorRole: string; roundId?: string | null; expectedVersion?: number }): { ok: boolean; error?: string; data?: RecReview } {
   const a = findAnyActivity(activityId)
   if (!a) return err('活动不存在')
   if (a.status === 'completed' || a.status === 'cancelled' || a.status === 'force_completed') return err('活动已结束，普通评价编辑已锁定')
@@ -1650,6 +1654,10 @@ export function submitReview(activityId: string, applicantId: string, input: { c
   }
   let rev = recruitmentReviews.find((r) => r.activityId === activityId && r.applicantId === applicantId && r.authorId === input.authorId)
   if (rev) {
+    // P2-8 乐观锁：更新已有评价时比对 expectedVersion，防止多标签页/并发覆盖
+    if (input.expectedVersion !== undefined && rev.version !== input.expectedVersion) {
+      return err('数据版本已变化，请刷新后重试')
+    }
     rev.history = [
       ...(rev.history || []),
       { comment: rev.comment, version: rev.version, updatedAt: rev.updatedAt },
@@ -1793,7 +1801,7 @@ export function createJointActivity(clubId: string, clubName: string, actorName:
   if (!input.clubIds.includes(clubId)) return err('发起方社团必须包含在拟参与名单中')
   if (!input.title.trim()) return err('联合活动名称不能为空')
   if (new Date(input.confirmDeadline).getTime() <= Date.now()) return err('名单确认截止必须严格晚于当前时刻')
-  const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '羽毛球协会' }
+  const clubNames: Record<string, string> = { 'club-001': '计算机协会', 'club-002': '电子设计协会', 'club-003': '数学建模协会' }
   const ja: JointActivity = {
     id: 'jnt-' + Date.now(), title: input.title, description: input.description || '',
     status: 'draft',
@@ -1921,7 +1929,7 @@ export function saveJointApplicationDraft(
   applicantId: string,
   applicantName: string,
   studentId: string,
-  input?: { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[] },
+  input?: { answers?: Record<string, unknown>; volunteerClubIds?: string[]; allowJointAdjustment?: boolean; consented?: boolean; preferences?: { departmentId: string; departmentName: string }[]; expectedVersion?: number },
 ): { ok: boolean; error?: string; data?: JointApplication } {
   const ja = findJoint(jointId)
   if (!ja) return err('联合活动不存在')
@@ -1935,6 +1943,10 @@ export function saveJointApplicationDraft(
     }
     jointApplications.push(app)
     ja.applicantIds.push(app.id)
+  }
+  // P2-8 乐观锁：已有草稿时比对 expectedVersion，防止多标签页/并发覆盖
+  if (input?.expectedVersion !== undefined && app.version !== input.expectedVersion) {
+    return err('数据版本已变化，请刷新后重试')
   }
   app.consented = input?.consented ?? app.consented
   app.allowJointAdjustment = input?.allowJointAdjustment ?? app.allowJointAdjustment
