@@ -17,7 +17,7 @@ vi.mock('@/services/client', () => ({
   put: (...args: unknown[]) => mockPut(...args),
 }))
 vi.mock('vue-sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
 import { toast } from 'vue-sonner'
@@ -323,6 +323,27 @@ describe('InterviewManagePage 面试管理', () => {
     // 面板已关闭、选中行已清空
     expect(wrapper.text()).not.toContain('代申请人预约面试')
     expect(wrapper.text()).not.toContain('2023001')
+    wrapper.unmount()
+  })
+
+  it('P1-202：操作返回 accepted 时提示已受理，不误报失败（跳轮为例）', async () => {
+    mockPageGet([interviewRow], [openRound], [{ applicantId: 'a2', applicantName: '李四', status: 'submitted' }])
+    mockPost.mockResolvedValue({ kind: 'accepted', data: { taskId: 'task-1', status: 'processing' } })
+    const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('轮次管理'))!.trigger('click')
+    const selects = wrapper.findAll('select')
+    await selects[1].setValue('a2')
+    await selects[2].setValue('r1')
+    const reasonInput = wrapper.findAll('input').find((i) => i.attributes('placeholder') === '跳轮原因（必填）')
+    await reasonInput!.setValue('已有实习offer')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('执行跳轮'))!.trigger('click')
+    await flushPromises()
+
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('跳轮已受理，正在后台处理')
     wrapper.unmount()
   })
 

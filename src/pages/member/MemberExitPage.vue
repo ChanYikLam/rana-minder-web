@@ -9,6 +9,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useLastLeaderGuard } from '@/composables/useLastLeaderGuard'
@@ -92,6 +93,8 @@ async function handleSubmitExitRequest() {
     exitOpen.value = false
     exitReason.value = ''
     await loadData()
+  } else if (r.kind === 'accepted') {
+    toastAcceptedAction('退出申请已受理，正在后台处理')
   } else if (r.kind === 'rejected' && r.error) {
     toast.error((r.error as { message?: string }).message || '提交失败')
   } else {
@@ -220,6 +223,8 @@ async function handleConfirmRemove(proof?: string) {
     toast.success('成员已移除')
     closeAction()
     await loadData()
+  } else if (r.kind === 'accepted') {
+    removeError.value = '操作已受理，正在后台处理，请稍后刷新查看结果'
   } else {
     removeError.value = (r as { error?: { message?: string } }).error?.message || '移除失败，请重试'
   }
@@ -275,6 +280,8 @@ async function handleSubmitResignation() {
     resignOpen.value = false
     resignReason.value = ''
     await loadData()
+  } else if (r.kind === 'accepted') {
+    toastAcceptedAction('辞职申请已受理，正在后台处理')
   } else if (r.kind === 'rejected' && r.error) {
     toast.error((r.error as { message?: string }).message || '提交失败')
   } else {

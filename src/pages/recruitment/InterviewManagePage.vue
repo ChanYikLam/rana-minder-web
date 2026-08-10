@@ -179,6 +179,8 @@ async function handleBook() {
     bookOpen.value = false
     bookForm.value = { applicantId: '', roundId: '', slotId: '' }
     await loadInterviews()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('预约已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '预约失败')
   }
@@ -214,6 +216,8 @@ async function handleCreateRound() {
     roundForm.value = { name: '', mode: 'club_unified', deadline: '', slotStart: '', slotEnd: '', slotCapacity: 10 }
     roundError.value = ''
     await loadRounds()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('创建轮次已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '创建轮次失败')
   }
@@ -232,6 +236,8 @@ async function handleUpdateRound(roundId: string) {
   newRoundDeadline.value = ''
   if (result.kind === 'completed') {
     await loadRounds()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('更新截止时间已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '更新失败')
   }
@@ -255,6 +261,8 @@ async function handleCancelRound(roundId: string) {
     cancelRoundReason.value = ''
     cancelRoundError.value = ''
     await loadRounds()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('取消轮次已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '取消失败')
   }
@@ -305,6 +313,8 @@ async function handleAssignTask() {
     taskForm.value = { userId: '', scope: 'activity', roundId: '' }
     taskError.value = ''
     await loadInterviewers()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('指派临时面试官已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '指派失败')
   }
@@ -319,6 +329,8 @@ async function handleRevokeTask(taskId: string) {
   revokingTaskId.value = null
   if (result.kind === 'completed') {
     await loadInterviewers()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('撤销任务已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '撤销失败')
   }
@@ -348,6 +360,8 @@ async function handleSkipRound() {
     skipForm.value = { applicantId: '', reason: '', roundId: '' }
     roundError.value = ''
     await Promise.all([loadRounds(), loadInterviews()])
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('跳轮已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '跳轮失败')
   }

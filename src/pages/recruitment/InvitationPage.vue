@@ -65,6 +65,8 @@ async function handleSyncConfirm() {
     toast.success('成员身份已生效')
     // 重新拉取详情：sync_failed 重试成功后 status/casdoorSync 均由后端更新
     await loadDetail()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('同步确认已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
   }

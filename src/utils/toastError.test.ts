@@ -4,7 +4,7 @@ import { toastError, toastErrorWithSupport } from './toastError'
 import type { ApiError } from '@/types/contracts'
 
 vi.mock('vue-sonner', () => ({
-  toast: { error: vi.fn() },
+  toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() },
 }))
 
 describe('toastError 错误提示三级回退链', () => {
@@ -30,6 +30,18 @@ describe('toastError 错误提示三级回退链', () => {
   it('未知错误码且无 message 时回退 fallback', () => {
     toastError({ kind: 'rejected', error: { code: 'BIZ-999' } as ApiError }, '兜底文案')
     expect(toast.error).toHaveBeenCalledWith('兜底文案')
+  })
+
+  it('accepted（202/IFC-ERR-014）不误报失败，统一提示已受理', () => {
+    toastError({ kind: 'accepted', error: { code: 'IFC-ERR-014', message: '操作正在处理中' } }, '操作失败，请重试')
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('操作已受理，正在后台处理，请稍后刷新查看结果')
+  })
+
+  it('external_uncertain（IFC-ERR-013）提示勿重复提交，不落入失败误报', () => {
+    toastError({ kind: 'external_uncertain', error: { code: 'IFC-ERR-013', message: 'x' } }, '操作失败，请重试')
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('操作结果暂时无法确认，请勿重复提交')
   })
 })
 

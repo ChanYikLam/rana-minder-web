@@ -7,6 +7,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import type { PageState } from '@/types/machine'
 import { ArrowRightLeft, Plus, AlertTriangle, RefreshCw } from '@lucide/vue'
@@ -135,6 +136,8 @@ async function handleWithdraw(id: string) {
   if (r.kind === 'completed') {
     toast.success('申请已撤回')
     await loadData()
+  } else if (r.kind === 'accepted') {
+    toastAcceptedAction('撤回已受理，正在后台处理')
   } else if (r.kind === 'rejected' && r.error) {
     toastError(r, '撤回失败')
   }
