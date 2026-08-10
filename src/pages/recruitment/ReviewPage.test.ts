@@ -28,7 +28,7 @@ const review = {
   id: 'app-1', applicantId: 'u-1', applicantName: '张三', departmentName: '技术部',
   status: 'in_progress', rating: null, comment: null, concludedAt: null, concludedBy: null,
   reviewId: 'rev-1', roundName: '一轮', interviewAt: '2026-08-10T04:00:00Z',
-  myRating: null, myComment: null, peerViewLocked: false, reviews: [],
+  myRating: null, myComment: null, myReviewVersion: null, peerViewLocked: false, reviews: [],
 }
 
 /** 申请详情响应：含 answers（file 字段含 FileMeta） */
@@ -154,7 +154,7 @@ describe('ReviewPage 评审页', () => {
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
       rating: 4,
       comment: '',
-    })
+    }, { expectedVersion: undefined })
     // 失败不再静默：操作结果走向独立 Toast 层（不内联进评价正文）
     expect(mockToastError).toHaveBeenCalledWith('申请人不存在')
     expect(wrapper.text()).not.toContain('申请人不存在')
@@ -176,7 +176,7 @@ describe('ReviewPage 评审页', () => {
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews/u-1/conclude', {
       rating: 4,
       comment: '',
-    })
+    }, { expectedVersion: undefined })
     expect(mockToastSuccess).toHaveBeenCalledWith('评价已提交')
     expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/reviews')
   })

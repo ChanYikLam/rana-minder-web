@@ -46,6 +46,7 @@ interface MyApplication {
   consented?: boolean
   submittedAt?: string | null
   withdrawBlockedReason?: string | null
+  version?: number
 }
 
 const CHANNEL_STATUS_TONE_CLASS: Record<string, string> = {
@@ -257,8 +258,9 @@ async function handleSaveDraft() {
     preferences: preferences.value,
     allowJointAdjustment: allowJointAdjustment.value,
     consented: consented.value,
-  })
+  }, { expectedVersion: myApplication.value?.version })
   if (result.kind === 'completed') {
+    const data = result.data as { version?: number }
     myApplication.value = {
       status: 'draft',
       answers: { ...formData.value },
@@ -266,8 +268,12 @@ async function handleSaveDraft() {
       preferences: preferences.value,
       allowJointAdjustment: allowJointAdjustment.value,
       consented: consented.value,
+      version: data?.version,
     }
     toast.success('报名草稿已保存，可随时回来继续填写')
+  } else if (result.kind === 'concurrency_conflict') {
+    toast.error('草稿已在其他窗口被修改，已刷新恢复最新内容，请重新编辑')
+    await loadMyApplication()
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '草稿保存失败')
   } else {

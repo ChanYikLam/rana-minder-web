@@ -152,13 +152,17 @@ async function handleSaveEdit() {
   actionLoading.value = true
   editError.value = ''
   const clubId = route.params.clubId as string
+  // P2-8 乐观锁：携带当前版本号，服务端比对不一致返回 409（IFC-ERR-008）
   const result = await put(`/org/${clubId}/recruitment/${detail.value.id}`, {
     title: editForm.value.title.trim(),
     description: editForm.value.description.trim(),
-  })
+  }, { expectedVersion: detail.value.version })
   actionLoading.value = false
   if (result.kind === 'completed') {
     editOpen.value = false
+    await loadDetail()
+  } else if (result.kind === 'concurrency_conflict') {
+    toast.error((result.error as { message?: string }).message || '数据版本已变化，请刷新后重试')
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '保存失败')
