@@ -33,6 +33,9 @@ const showEditor = ref(false)
 const showExecuteConfirm = ref(false)
 const executeReason = ref('')
 const executeReasonError = ref('')
+const planDirty = ref(false)
+const executeSucceeded = ref(false)
+const executeErrorMessage = ref('')
 
 // 编辑方案表单
 const editList = ref<'candidates' | 'appointments'>('candidates')
@@ -47,6 +50,7 @@ async function loadData() {
   if (result.kind === 'completed') {
     data.value = result.data
     state.value = 'normal'
+    planDirty.value = false
   } else if (result.kind === 'accepted') {
     // P1-1：202/IFC-ERR-014 异步受理（数据生成中）不再永久卡 loading，降级为可重试的 error 态
     state.value = 'error'
@@ -81,6 +85,7 @@ function addPlanItem() {
   const list = editList.value === 'candidates' ? data.value.candidates : data.value.appointments
   if (list.some((x) => x.memberId === m.id)) { editError.value = '该成员已在方案中'; return }
   list.push(item)
+  planDirty.value = true
   editError.value = ''
 }
 
@@ -88,6 +93,7 @@ function removePlanItem(list: 'candidates' | 'appointments', memberId: string) {
   if (!data.value) return
   if (list === 'candidates') data.value.candidates = data.value.candidates.filter((x) => x.memberId !== memberId)
   else data.value.appointments = data.value.appointments.filter((x) => x.memberId !== memberId)
+  planDirty.value = true
 }
 
 async function savePlan() {
@@ -102,10 +108,42 @@ async function savePlan() {
   if (r.kind === 'completed') {
     toast.success('换届方案已保存')
     showEditor.value = false
+    planDirty.value = false
     await loadData()
   } else {
     toastError(r, '保存失败，请重试')
   }
+}
+
+// 仅保存方案（不重置编辑器态、不弹 toast），用于执行前的自动落库
+async function persistPlanSilently(): Promise<boolean> {
+  if (!data.value) return false
+  saving.value = true
+  const clubId = route.params.clubId as string
+  const r = await post(`/org/${clubId}/members/transition/plan`, {
+    candidates: data.value.candidates,
+    appointments: data.value.appointments,
+  })
+  saving.value = false
+  if (r.kind === 'completed') {
+    planDirty.value = false
+    return true
+  }
+  toastError(r, '方案尚未保存，请先保存后再执行')
+  return false
+}
+
+// 点击"确认执行换届"：若存在未保存编辑，先落库再打开确认弹窗；
+// 避免服务器侧仍按旧方案执行而前端展示的是新方案。
+async function attemptExecute() {
+  if (!data.value?.canExecute) return
+  executeSucceeded.value = false
+  executeErrorMessage.value = ''
+  if (planDirty.value) {
+    const ok = await persistPlanSilently()
+    if (!ok) return
+  }
+  showExecuteConfirm.value = true
 }
 
 async function handleExecute(proof?: string) {
@@ -130,8 +168,12 @@ async function handleExecute(proof?: string) {
     data.value.executedAt = new Date().toISOString()
     data.value.canExecute = false
     const failed = r.data.results.filter((x) => !x.success)
+    executeSucceeded.value = true
+    executeErrorMessage.value = ''
     toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
   } else {
+    executeSucceeded.value = false
+    executeErrorMessage.value = 'error' in r ? (r.error?.message ?? '换届执行失败，请重试') : '换届执行失败，请重试'
     toastError(r, '换届执行失败，请重试')
   }
 }
@@ -165,9 +207,14 @@ onMounted(async () => {
 
       <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold text-text-primary">换届管理</h1>
-        <button v-if="!data.executedAt" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="openEditor">
-          <Plus :size="16" /> 编辑方案
-        </button>
+        <div class="flex items-center gap-2">
+          <span v-if="planDirty" class="flex items-center gap-1 text-xs text-warning" data-testid="plan-dirty">
+            <AlertTriangle :size="14" /> 方案有未保存的编辑
+          </span>
+          <button v-if="!data.executedAt" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="openEditor">
+            <Plus :size="16" /> 编辑方案
+          </button>
+        </div>
       </div>
 
       <!-- 执行前 -->
@@ -262,12 +309,13 @@ onMounted(async () => {
 
         <button
           class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
-          :disabled="executing || !data.canExecute"
-          @click="showExecuteConfirm = true"
+          :disabled="executing || saving || !data.canExecute"
+          @click="attemptExecute"
         >
-          <ShieldAlert :size="18" /> {{ executing ? '执行中...' : '确认执行换届' }}
+          <ShieldAlert :size="18" /> {{ executing ? '执行中...' : (saving ? '保存中...' : (planDirty ? '保存并执行换届' : '确认执行换届')) }}
         </button>
         <p v-if="!data.canExecute" class="text-xs text-text-secondary mt-2 text-center">需先保存包含至少一项晋升或任命的换届方案，且换届未执行</p>
+        <p v-else-if="planDirty" class="text-xs text-warning mt-2 text-center">点击执行将先自动保存当前方案，再进入执行确认</p>
       </template>
 
       <!-- 执行结果 -->
@@ -317,8 +365,10 @@ onMounted(async () => {
         confirm-label="确认执行换届"
         reauth-required
         :executing="executing"
-        @confirm="showExecuteConfirm = false; handleExecute($event)"
-        @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = '' } }"
+        :succeeded="executeSucceeded"
+        :error-message="executeErrorMessage"
+        @confirm="handleExecute($event)"
+        @update:open="(v) => { if (!v) { showExecuteConfirm = false; executeReason = ''; executeReasonError = ''; executeSucceeded = false; executeErrorMessage = '' } }"
       >
         <template #extra>
           <textarea
