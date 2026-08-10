@@ -35,6 +35,7 @@ const actionLoading = ref(false)
 const riskError = ref('')
 const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
 const riskOpen = ref(false)
+const cancelSucceeded = ref(false)
 
 async function loadDetail() {
   if (isCreate.value) { state.value = 'normal'; return }
@@ -56,10 +57,20 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
+    if (action === 'cancel') {
+      cancelSucceeded.value = true
+      riskOpen.value = false
+    }
   } else if (result.kind === 'rejected' && result.error) {
     riskError.value = (result.error as { message?: string }).message || '操作失败'
     toast.error(riskError.value)
   }
+}
+
+function openCancelRisk() {
+  cancelSucceeded.value = false
+  riskError.value = ''
+  riskOpen.value = true
 }
 
 async function runChannel(action: string, input?: Record<string, unknown>) {
@@ -260,7 +271,7 @@ onMounted(loadDetail)
               v-if="!['cancelled', 'force_closed', 'closed'].includes(detail.status)"
               class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-destructive text-text-on-primary text-sm font-medium hover:opacity-90 disabled:opacity-60"
               :disabled="actionLoading"
-              @click="riskOpen = true"
+              @click="openCancelRisk"
             >
               <XCircle :size="15" /> 取消活动
             </button>
@@ -374,6 +385,7 @@ onMounted(loadDetail)
         confirm-label="确认取消"
         reauth-required
         :executing="actionLoading"
+        :succeeded="cancelSucceeded"
         :error-message="riskError"
         @confirm="runAction('cancel', { confirm: true, reason: '发起方取消联合活动' })"
       />

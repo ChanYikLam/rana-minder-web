@@ -68,4 +68,28 @@ describe('JointManagePage 联合活动管理', () => {
     expect(wrapper.findAll('button').some((b) => b.text().includes('发布活动'))).toBe(true)
     wrapper.unmount()
   })
+
+  it('取消活动成功后关闭弹窗并置 succeeded（避免 HighRiskConfirm 永久转圈）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: detail })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    const cancelBtn = wrapper.findAll('button').find((b) => b.text().includes('取消活动'))
+    expect(cancelBtn).toBeDefined()
+    await cancelBtn!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.hrc').exists()).toBe(true)
+
+    const confirmBtn = wrapper.find('.hrc-confirm')
+    expect(confirmBtn.exists()).toBe(true)
+    await confirmBtn.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/cancel', { confirm: true, reason: '发起方取消联合活动' })
+    expect(wrapper.find('.hrc').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })
