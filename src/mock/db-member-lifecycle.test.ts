@@ -550,6 +550,7 @@ describe('任期到期提醒（MEM-004）', () => {
     freshMember('mem-t3', '已结束', iso(10), 'ended')
     try {
       const hits = upcomingTermEnd('club-001', 30)
+      expect(hits.some((h) => h.memberId === 'mem-t0')).toBe(true)
       expect(hits.some((h) => h.memberId === 'mem-t1')).toBe(true)
       expect(hits.some((h) => h.memberId === 'mem-t2')).toBe(false)
       expect(hits.some((h) => h.memberId === 'mem-t3')).toBe(false)

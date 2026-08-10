@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import type { PageState } from '@/types/machine'
 import { Type, AlignLeft, Hash, Calendar, CalendarClock, CircleDot, ListChecks, ChevronDown, CheckSquare, Image, FileUp, Rows3, Plus, X, GripVertical, Save, Eye, Send, Archive, RotateCcw, Copy } from '@lucide/vue'
@@ -63,7 +64,7 @@ async function loadData() {
     formStatus.value = result.data.status || 'draft'
     currentVersion.value = typeof result.data.version === 'number' ? result.data.version : 1
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function addField(type: string) {

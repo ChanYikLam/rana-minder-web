@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { TrendingUp, TrendingDown, Minus, Users, UserPlus, ClipboardList, Mail } from '@lucide/vue'
 import { resolveApiScope } from '@/services/route-scope'
@@ -23,7 +24,7 @@ async function loadData() {
     summary.value = result.data.summary
     deptDist.value = result.data.departmentDistribution
     state.value = 'normal'
-  } else { state.value = 'error' }
+  } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 const maxCount = ref(0)

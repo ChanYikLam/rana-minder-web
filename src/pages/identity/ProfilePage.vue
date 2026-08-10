@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import { PageStateBoundary } from '@/components/common'
 import { get, put, post } from '@/services/client'
+import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { identityApi } from '@/services/modules'
 import { authMode } from '@/services/auth'
 import { toast } from 'vue-sonner'
@@ -92,14 +93,10 @@ async function loadProfile() {
     // 版本号以响应为准（P2-3：删除硬编码 1，与 mock 侧最新版本保持一致）
     version.value = result.data.version ?? 1
     state.value = 'normal'
-  } else if (result.kind === 'rejected') {
-    state.value = result.error.code.startsWith('IFC-ERR-00') && ['IFC-ERR-001', 'IFC-ERR-002', 'IFC-ERR-003'].includes(result.error.code)
-      ? 'forbidden'
-      : 'error'
-    error.value = result.error
   } else {
-    state.value = 'error'
-    error.value = { code: 'IFC-ERR-016', message: '加载失败' }
+    // P3-2：rejected 也统一走 errorToPageState，避免手写 forbidden 集合与映射不一致（004/011/015 同样映射为 forbidden）
+    state.value = errorToPageState(errorCodeOf(result))
+    error.value = 'error' in result ? result.error : { code: errorCodeOf(result), message: '加载失败' }
   }
 }
 
