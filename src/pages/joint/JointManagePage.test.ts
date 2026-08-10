@@ -2,17 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, mockRoute, mockPush } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockRoute: { params: { clubId: 'club-001', jointId: 'jnt-1' }, meta: { mode: 'manage' as 'manage' | 'create' } },
+  mockPush: vi.fn(),
+}))
+const { mockToastError } = vi.hoisted(() => ({ mockToastError: vi.fn() }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { clubId: 'club-001', jointId: 'jnt-1' }, meta: { mode: 'manage' } }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRoute: () => mockRoute,
+  useRouter: () => ({ push: mockPush }),
 }))
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
 }))
 vi.mock('vue-sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  toast: { success: vi.fn(), error: mockToastError, info: vi.fn() },
 }))
 
 import { toast } from 'vue-sonner'
@@ -29,6 +35,9 @@ describe('JointManagePage 联合活动管理', () => {
   beforeEach(() => {
     mockGet.mockReset()
     mockPost.mockReset()
+    mockPush.mockReset()
+    mockToastError.mockReset()
+    mockRoute.meta.mode = 'manage'
     vi.clearAllMocks()
   })
   afterEach(() => vi.restoreAllMocks())
@@ -146,6 +155,69 @@ describe('JointManagePage 联合活动管理', () => {
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/cancel', { confirm: true, reason: '发起方取消联合活动' })
     expect(wrapper.find('.hrc').exists()).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it('创建态：成功后跳转详情页', async () => {
+    mockRoute.meta.mode = 'create'
+    mockPost.mockResolvedValue({ kind: 'completed', data: { id: 'jnt-new' } })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('发起联合活动')
+
+    await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
+    await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
+    await flushPromises()
+
+    const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))
+    expect(createBtn).toBeDefined()
+    await createBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint', expect.objectContaining({ title: '计算机+电子联合招新' }))
+    expect(mockPush).toHaveBeenCalledWith('/org/club-001/joint/jnt-new')
+    expect(mockToastError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('创建失败：toast 错误提示且不跳转（之前 kind!==completed 完全静默）', async () => {
+    mockRoute.meta.mode = 'create'
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'JNT-001', message: '标题重复' } })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
+    await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
+    await flushPromises()
+
+    const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))
+    expect(createBtn).toBeDefined()
+    await createBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockToastError).toHaveBeenCalledWith('标题重复')
+    expect(mockPush).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('创建失败：服务端 message 缺失时回退到「创建失败，请稍后重试」', async () => {
+    mockRoute.meta.mode = 'create'
+    mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'JNT-001' } })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
+    await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
+    await flushPromises()
+
+    const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))
+    expect(createBtn).toBeDefined()
+    await createBtn!.trigger('click')
+    await flushPromises()
+
+    expect(mockToastError).toHaveBeenCalledWith('创建失败，请稍后重试')
+    expect(mockPush).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })
