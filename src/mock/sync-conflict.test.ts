@@ -1,0 +1,133 @@
+import { describe, expect, it, beforeEach } from 'vitest'
+import handlers, { resetIdentityMockState } from './index'
+import { resolveMockUser, clearMockSession, resetMockUsers, mockUsers } from './auth'
+
+/** 走 mock 真实分发路径 */
+function invoke(urlPattern: string, method: string, reqUrl: string, body: unknown = {}): {
+  code?: number
+  data?: { conflicts?: Array<{ field: string; label: string; localValue: string; remoteValue: string }>; name?: string; studentId?: string; email?: string; phone?: string }
+  statusCode?: number
+  body?: { code?: string; message?: string; supportId?: string }
+} {
+  const handler = handlers.find((h) => h.url === urlPattern && h.method === method)
+  if (!handler) throw new Error(`handler 未找到: ${method} ${urlPattern}`)
+  const url = new URL(reqUrl, 'http://localhost')
+  const query: Record<string, string> = {}
+  url.searchParams.forEach((v, k) => { query[k] = v })
+  return handler.response({ url: url.pathname + url.search, query, body, headers: {} }) as never
+}
+
+describe('P0-3 同步冲突（sync-conflict）：真实冲突清单与写回', () => {
+  beforeEach(() => {
+    clearMockSession()
+    resetMockUsers()
+    resetIdentityMockState()
+  })
+
+  it('冲突清单：本地与学校侧不一致的字段进入冲突列表（leader 姓名冲突）', () => {
+    // leader 学校侧姓名登记为「张铭远」，本地为「张明远」→ name 冲突；其余字段一致
+    const out = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=leader')
+    expect(out.code).toBe(0)
+    const fields = out.data?.conflicts?.map((c) => c.field)
+    expect(fields).toContain('name')
+    expect(fields).not.toContain('studentId')
+    expect(fields).not.toContain('email')
+    expect(fields).not.toContain('phone')
+    const nameConflict = out.data?.conflicts?.find((c) => c.field === 'name')
+    expect(nameConflict?.localValue).toBe('张明远')
+    expect(nameConflict?.remoteValue).toBe('张铭远')
+    // 不再出现「（学校侧已更新）」垃圾字符串
+    expect(nameConflict?.remoteValue).not.toContain('学校侧已更新')
+  })
+
+  it('冲突清单：学校侧与本地一致时不产生冲突（member 无冲突）', () => {
+    const out = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=member')
+    expect(out.code).toBe(0)
+    expect(out.data?.conflicts ?? []).toHaveLength(0)
+  })
+
+  it('解决冲突：选择学校侧值时真正写回本地档案', () => {
+    resolveMockUser('/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const out = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'name', chosenValue: '张铭远' },
+    })
+    expect(out.code).toBe(0)
+    expect(out.data?.name).toBe('张铭远')
+    // 本地档案已更新
+    const user = mockUsers.leader
+    expect(user.name).toBe('张铭远')
+  })
+
+  it('解决冲突：不支持的字段返回 422 + IFC-ERR-006', () => {
+    const out = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'avatar', chosenValue: 'x' },
+    })
+    expect(out.statusCode).toBe(422)
+    expect(out.body?.code).toBe('IFC-ERR-006')
+  })
+
+  it('解决冲突：空值/未变化提交不产生写回（避免垃圾数据）', () => {
+    resolveMockUser('/api/auth/profile?_mock_user=leader')
+    const empty = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'name', chosenValue: '' },
+    })
+    expect(empty.code).toBe(0)
+    expect(mockUsers.leader.name).toBe('张明远')
+
+    const same = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'name', chosenValue: '张明远' },
+    })
+    expect(same.code).toBe(0)
+    expect(mockUsers.leader.name).toBe('张明远')
+  })
+
+  it('解决冲突：邮箱/手机号格式非法返回 422（与 PUT profile 一致，避免垃圾格式值落库）', () => {
+    resolveMockUser('/api/auth/profile?_mock_user=leader')
+    const badEmail = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'email', chosenValue: 'not-an-email' },
+    })
+    expect(badEmail.statusCode).toBe(422)
+    expect(badEmail.body?.code).toBe('IFC-ERR-006')
+
+    const badPhone = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'phone', chosenValue: '123' },
+    })
+    expect(badPhone.statusCode).toBe(422)
+    expect(badPhone.body?.code).toBe('IFC-ERR-006')
+
+    // 非法值未写入本地档案
+    expect(mockUsers.leader.email).toBe('leader@example.edu.cn')
+    expect(mockUsers.leader.phone).toBe('13800000002')
+  })
+
+  it('审计 P2-2：写回本地后学校侧权威值不随本地漂移，冲突可持续复现', () => {
+    // 首次：leader 姓名冲突，选择学校侧值写回
+    resolveMockUser('/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const first = invoke('/api/auth/profile/sync-conflict', 'post', '/api/auth/profile/sync-conflict', {
+      input: { field: 'name', chosenValue: '张铭远' },
+    })
+    expect(first.code).toBe(0)
+    expect(mockUsers.leader.name).toBe('张铭远')
+    // 再次请求冲突清单：学校侧仍是种子权威值「张铭远」，本地已同步为「张铭远」→ 不再产生 name 冲突
+    const after = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const fieldsAfter = after.data?.conflicts?.map((c) => c.field)
+    expect(fieldsAfter).not.toContain('name')
+
+    // 重置本地为种子值后，学校侧仍为固定权威值（不随运行期 mockUsers 漂移）
+    mockUsers.leader.name = '张明远'
+    const again = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=leader')
+    const nameConflict = again.data?.conflicts?.find((c) => c.field === 'name')
+    expect(nameConflict?.localValue).toBe('张明远')
+    expect(nameConflict?.remoteValue).toBe('张铭远')
+  })
+
+  it('审计 P2-2：写回 email 后权威侧 email 不随本地变化，冲突仍可复现', () => {
+    // 为 member 配置学校侧 email 差异（模拟登记变更），写回本地后权威侧不被污染
+    mockUsers.member.email = 'member-new@example.edu.cn'
+    const out = invoke('/api/auth/profile/sync-conflicts', 'get', '/api/auth/profile/sync-conflicts?_mock_user=member')
+    // member 学校侧无 override，回退到 seedMockUsers 种子 email（member@example.edu.cn），与本地新值不一致 → 产生冲突
+    const emailConflict = out.data?.conflicts?.find((c) => c.field === 'email')
+    expect(emailConflict?.localValue).toBe('member-new@example.edu.cn')
+    expect(emailConflict?.remoteValue).toBe('member@example.edu.cn')
+  })
+})

@@ -383,6 +383,45 @@ export function resetMockUsers(): void {
   mockUsers = JSON.parse(JSON.stringify(seedMockUsers)) as Record<string, MockUser>
 }
 
+/**
+ * 学校侧（Casdoor 权威侧）资料快照：模拟统一身份认证登记的姓名/学号等权威值。
+ * 仅用于 sync-conflict 冲突解决演示——本地档案与学校侧不一致的字段进入冲突列表；
+ * 与运行期 mockUsers 解耦（本地可被编辑，学校侧为固定权威值）。
+ */
+export interface SchoolProfile {
+  studentId: string
+  name: string
+  email: string
+  phone: string
+}
+
+/** 学校侧登记种子（按用户 key；以 seedMockUsers 为准，个别字段演示登记差异） */
+const seedSchoolProfiles: Record<string, SchoolProfile> = {
+  // 演示：学校侧将姓名登记更正为「张铭远」，本地仍为「张明远」→ name 字段产生冲突
+  leader: { studentId: '20210002', name: '张铭远', email: 'leader@example.edu.cn', phone: '13800000002' },
+  // 其余用户学校侧与本地一致（默认无冲突）
+}
+
+/**
+ * 获取某用户的学校侧权威资料（Casdoor 权威侧快照）。
+ *
+ * 权威侧必须是**不可变快照**：以 seedMockUsers 种子为准，叠加 seedSchoolProfiles 登记差异。
+ * 绝不回退到运行期 mockUsers 当前值，否则冲突解决写回本地后，权威侧随本地漂移，
+ * 该字段将永远不再产生冲突（审计 P2-2：mock 权威侧被本地写回污染）。
+ */
+export function getSchoolProfile(userId: string): SchoolProfile {
+  const key = Object.keys(mockUsers).find((k) => mockUsers[k].id === userId) ?? 'leader'
+  const seed = seedMockUsers[key]
+  const override = seedSchoolProfiles[key]
+  if (!seed) return { studentId: '', name: '', email: '', phone: '' }
+  return {
+    studentId: override?.studentId ?? seed.studentId,
+    name: override?.name ?? seed.name,
+    email: override?.email ?? seed.email,
+    phone: override?.phone ?? seed.phone,
+  }
+}
+
 /** SRS-FAIL-001 降级模式演示开关（Casdoor 故障时置位，会话端点据此输出 degraded / degradedSince） */
 const mockDegraded = { enabled: false, since: 0 }
 
