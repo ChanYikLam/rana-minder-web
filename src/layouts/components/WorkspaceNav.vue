@@ -30,7 +30,8 @@ function getGroupPanelId(index: number): string {
 }
 
 function isGroupActive(group: NavGroup): boolean {
-  return route.path.startsWith(group.prefix) || route.path === group.prefix || group.items.some(item => route.path === item.path)
+  const prefix = group.prefix
+  return route.path === prefix || route.path.startsWith(`${prefix}/`) || group.items.some(item => route.path === item.path)
 }
 
 function isGroupExpanded(group: NavGroup): boolean {
