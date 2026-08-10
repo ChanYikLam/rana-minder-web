@@ -1,5 +1,5 @@
 /**
- * 29 个状态机的精确转换表（依据 docs/specification/SRS-状态机转换明细-v1.0.md）
+ * 30 个状态机的精确转换表（依据 docs/specification/SRS-状态机转换明细-v1.0.md）
  * 每个状态机：from → { event: to }。未列出的跳转一律拒绝并保持原状态。
  * 业务前置条件校验由 db 业务函数完成；这里负责状态转换合法性的第一道闸。
  *
@@ -209,7 +209,6 @@ const TRANSITIONS_CONST = {
       submit_in_window: 'submitted',
       identity_disabled: 'identity_anomaly',
     },
-    revised: { submit: 'submitted', identity_disabled: 'identity_anomaly' },
     exited: {
       resubmit_before_deadline: 'submitted',
       create_recovery_window: 'exited',
@@ -521,7 +520,10 @@ const TRANSITIONS_CONST = {
 
   /** SM-MEM-004 常规入社邀请 */
   'SM-MEM-004': {
-    sent: { send: 'pending_acceptance' },
+    sent: {
+      send: 'pending_acceptance',
+      withdraw: 'withdrawn',
+    },
     pending_acceptance: {
       reject: 'rejected',
       withdraw: 'withdrawn',
@@ -543,6 +545,15 @@ const TRANSITIONS_CONST = {
     withdrawn: { reissue: 'pending_acceptance' },
     expired: { reissue: 'pending_acceptance' },
     target_already_member: { reissue: 'pending_acceptance' },
+  },
+
+  /** SM-MEM-005 辞职申请 */
+  'SM-MEM-005': {
+    under_review: {
+      approve: 'approved',
+      reject: 'rejected',
+      withdraw: 'withdrawn',
+    },
   },
 
   /** SM-FORM-001 表单定义 */

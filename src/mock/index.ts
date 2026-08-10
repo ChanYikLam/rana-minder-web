@@ -19,6 +19,7 @@ import * as orgdb from './db-organization'
 import { listNotifications, unreadCountOf, markNotificationRead, markAllNotificationsRead, listNotificationPreferences, setNotificationPreference, notificationTemplates, notificationKillSwitch, setNotificationKillSwitch, clubKillSwitchState, emailConfigKey, getEmailConfig, saveEmailConfig, markEmailTestPassed, rotateEmailKey, emailOutbox, pushNotification, userIdOfMember, userIdOfName } from './notifications'
 import { recruitmentApiHandlers, withStatus, rdb, applicantIdOfUrl } from './recruitment-api'
 import { correctionsDb, deriveCorrectionStatus, type CorrectionRecord, type CorrectionAuditEntry } from './db-corrections'
+import { assertTransition } from './state-machines/transitions'
 import { auditLogsDb, writeAuditLog } from './db-audit'
 import * as formdb from './db-forms'
 import {
@@ -54,11 +55,6 @@ function deliverTermEndReminders(clubId: string) {
 }
 
 /** 事实纠错共享内存库见 db-corrections.ts（社团/个人中心/管理员共用） */
-
-/** 纠错状态机守卫（SM-AUD-001）：仅 submitted（含 overdue 未处置）可被批准/拒绝/撤回， */
-function isCorrectionActable(record: CorrectionRecord): boolean {
-  return record.status === 'submitted' || record.status === 'overdue'
-}
 
 /** 纠错提交人 → 可接收通知的前端用户 id（US-AUD-01 通知联动；mock 用户未知时返回 null） */
 function correctionSubmitterUserId(record: CorrectionRecord): string | null {
@@ -2335,9 +2331,24 @@ if (!r.ok) return businessError(r.error || '操作失败')
         const old = db.findMember(query.clubId, t.currentLeader.id)
         if (old) {
           const pos = old.positions.find((p) => p.status === 'active')
-          if (pos) { pos.endDate = new Date().toISOString().slice(0, 10); pos.status = 'ended' }
-          old.status = 'exited'
-          old.exitedAt = new Date().toISOString()
+          // P0-1：换届执行走状态机——SM-MEM-002 end_change 结束职位、SM-MEM-001 removed→exiting→exited 两步退出，
+          // 不再直接写 status，避免绕过 active→exiting→exited 的不可变语义
+          if (pos) {
+            const tp = assertTransition('SM-MEM-002', pos.status, 'ended', 'end_change')
+            if (tp.ok) { pos.endDate = new Date().toISOString().slice(0, 10); pos.status = 'ended' }
+          }
+          const prevStatus = old.status
+          const step1 = assertTransition('SM-MEM-001', prevStatus, 'exiting', 'removed')
+          if (step1.ok) {
+            old.status = 'exiting'
+            const step2 = assertTransition('SM-MEM-001', old.status, 'exited', 'confirmed')
+            if (step2.ok) {
+              old.status = 'exited'
+              old.exitedAt = new Date().toISOString()
+            } else {
+              old.status = prevStatus
+            }
+          }
           // ORG-001/017：换届同步——旧任退出负责人职位 Group，新任加入
           const oldSync = orgdb.syncPositionMembership({ clubId: query.clubId, memberId: old.id, memberName: old.name, departmentName: pos?.departmentName ?? null, title: '负责人', active: false })
           if (!oldSync.ok && oldSync.error) t.syncFailures.push({ memberId: old.id, memberName: old.name, title: '负责人', active: false, error: oldSync.error })
@@ -2964,8 +2975,9 @@ response: ({ url }: { url: string }) => {
         return businessError('不能处理自己提交的纠错申请')
       }
       // SM-AUD-001：submitted/overdue 均可处置（overdue 可能由派生产生，未落库为 overdue）
-      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
+      const t = assertTransition('SM-AUD-001', deriveCorrectionStatus(record), approved ? 'approved' : 'rejected', approved ? 'approve' : 'reject')
+      if (!t.ok) return correctionStateConflict()
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
       record.decidedBy = user.name
@@ -2997,7 +3009,8 @@ response: ({ url }: { url: string }) => {
       }
       if (record.submitterName !== user.name) return forbidden()
       // SM-AUD-001：submitted/overdue 均可撤回
-      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
+      const t = assertTransition('SM-AUD-001', deriveCorrectionStatus(record), 'withdrawn', 'withdraw')
+      if (!t.ok) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
@@ -3063,8 +3076,9 @@ response: ({ url }: { url: string }) => {
         return businessError('不能处理自己提交的纠错申请')
       }
       // SM-AUD-001：submitted/overdue 均可处置
-      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
+      const t = assertTransition('SM-AUD-001', deriveCorrectionStatus(record), approved ? 'approved' : 'rejected', approved ? 'approve' : 'reject')
+      if (!t.ok) return correctionStateConflict()
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
       record.decidedBy = user.name
@@ -3096,7 +3110,8 @@ response: ({ url }: { url: string }) => {
       }
       if (record.submitterName !== user.name) return forbidden()
       // SM-AUD-001：submitted/overdue 均可撤回
-      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
+      const t = assertTransition('SM-AUD-001', deriveCorrectionStatus(record), 'withdrawn', 'withdraw')
+      if (!t.ok) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name
@@ -3977,8 +3992,9 @@ response: ({ url }: { url: string }) => {
         return businessError('不能处理自己提交的纠错申请')
       }
       // SM-AUD-001：submitted/overdue 均可处置
-      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
       const approved = body.input?.decision === 'approve'
+      const t = assertTransition('SM-AUD-001', deriveCorrectionStatus(record), approved ? 'approved' : 'rejected', approved ? 'approve' : 'reject')
+      if (!t.ok) return correctionStateConflict()
       const decidedAt = new Date().toISOString()
       record.status = approved ? 'approved' : 'rejected'
       record.decidedBy = user.name
@@ -4010,7 +4026,8 @@ response: ({ url }: { url: string }) => {
       }
       if (record.submitterName !== user.name) return forbidden()
       // SM-AUD-001：submitted/overdue 均可撤回
-      if (!isCorrectionActable({ ...record, status: deriveCorrectionStatus(record) })) return correctionStateConflict()
+      const t = assertTransition('SM-AUD-001', deriveCorrectionStatus(record), 'withdrawn', 'withdraw')
+      if (!t.ok) return correctionStateConflict()
       const withdrawnAt = new Date().toISOString()
       record.status = 'withdrawn'
       record.withdrawnBy = user.name

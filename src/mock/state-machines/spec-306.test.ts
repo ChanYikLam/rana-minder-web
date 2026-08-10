@@ -13,11 +13,11 @@ import {
 import { TRANSITIONS, assertTransition as assertExact, statesOf } from './transitions'
 import type { StateMachineId } from '@/types/machine'
 
-/** SRS 状态机转换明细 v1.0：29 个状态机、306 条转换规则 */
+/** SRS 状态机转换明细 v1.0：29 个状态机、306 条转换规则 + SM-MEM-005 辞职申请（P1-2 补充） */
 describe('状态机 spec-306 精确转换表', () => {
-  it('存在且仅存在 29 个状态机', () => {
-    expect(MACHINE_IDS.length).toBe(29)
-    expect(new Set(MACHINE_IDS).size).toBe(29)
+  it('存在且仅存在 30 个状态机', () => {
+    expect(MACHINE_IDS.length).toBe(30)
+    expect(new Set(MACHINE_IDS).size).toBe(30)
   })
 
   it('每个状态机都有中文名称与全局唯一状态集', () => {

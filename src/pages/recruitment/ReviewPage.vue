@@ -229,7 +229,7 @@ async function handlePublishAll() {
   submitting.value = false
   if (result.kind === 'completed') {
     publishSucceeded.value = true
-    reviews.value.forEach((r) => { if (r.status === 'concluded') r.status = 'published' })
+    await loadReviews()
   } else if (result.kind === 'accepted') {
     toastAcceptedAction('发布已受理，正在后台处理')
   } else {

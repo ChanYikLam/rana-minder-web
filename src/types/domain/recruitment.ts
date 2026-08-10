@@ -66,7 +66,6 @@ export type ApplicationStatus =
   | 'draft'
   | 'submitted'
   | 'revision_requested'
-  | 'revised'
   | 'exited'
   | 'adjustment_overdue'
   | 'identity_anomaly'
