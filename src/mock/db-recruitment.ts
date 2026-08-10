@@ -1715,6 +1715,14 @@ export function reissueRecInvitation(invitationId: string, expireDays: number): 
 export function confirmRecInvitationSync(invitationId: string): { ok: boolean; error?: string; data?: RecInvitation } {
   const inv = findInvitation(invitationId)
   if (!inv) return err('邀请不存在')
+  if (inv.status === 'sync_failed') {
+    // P2-3：同步失败后可重试（SM-INV-001 sync_failed --retry--> accepted），再走既有生效链路
+    const t = assertTransition('SM-INV-001', inv.status, 'accepted', 'retry')
+    if (!t.ok) return err(t.reason || '当前状态不可重试')
+    inv.status = 'accepted'
+    inv.casdoorSync = 'processing'
+    return confirmRecInvitationSync(invitationId)
+  }
   if (inv.status !== 'accepted') return err('仅已接受的邀请可执行成员同步确认')
   if (inv.casdoorSync === 'processing') {
     // 先创建成员再翻转同步状态：成员创建失败时保持 processing，可重试，避免卡在「已确认但无成员」中间态
