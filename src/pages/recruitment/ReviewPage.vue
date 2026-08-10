@@ -26,6 +26,7 @@ interface ReviewItem {
   comment: string; concludedAt: string | null; concludedBy: string | null
   reviewId: string | null
   myRating: number | null; myComment: string | null
+  myReviewVersion: number | null
   peerViewLocked: boolean
   reviews: PeerReview[]
 }
@@ -200,13 +201,16 @@ async function handleSubmitReview() {
   const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/${selected.value.applicantId}/conclude`, {
     rating: rating.value,
     comment: comment.value,
-  })
+  }, { expectedVersion: selected.value.myReviewVersion ?? undefined })
   submitting.value = false
   if (result.kind === 'completed') {
     toast.success('评价已提交')
     await loadReviews()
   } else if (result.kind === 'accepted') {
     toastAcceptedAction('评价已受理，正在后台处理')
+  } else if (result.kind === 'concurrency_conflict') {
+    toast.error('该评价已在其他窗口被修改，已刷新最新内容，请重新提交')
+    await loadReviews()
   } else {
     const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
     toast.error(message)
