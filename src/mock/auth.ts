@@ -496,16 +496,18 @@ const ROLE_HINTS: Record<MockRole['role'], string> = {
   applicant: '报名与查看邀请',
 }
 
-export const DEMO_ROLES: DemoRoleInfo[] = Object.entries(mockUsers).map(([key, u]) => {
-  const role = u.roles[0]?.role ?? 'applicant'
-  return {
-    key,
-    role,
-    label: ROLE_LABELS[role],
-    desc: u.roles[0]?.clubName ? `${ROLE_HINTS[role]} · ${u.roles[0].clubName}` : ROLE_HINTS[role],
-    badge: DEMO_BADGES[key],
-  }
-})
+export function getDemoRoles(): DemoRoleInfo[] {
+  return Object.entries(mockUsers).map(([key, u]) => {
+    const role = u.roles[0]?.role ?? 'applicant'
+    return {
+      key,
+      role,
+      label: ROLE_LABELS[role],
+      desc: u.roles[0]?.clubName ? `${ROLE_HINTS[role]} · ${u.roles[0].clubName}` : ROLE_HINTS[role],
+      badge: DEMO_BADGES[key],
+    }
+  })
+}
 
 export function clearMockSession(): void {
   activeMockUserKey = null
