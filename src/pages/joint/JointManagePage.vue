@@ -9,6 +9,7 @@ import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
+import { toDateTimeLocal, toIso } from '@/lib/date'
 import type { PageState } from '@/types/machine'
 import {
   Users, ChevronRight, ArrowLeft, Building2, Calendar, UserCheck,
@@ -34,7 +35,7 @@ const submitting = ref(false)
 // 管理操作
 const actionLoading = ref(false)
 const riskError = ref('')
-const newDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
+const newDeadline = ref(toDateTimeLocal(new Date(Date.now() + 7 * 86400000).toISOString()))
 const riskOpen = ref(false)
 const riskSucceeded = ref(false)
 
@@ -91,9 +92,20 @@ async function runAction(action: string, input?: Record<string, unknown>) {
 
 async function runChannel(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
+  // P2-32：截止时间必须为未来时间
+  const rawDeadline = input?.deadline as string | undefined
+  if (!rawDeadline || new Date(toIso(rawDeadline)).getTime() <= Date.now()) {
+    toast.error('截止时间必须晚于当前时间')
+    return
+  }
   actionLoading.value = true
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/joint/${detail.value.id}/channel`, { action, ...(input || {}) })
+  const body: Record<string, unknown> = { action, ...(input || {}) }
+  // P2-32：datetime-local → ISO 契约转换
+  if (typeof body.deadline === 'string' && body.deadline.includes('T') && !body.deadline.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(body.deadline)) {
+    body.deadline = toIso(body.deadline)
+  }
+  const result = await post(`/org/${clubId}/joint/${detail.value.id}/channel`, body)
   actionLoading.value = false
   if (result.kind === 'completed') {
     await loadDetail()
@@ -110,14 +122,28 @@ const canOpenChannel = computed(() => {
 const canCloseChannel = computed(() => detail.value?.channelStatus === 'open')
 
 // 名单调整
-const clubOptions = [
+// P2-30：参与社团名单从 /explore/clubs（真实数据）加载，静态名单仅作加载失败时的兜底，不再硬编码写死
+const staticClubOptions = [
   { id: 'club-001', name: '计算机协会' },
   { id: 'club-002', name: '电子设计协会' },
   { id: 'club-003', name: '数学建模协会' },
 ]
+const clubOptions = ref<{ id: string; name: string }[]>(staticClubOptions)
+
+async function loadClubOptions() {
+  const result = await get<{ items: { id: string; name: string }[] }>('/explore/clubs')
+  if (result.kind === 'completed' && Array.isArray(result.data?.items) && result.data.items.length > 0) {
+    clubOptions.value = result.data.items
+  }
+}
+
+// 创建模式可邀请的社团 = 真实名单除去当前工作空间社团
+const createClubOptions = computed(() =>
+  clubOptions.value.filter((c) => c.id !== (route.params.clubId as string)),
+)
 const adjustOpen = ref(false)
 const selectedClubs = ref<string[]>([])
-const newConfirmDeadline = ref(new Date(Date.now() + 7 * 86400000).toISOString())
+const newConfirmDeadline = ref(toDateTimeLocal(new Date(Date.now() + 7 * 86400000).toISOString()))
 
 async function openAdjust() {
   adjustOpen.value = true
@@ -126,11 +152,15 @@ async function openAdjust() {
 
 async function handleAdjust() {
   if (!detail.value || actionLoading.value) return
+  if (!newConfirmDeadline.value || new Date(toIso(newConfirmDeadline.value)).getTime() <= Date.now()) {
+    toast.error('确认截止时间必须晚于当前时间')
+    return
+  }
   actionLoading.value = true
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/joint/${detail.value.id}/clubs`, {
     clubIds: selectedClubs.value,
-    newDeadline: newConfirmDeadline.value,
+    newDeadline: toIso(newConfirmDeadline.value),
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
@@ -142,9 +172,20 @@ async function handleAdjust() {
 }
 
 async function handleCreate() {
+  // P2-31：创建页补齐"至少两个参与社团"校验（与调整名单口径一致）
+  if (form.value.participants.length < 2) {
+    toast.error('参与社团至少选择两个')
+    return
+  }
+  if (!form.value.deadline || new Date(toIso(form.value.deadline)).getTime() <= Date.now()) {
+    toast.error('报名截止时间必须晚于当前时间')
+    return
+  }
   submitting.value = true
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/joint`, form.value)
+  // P2-22：datetime-local 本地值转 ISO 契约后再提交
+  const payload = { ...form.value, deadline: toIso(form.value.deadline) }
+  const result = await post(`/org/${clubId}/joint`, payload)
   submitting.value = false
   if (result.kind === 'completed') {
     router.push(`/org/${clubId}/joint/${(result.data as { id: string }).id}`)
@@ -163,7 +204,10 @@ function formatDeadline(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
-onMounted(loadDetail)
+onMounted(() => {
+  loadClubOptions()
+  loadDetail()
+})
 </script>
 
 <template>
@@ -194,7 +238,7 @@ onMounted(loadDetail)
             <p class="text-xs text-text-secondary mb-2">邀请其他社团参与，各社团将独立进行评价和邀请</p>
             <div class="flex flex-wrap gap-2">
               <button
-                v-for="club in [{ id: 'club-002', name: '电子设计协会' }, { id: 'club-003', name: '数学建模协会' }]"
+                v-for="club in createClubOptions"
                 :key="club.id"
                 class="flex items-center gap-1 px-3 py-1.5 rounded-md border text-sm transition-colors"
                 :class="form.participants.includes(club.id) ? 'border-primary bg-primary-subtle text-primary' : 'border-border text-text-secondary hover:border-border-strong'"
@@ -314,11 +358,15 @@ onMounted(loadDetail)
                 {{ club.name }}
               </button>
             </div>
-            <input
-              v-model="newConfirmDeadline"
-              class="px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary mb-2"
-              placeholder="新的确认截止时间（ISO）"
-            />
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+              <label for="joint-confirm-deadline" class="text-xs text-text-secondary">新的确认截止时间</label>
+              <input
+                id="joint-confirm-deadline"
+                v-model="newConfirmDeadline"
+                type="datetime-local"
+                class="px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+              />
+            </div>
             <button
               class="px-4 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
               :disabled="actionLoading || selectedClubs.length < 2"
@@ -335,10 +383,12 @@ onMounted(loadDetail)
             </p>
             <div class="flex flex-wrap items-center gap-2">
               <template v-if="canOpenChannel">
+                <label for="joint-channel-deadline" class="text-xs text-text-secondary">新截止时间</label>
                 <input
+                  id="joint-channel-deadline"
                   v-model="newDeadline"
+                  type="datetime-local"
                   class="px-3 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
-                  placeholder="新截止时间"
                 />
                 <button
                   class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"

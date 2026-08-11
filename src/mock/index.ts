@@ -3420,7 +3420,7 @@ response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       const clubId = query.clubId
       if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
-      const type = body.input?.type || '成员名单'
+      const type = body.input?.type || 'members'
       const scope = exportScopeFor(user, clubId)
       // 先结算再判复用：超时的 generating 先落 failed，避免被误判为"进行中"而复用；同时 GC 掉过期任务，
       // 保证反复 POST 后数组有回落途径（MRM-009）

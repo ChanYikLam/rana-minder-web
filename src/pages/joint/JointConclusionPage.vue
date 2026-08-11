@@ -68,13 +68,9 @@ async function handleEvaluate() {
   })
   evaluating.value = false
   if (result.kind === 'completed') {
-    const item = conclusions.value.find((c) => c.id === selected.value!.id)
-    if (item) {
-      item.status = 'concluded'
-      item.rating = rating.value
-      item.comment = comment.value
-      item.concludedAt = new Date().toISOString()
-    }
+    // P2-38：原乐观更新仅刷新 status/rating/comment/concludedAt，history/versions/authorName 过期。
+    // 直接重载结论列表，保证评价历史/版本/作者与服务端一致。
+    await loadData()
     selected.value = null
     rating.value = 0
     comment.value = ''

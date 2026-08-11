@@ -59,6 +59,25 @@ const todoIcons: Record<string, typeof ClipboardList> = {
   invitation_pending: Mail,
 }
 
+// P2-56：待办按类型跳转正确页面（application_review → 部门入社审批，其余 → 招新管理）
+const todoLinks: Record<string, string> = {
+  application_review: `/org/${route.params.clubId}/members/department-apply`,
+  interview_schedule: `/org/${route.params.clubId}/recruitment`,
+  invitation_pending: `/org/${route.params.clubId}/recruitment`,
+}
+
+function todoLinkOf(todo: TodoItem): string {
+  return todoLinks[todo.type] ?? `/org/${route.params.clubId}/recruitment`
+}
+
+// P2-57：可点击 Card 键盘可达（Enter/Space 触发点击）
+function onCardKeydown(event: KeyboardEvent, link: string) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    router.push(link)
+  }
+}
+
 onMounted(loadDashboard)
 </script>
 
@@ -87,7 +106,7 @@ onMounted(loadDashboard)
 
       <!-- HR 指标 -->
       <div v-if="metrics" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <Card v-if="can('club:member:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/members/department-apply`)">
+        <Card v-if="can('club:member:manage')" padding="p-4" class="cursor-pointer" role="link" tabindex="0" :aria-label="`待审批申请 ${metrics.pendingReviews} 条`" @click="router.push(`/org/${route.params.clubId}/members/department-apply`)" @keydown="onCardKeydown($event, `/org/${route.params.clubId}/members/department-apply`)">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-primary-subtle text-primary"><ClipboardCheck :size="20" /></div>
             <div>
@@ -96,7 +115,7 @@ onMounted(loadDashboard)
             </div>
           </div>
         </Card>
-        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/recruitment`)">
+        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" role="link" tabindex="0" :aria-label="`待安排面试 ${metrics.pendingInterviews} 条`" @click="router.push(`/org/${route.params.clubId}/recruitment`)" @keydown="onCardKeydown($event, `/org/${route.params.clubId}/recruitment`)">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-warning-subtle text-warning"><CalendarClock :size="20" /></div>
             <div>
@@ -105,7 +124,7 @@ onMounted(loadDashboard)
             </div>
           </div>
         </Card>
-        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" @click="router.push(`/org/${route.params.clubId}/recruitment`)">
+        <Card v-if="can('club:recruitment:manage')" padding="p-4" class="cursor-pointer" role="link" tabindex="0" :aria-label="`待发布结果 ${metrics.pendingResults} 条`" @click="router.push(`/org/${route.params.clubId}/recruitment`)" @keydown="onCardKeydown($event, `/org/${route.params.clubId}/recruitment`)">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-success-subtle text-success"><Send :size="20" /></div>
             <div>
@@ -114,7 +133,7 @@ onMounted(loadDashboard)
             </div>
           </div>
         </Card>
-        <Card v-if="can('club:member:manage')" padding="p-4" class="cursor-pointer" :class="metrics.syncErrors > 0 ? 'border-danger' : ''" @click="router.push(`/org/${route.params.clubId}/members`)">
+        <Card v-if="can('club:member:manage')" padding="p-4" class="cursor-pointer" role="link" tabindex="0" :aria-label="`同步异常 ${metrics.syncErrors} 条`" :class="metrics.syncErrors > 0 ? 'border-danger' : ''" @click="router.push(`/org/${route.params.clubId}/members`)" @keydown="onCardKeydown($event, `/org/${route.params.clubId}/members`)">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-danger-subtle text-danger"><AlertTriangle :size="20" /></div>
             <div>
@@ -149,7 +168,11 @@ onMounted(loadDashboard)
           v-for="todo in visibleTodos"
           :key="todo.id"
           class="cursor-pointer"
-          @click="router.push(`/org/${route.params.clubId}/recruitment`)"
+          role="link"
+          tabindex="0"
+          :aria-label="`${todo.title} ${todo.count} 条`"
+          @click="router.push(todoLinkOf(todo))"
+          @keydown="onCardKeydown($event, todoLinkOf(todo))"
         >
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">

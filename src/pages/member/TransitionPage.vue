@@ -149,12 +149,14 @@ async function attemptExecute() {
 
 async function handleExecute(proof?: string) {
   if (!data.value?.canExecute) return
-  if (!executeReason.value.trim()) {
-    executeReasonError.value = '换届原因不能为空'
+  // P2-50：校验与占位符承诺一致（至少 5 字），trim 后计数
+  if (executeReason.value.trim().length < 5) {
+    executeReasonError.value = '换届原因至少 5 个字'
     return
   }
   if (!proof) {
-    executeReasonError.value = '身份验证失败，请重试'
+    // P2-50：身份验证失败属弹窗层错误，写入 executeError 而非原因输入框（语义错位修复）
+    executeError.value = '身份验证失败，请重试'
     return
   }
   executing.value = true
@@ -196,7 +198,9 @@ async function handleRetry() {
   executing.value = false
   if (r.kind === 'completed' && data.value) {
     data.value.results = r.data.results
-    toast.success('失败项已重试成功')
+    // P2-51：结果可能仍有 success=false，文案如实反映
+    const remaining = r.data.results.filter((x) => !x.success).length
+    toast.success(remaining === 0 ? '失败项已全部重试成功' : `重试完成，仍有 ${remaining} 项失败`)
   } else {
     toastError(r, '重试失败，请重试')
   }

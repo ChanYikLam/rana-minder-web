@@ -372,4 +372,15 @@ describe('DynamicForm array 字段', () => {
     expect(wrapper.text()).not.toContain('删除')
     expect((wrapper.find('input').element as HTMLInputElement).disabled).toBe(true)
   })
+
+  it('P2-9：legacy 无 _uid 行挂载时自动补齐稳定 key', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [arrayField, childField], modelValue: { arr: [{ c1: '旧数据' }] } },
+      global: { stubs: commonStubs },
+    })
+    const emitted = wrapper.emitted('update:modelValue')?.[0]![0] as { arr: Record<string, unknown>[] }
+    expect(emitted.arr).toHaveLength(1)
+    expect(typeof emitted.arr[0]._uid).toBe('string')
+    expect(emitted.arr[0].c1).toBe('旧数据')
+  })
 })

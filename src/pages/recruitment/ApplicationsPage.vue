@@ -201,8 +201,9 @@ onMounted(loadData)
                 <div v-if="app.status === 'exited'" class="flex flex-wrap items-center gap-2">
                   <input
                     v-model="deadlineInput[app.id]"
+                    type="datetime-local"
                     class="px-2 h-8 rounded-md border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
-                    placeholder="恢复窗口截止（ISO）"
+                    aria-label="恢复窗口截止时间"
                   />
                   <button
                     class="px-3 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
@@ -246,8 +247,9 @@ onMounted(loadData)
                   />
                   <input
                     v-model="deadlineInput[app.id]"
+                    type="datetime-local"
                     class="px-2 h-8 rounded-md border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
-                    placeholder="补充截止（ISO）"
+                    aria-label="补充截止时间"
                   />
                   <button
                     v-if="app.status === 'submitted'"

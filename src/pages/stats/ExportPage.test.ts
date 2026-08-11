@@ -33,7 +33,7 @@ const commonStubs = pageStubs
 
 const generatingTask = {
   id: 'exp-001',
-  type: '成员名单',
+  type: 'members',
   status: 'generating',
   createdAt: '2026-08-07T04:00:00Z',
   completedAt: null,
@@ -174,7 +174,7 @@ describe('ExportPage 任务列表与轮询', () => {
     mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
     mockPost.mockResolvedValueOnce({
       kind: 'completed',
-      data: { id: 'exp-002', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z', completedAt: '2026-08-07T04:00:05Z', expiredAt: null, downloadUrl: '/files/2.xlsx', fileSize: 1024 },
+      data: { id: 'exp-002', type: 'members', status: 'completed', createdAt: '2026-08-07T04:00:00Z', completedAt: '2026-08-07T04:00:05Z', expiredAt: null, downloadUrl: '/files/2.xlsx', fileSize: 1024 },
     })
 
     const wrapper = mountPage()
@@ -186,7 +186,7 @@ describe('ExportPage 任务列表与轮询', () => {
     await flushPromises()
     await nextTick()
 
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/exports', { type: '成员名单' })
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/exports', { type: 'members' })
     expect(toast.success).toHaveBeenCalledWith('导出已生成完成，可点击下载')
     // 任务插入列表并展示尺寸
     expect(wrapper.text()).toContain('成员名单')
@@ -200,12 +200,12 @@ describe('ExportPage 任务列表与轮询', () => {
     // 列表已有进行中任务 exp-005
     mockGet.mockResolvedValueOnce({
       kind: 'completed',
-      data: { items: [{ id: 'exp-005', type: '成员名单', status: 'generating', createdAt: '2026-08-07T04:00:00Z', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 }] },
+      data: { items: [{ id: 'exp-005', type: 'members', status: 'generating', createdAt: '2026-08-07T04:00:00Z', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 }] },
     })
     // 创建返回复用同一任务（同 id）——不应重复插入渲染
     mockPost.mockResolvedValueOnce({
       kind: 'completed',
-      data: { id: 'exp-005', type: '成员名单', status: 'generating', createdAt: '2026-08-07T04:00:00Z', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 },
+      data: { id: 'exp-005', type: 'members', status: 'generating', createdAt: '2026-08-07T04:00:00Z', completedAt: null, expiredAt: null, downloadUrl: null, fileSize: 0 },
     })
 
     const wrapper = mountPage()
@@ -257,7 +257,7 @@ describe('ExportPage 任务列表与轮询', () => {
 
   it('下载已完成任务：请求下载地址并提示开始下载', async () => {
     const completedTask = {
-      id: 'exp-003', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
+      id: 'exp-003', type: 'members', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
       completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-09-08T04:00:00Z',
       downloadUrl: '/files/3.xlsx', fileSize: 2048,
     }
@@ -293,7 +293,7 @@ describe('ExportPage 任务列表与轮询', () => {
 
   it('MRM-009：completed 任务 expiredAt 已过——前端拦截下载并提示重新导出', async () => {
     const expiredTask = {
-      id: 'exp-005', type: '成员名单', status: 'completed', createdAt: '2026-08-01T04:00:00Z',
+      id: 'exp-005', type: 'members', status: 'completed', createdAt: '2026-08-01T04:00:00Z',
       completedAt: '2026-08-01T04:01:00Z', expiredAt: '2026-08-02T04:00:00Z',
       downloadUrl: '/files/5.xlsx', fileSize: 2048,
     }
@@ -316,7 +316,7 @@ describe('ExportPage 任务列表与轮询', () => {
 
   it('下载：空原因被拦截', async () => {
     const completedTask = {
-      id: 'exp-004', type: '成员名单', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
+      id: 'exp-004', type: 'members', status: 'completed', createdAt: '2026-08-07T04:00:00Z',
       completedAt: '2026-08-07T04:01:00Z', expiredAt: '2026-09-08T04:00:00Z',
       downloadUrl: '/files/4.xlsx', fileSize: 2048,
     }

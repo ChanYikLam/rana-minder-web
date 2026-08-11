@@ -67,7 +67,8 @@ describe('InvitationPage 招新邀请', () => {
     expect(rejectBtn, '待处理邀请应渲染拒绝按钮').toBeTruthy()
     await rejectBtn!.trigger('click')
     await flushPromises()
-    expect(mockToastError).toHaveBeenCalledWith('操作失败，请稍后重试')
+    // P2-27：展示服务端 error.message（'x'）而非仅 fallback
+    expect(mockToastError).toHaveBeenCalledWith('x')
   })
 
   it('加载失败：不渲染详情', async () => {

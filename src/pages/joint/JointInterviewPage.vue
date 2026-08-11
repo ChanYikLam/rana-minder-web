@@ -44,12 +44,24 @@ async function loadData() {
 }
 
 async function loadOptions() {
+  // P2-36：加载失败不再静默--下拉为空时给出明确错误提示，而非误导"无数据"
+  optionsError.value = ''
   const [a, s] = await Promise.all([
     get<{ items: JointApp[] }>(`/org/${clubId.value}/joint/${jointId.value}/applications`),
     get<{ items: Slot[] }>(`/org/${clubId.value}/joint/${jointId.value}/slots`),
   ])
-  if (a.kind === 'completed') applications.value = a.data.items
-  if (s.kind === 'completed') slots.value = s.data.items
+  if (a.kind === 'completed') {
+    applications.value = a.data.items
+  } else {
+    optionsError.value = '申请人列表加载失败'
+    toast.error('申请人列表加载失败，请刷新重试')
+  }
+  if (s.kind === 'completed') {
+    slots.value = s.data.items
+  } else {
+    optionsError.value = optionsError.value ? `${optionsError.value}；面试时段加载失败` : '面试时段加载失败'
+    toast.error('面试时段加载失败，请刷新重试')
+  }
 }
 
 function formatTime(iso: string): string {
@@ -104,8 +116,13 @@ const candidates = ref<CandidateItem[]>([])
 const taskForm = ref<{ userId: string }>({ userId: '' })
 const taskError = ref('')
 const revokingTaskId = ref<string | null>(null)
+// P2-36：选项/面试官加载失败时的错误态（避免下拉静默为空）
+const optionsError = ref('')
+const interviewersError = ref('')
 
 async function loadInterviewers() {
+  // P2-36：加载失败不再静默
+  interviewersError.value = ''
   const [t, c] = await Promise.all([
     get<{ defaultReviewers: { id: string; name: string; source: string }[]; tasks: JointInterviewerTask[] }>(`/org/${clubId.value}/joint/${jointId.value}/interviewers`),
     get<{ items: CandidateItem[] }>(`/org/${clubId.value}/joint/${jointId.value}/interviewers/candidates`),
@@ -114,8 +131,16 @@ async function loadInterviewers() {
     // 防御：后端缺省字段时回落空数组，避免模板 .map 崩溃
     defaultReviewers.value = t.data.defaultReviewers ?? []
     jointTasks.value = t.data.tasks ?? []
+  } else {
+    interviewersError.value = '面试官任务加载失败'
+    toast.error('面试官任务加载失败，请刷新重试')
   }
-  if (c.kind === 'completed') candidates.value = c.data.items
+  if (c.kind === 'completed') {
+    candidates.value = c.data.items
+  } else {
+    interviewersError.value = interviewersError.value ? `${interviewersError.value}；候选成员加载失败` : '候选成员加载失败'
+    toast.error('候选成员加载失败，请刷新重试')
+  }
 }
 
 async function handleAssignTask() {
@@ -217,6 +242,9 @@ onMounted(async () => {
             </button>
           </div>
         </div>
+        <p v-if="optionsError" class="mt-2 text-xs text-destructive flex items-center gap-1">
+          <AlertTriangle :size="12" /> {{ optionsError }}
+        </p>
       </Card>
 
       <!-- 临时联合面试官任务（JNT-031/ORG-037） -->
@@ -236,6 +264,9 @@ onMounted(async () => {
           <div class="space-y-3 text-sm">
             <p class="text-xs text-text-secondary">
               默认面试官：{{ defaultReviewers.map((d) => d.name).join('、') || '无' }}。临时面试官须为本社团当前成员，撤销或联合活动结束即失效。
+            </p>
+            <p v-if="interviewersError" class="text-xs text-destructive flex items-center gap-1">
+              <AlertTriangle :size="12" /> {{ interviewersError }}
             </p>
 
             <div v-if="interviewerOpen" class="rounded-lg border border-border p-3 space-y-3">
@@ -288,6 +319,11 @@ onMounted(async () => {
       </PermissionGuard>
 
       <div class="grid gap-3">
+        <!-- P2-37：面试列表空态 -->
+        <Card v-if="interviews.length === 0" class="py-10 text-center">
+          <CalendarPlus :size="28" class="mx-auto text-text-secondary mb-2" />
+          <p class="text-sm text-text-secondary">暂无联合面试记录，可在上方为申请人预约面试</p>
+        </Card>
         <Card v-for="iv in interviews" :key="iv.id">
           <div class="flex items-start justify-between mb-3">
             <div>

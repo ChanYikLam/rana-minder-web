@@ -185,6 +185,11 @@ async function handleSendCode() {
   if (result.kind === 'completed') {
     codeSent.value = true
     startResendCountdown()
+  } else if (result.kind === 'rejected' && result.error) {
+    // P2-43：发送验证码失败不再静默
+    toast.error((result.error as { message?: string }).message || '验证码发送失败，请稍后重试')
+  } else {
+    toast.error('验证码发送失败，请稍后重试')
   }
 }
 
@@ -259,17 +264,22 @@ async function loadConflicts() {
 async function handleResolveConflicts() {
   if (conflictSubmitting.value) return
   conflictSubmitting.value = true
+  const resolvedLabels: string[] = []
   for (const f of conflictFields.value) {
     const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
     const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
     if (r.kind === 'rejected' && r.error) {
       conflictSubmitting.value = false
-      toastError(r, '冲突解决失败')
+      // P2-44：部分失败明确提示已生效字段，避免用户误以为全部失败或全部成功
+      toastError(r, resolvedLabels.length > 0
+        ? `冲突解决中断：${resolvedLabels.join('、')} 已生效，失败项：${(r.error as { message?: string }).message || '请重试'}`
+        : '冲突解决失败')
       // 逐条写回过程中途失败：已写回字段已生效，重新拉取冲突清单使页面与服务端状态对齐，
       // 避免已解决字段留在页面上被重复提交
       await loadConflicts()
       return
     }
+    resolvedLabels.push(f.label)
   }
   conflictSubmitting.value = false
   if (profile.value) {

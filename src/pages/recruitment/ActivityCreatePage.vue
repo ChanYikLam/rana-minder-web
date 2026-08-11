@@ -5,6 +5,8 @@ import { Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
+import { toastError } from '@/utils/toastError'
+import { toIso } from '@/lib/date'
 import { ArrowLeft, Plus, X, Save, FileText, Copy } from '@lucide/vue'
 
 const route = useRoute()
@@ -73,7 +75,9 @@ const steps = [
 async function handlePublish() {
   submitting.value = true
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/recruitment`, form)
+  // P2-22：datetime-local 本地值原样发送会破坏全仓 ISO 契约（时区偏移丢失），提交前转 ISO
+  const payload = { ...form, deadline: toIso(form.deadline) }
+  const result = await post(`/org/${clubId}/recruitment`, payload)
   submitting.value = false
   if (result.kind === 'completed') {
     toast.success('招新活动已创建并发布')
@@ -81,7 +85,8 @@ async function handlePublish() {
   } else if (result.kind === 'accepted') {
     toastAcceptedAction('发布已受理，正在后台处理')
   } else {
-    toast.error('发布失败，请稍后重试')
+    // P2-23：发布失败展示服务端 error.message
+    toastError(result, '发布失败，请稍后重试')
   }
 }
 </script>
@@ -169,7 +174,7 @@ async function handlePublish() {
           :class="form.formId === f.id ? 'border-primary bg-primary-subtle' : 'border-border hover:border-primary'"
           @click="selectForm(f.id)"
         >
-          <input type="radio" :checked="form.formId === f.id" class="accent-primary" :aria-label="`选择表单 ${f.title}`" @click="selectForm(f.id)" />
+          <input type="radio" name="form-select" :checked="form.formId === f.id" class="accent-primary" :aria-label="`选择表单 ${f.title}`" @click="selectForm(f.id)" />
           <div class="flex-1">
             <p class="text-sm font-medium text-text-primary">{{ f.title }}</p>
             <p class="text-xs text-text-secondary">{{ f.status === 'published' ? '已发布' : '草稿' }}</p>

@@ -50,6 +50,9 @@ async function handleRespond(action: 'accept' | 'reject') {
     }
   } else if (result.kind === 'accepted') {
     toastAcceptedAction(action === 'accept' ? '接受邀请已受理，正在后台处理' : '拒绝邀请已受理，正在后台处理')
+  } else if (result.kind === 'rejected' && result.error) {
+    // P2-27：展示服务端 error.message
+    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
   } else {
     toast.error('操作失败，请稍后重试')
   }

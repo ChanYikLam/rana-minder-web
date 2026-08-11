@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import FieldPermission from './FieldPermission.vue'
 import AttachmentUpload from './AttachmentUpload.vue'
 import DateTimePicker from './DateTimePicker.vue'
@@ -25,6 +25,29 @@ const emit = defineEmits<{
   'resolveConflict': []
   'migrateVersion': []
 }>()
+
+// P2-9：legacy 数组数据缺少 _uid 时一次性补齐稳定 key，
+// 避免删除中间项后 index key 错位导致 DOM/输入状态漂移
+function ensureArrayUids() {
+  let dirty = false
+  const next: DynamicFormValue = { ...props.modelValue }
+  for (const field of props.fields) {
+    if (field.type !== 'array') continue
+    const val = next[field.id]
+    if (!Array.isArray(val)) continue
+    next[field.id] = val.map((row: unknown) => {
+      const record = row as Record<string, unknown> | null
+      if (record && typeof record === 'object' && !record._uid) {
+        dirty = true
+        return { ...record, _uid: crypto.randomUUID() }
+      }
+      return row
+    })
+  }
+  if (dirty) emit('update:modelValue', next)
+}
+
+onMounted(ensureArrayUids)
 
 // P1-23：进行中状态改为纯 prop 驱动（resolvingConflict/migratingVersion），
 // 父级完成/取消后置 false 即复位；删除内部置位 ref，避免"刷新中/迁移中"永久停留

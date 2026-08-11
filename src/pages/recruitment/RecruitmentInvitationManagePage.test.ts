@@ -30,11 +30,13 @@ describe('RecruitmentInvitationManagePage 邀请管理', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
-  it('空列表：展示空态', async () => {
+  it('空列表：进入空态（不渲染列表卡片）', async () => {
     mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
     const wrapper = mount(RecruitmentInvitationManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
-    expect(wrapper.text()).toContain('暂无')
+    // P2-29：空态由 PageStateBoundary 统一承接（测试中 PageStateBoundary 被 stub，不渲染空态文案），
+    // 这里断言列表不渲染任何卡片，避免双空态并存
+    expect(wrapper.findAll('.card').length).toBe(0)
   })
 
   it('加载失败：不渲染列表', async () => {

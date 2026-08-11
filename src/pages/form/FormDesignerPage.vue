@@ -93,6 +93,34 @@ function selectField(id: string) {
   selectedFieldId.value = id
 }
 
+// P2-62：GripVertical 拖拽手柄 → 原生 HTML5 拖拽重排字段
+const dragIndex = ref<number | null>(null)
+
+function onDragStart(index: number, event: DragEvent) {
+  dragIndex.value = index
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(index))
+  }
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function onDrop(targetIndex: number, event: DragEvent) {
+  event.preventDefault()
+  const from = dragIndex.value
+  dragIndex.value = null
+  if (from === null || from === targetIndex) return
+  const next = [...fields.value]
+  const [moved] = next.splice(from, 1)
+  next.splice(targetIndex, 0, moved)
+  fields.value = next
+  dirty.value = true
+}
+
 function updateSelectedField(updates: Partial<Field>) {
   if (!selectedField.value) return
   const idx = fields.value.findIndex((f) => f.id === selectedField.value!.id)
@@ -299,6 +327,11 @@ onBeforeRouteLeave(() => {
               :key="field.id"
               class="flex items-center gap-2 rounded-lg border cursor-pointer p-3 hover:border-primary transition-colors"
               :class="selectedFieldId === field.id ? 'border-primary bg-primary-subtle' : 'border-border'"
+              :draggable="true"
+              @dragstart="onDragStart(index, $event)"
+              @dragover.prevent="onDragOver($event)"
+              @drop="onDrop(index, $event)"
+              @dragend="dragIndex = null"
               @click="selectField(field.id)"
             >
               <GripVertical :size="16" class="text-muted-foreground cursor-grab" />

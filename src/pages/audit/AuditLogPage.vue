@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import { PageStateBoundary, Card, EmptyState, Pagination } from '@/components/common'
 import { Timeline, type TimelineEntry } from '@/components/display'
 import { get } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
@@ -16,9 +16,19 @@ const route = useRoute()
 const state = ref<PageState>('loading')
 const items = ref<AuditLog[]>([])
 const searchKeyword = ref('')
+// P2-52：客户端分页（服务端暂返回全量），每页 20 条
+const PAGE_SIZE = 20
+const page = ref(1)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(items.value.length / PAGE_SIZE)))
+const pagedItems = computed(() => items.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+
+watch(page, (p) => {
+  if (p > totalPages.value) page.value = totalPages.value
+})
 
 const timelineItems = computed<TimelineEntry[]>(() =>
-  items.value.map((log) => ({
+  pagedItems.value.map((log) => ({
     id: log.id,
     time: log.createdAt,
     title: `${log.actorName} · ${log.action}`,
@@ -41,6 +51,7 @@ const { seq, schedule } = useDebouncedSearch({
     if (mySeq !== seq.value) return
     if (result.kind === 'completed') {
       items.value = (result as { kind: 'completed'; data: { items: AuditLog[] } }).data.items
+      page.value = 1
       state.value = 'normal'
     } else {
       // 失败时清空旧结果，避免残留误导（与 ClubManage/ClubAccessWizard 语义一致）
@@ -73,9 +84,12 @@ onMounted(() => schedule(searchKeyword.value))
 
       <EmptyState v-if="items.length === 0" type="no_result" title="未找到审计记录" />
 
-      <Card v-else class="p-4">
-        <Timeline :items="timelineItems" label="审计记录时间线" />
-      </Card>
+      <template v-else>
+        <Card class="p-4">
+          <Timeline :items="timelineItems" label="审计记录时间线" />
+        </Card>
+        <Pagination :page="page" :page-size="PAGE_SIZE" :total="items.length" @update:page="page = $event" />
+      </template>
     </div>
   </PageStateBoundary>
 </template>

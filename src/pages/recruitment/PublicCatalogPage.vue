@@ -7,6 +7,7 @@ import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
 import { Search, Users, Calendar, ChevronRight, Building2, Sparkles, Tag, History } from '@lucide/vue'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
+import { dayBoundaryIso } from '@/lib/date'
 
 interface Club { id: string; name: string; description: string; memberCount: number; logo: string | null; layer: SearchLayer }
 interface Activity {
@@ -49,8 +50,9 @@ function buildActivityParams(withClubs: boolean, kw: string): string {
     if (statusFilter.value !== 'all') params.set('status', statusFilter.value)
     if (deadlineRange.value !== 'all') params.set('range', deadlineRange.value)
     if (deadlineRange.value === 'custom') {
-      if (customFrom.value) params.set('deadlineFrom', new Date(customFrom.value).toISOString())
-      if (customTo.value) params.set('deadlineTo', new Date(customTo.value).toISOString())
+      // P2-17：date-only 按平台时区自然日边界转换，避免 UTC 换算导致截止日当天漏筛
+      if (customFrom.value) params.set('deadlineFrom', dayBoundaryIso(customFrom.value, false))
+      if (customTo.value) params.set('deadlineTo', dayBoundaryIso(customTo.value, true))
     }
   }
   return params.toString()
@@ -97,11 +99,11 @@ function switchTab(tab: 'activities' | 'clubs') {
   customTo.value = ''
   searchKeyword.value = ''
   // 真正切换 Tab 时直接以目标 Tab 默认参数发起一次全量查询，避免 watch(activeTab) 再触发一次空关键字冗余请求；
-  // 重复点击当前 Tab 仅重置筛选与关键字，不重复发请求
+  // 重复点击当前 Tab 时筛选已重置（watch 被 suppress），需显式重新查询，保证界面与数据一致（P2-16）
   if (activeTab.value !== tab) {
     suppressActiveTabWatch = true
-    schedule('')
   }
+  schedule('')
   router.push(tab === 'clubs' ? '/explore/clubs' : '/explore/activities')
 }
 
@@ -115,6 +117,14 @@ let suppressActiveTabWatch = false
 
 function openActivity(a: Activity) {
   router.push(a.type === 'joint' ? `/activity/joint/${a.id}` : `/activity/recruitment/${a.id}`)
+}
+
+// P2-26：可点击卡片键盘可达（Enter/Space 触发导航）
+function onCardKeydown(event: KeyboardEvent, a: Activity) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    openActivity(a)
+  }
 }
 
 function formatDeadline(iso: string): string {
@@ -244,7 +254,11 @@ onMounted(() => schedule(searchKeyword.value))
               v-for="act in directMatches"
               :key="act.id"
               class="cursor-pointer"
+              role="link"
+              tabindex="0"
+              :aria-label="`查看 ${act.title}`"
               @click="openActivity(act)"
+              @keydown="onCardKeydown($event, act)"
             >
               <div class="flex items-start justify-between mb-2">
                 <div>
@@ -283,7 +297,11 @@ onMounted(() => schedule(searchKeyword.value))
                 v-for="act in fuzzyMatches"
                 :key="act.id"
                 class="cursor-pointer border-dashed"
+                role="link"
+                tabindex="0"
+                :aria-label="`查看 ${act.title}`"
                 @click="openActivity(act)"
+                @keydown="onCardKeydown($event, act)"
               >
                 <div class="flex items-start justify-between mb-2">
                   <div>

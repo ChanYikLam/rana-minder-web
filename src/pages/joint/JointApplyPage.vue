@@ -204,6 +204,15 @@ function onPickDepartments(ids: string[]) {
 
 async function handleSubmit() {
   if (!showApplyForm.value) return
+  // P2-33：提交前校验通道状态与截止时间，暂停/未开放/已关闭/过期通道不可提交
+  if (detail.value?.channelStatus && detail.value.channelStatus !== 'open') {
+    toast.error(`${channelStatusMeta(detail.value.channelStatus).label}，暂不可提交`)
+    return
+  }
+  if (detail.value?.deadline && new Date(detail.value.deadline).getTime() <= Date.now()) {
+    toast.error('报名已截止，暂不可提交')
+    return
+  }
   formErrors.value = validateJointForm(formFields.value, formData.value)
   if (Object.keys(formErrors.value).length > 0) return
 

@@ -114,6 +114,10 @@ const canExecute = computed(() => {
   }
   if (isSelf.value) return false
   if (isLastLeader.value) return false
+  // P2-45：正式成员分支同样要求部门/职位非空，避免提交空 departmentId/title
+  if (action.value === 'appoint' || action.value === 'transfer') {
+    if (!targetDept.value || !targetTitle.value) return false
+  }
   if (isScheduled.value && !scheduledAt.value) return false
   return true
 })

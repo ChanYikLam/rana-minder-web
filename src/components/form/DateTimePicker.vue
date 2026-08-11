@@ -21,15 +21,30 @@ const today = new Date().toISOString().slice(0, 10)
 const datePart = computed(() => props.modelValue?.slice(0, 10) || '')
 const timePart = computed(() => props.modelValue?.slice(11, 16) || '')
 
-function toIso(date: string, time: string): string {
-  return `${date}T${time || '00:00'}:00+08:00`
+// P2-5：时区 prop 驱动 ISO 偏移，不再硬编码 +08:00；未识别时区按 UTC 处理
+const TZ_OFFSETS: Record<string, string> = {
+  'Asia/Shanghai': '+08:00',
+  'Asia/Tokyo': '+09:00',
+  'Asia/Kolkata': '+05:30',
+  UTC: '+00:00',
 }
 
+function offsetOf(tz: string): string {
+  return TZ_OFFSETS[tz] ?? '+00:00'
+}
+
+function toIso(date: string, time: string): string {
+  return `${date}T${time || '00:00'}:00${offsetOf(props.timezone)}`
+}
+
+// P2-5：清空日期/时间 → 发出空串（合法"未设置"态），不再拼非法 ISO / 回填 00:00
 function onDate(v: string) {
+  if (!v) { emit('update:modelValue', ''); return }
   emit('update:modelValue', toIso(v, timePart.value || '00:00'))
 }
 
 function onTime(v: string) {
+  if (!v) { emit('update:modelValue', ''); return }
   emit('update:modelValue', toIso(datePart.value || today, v))
 }
 </script>
