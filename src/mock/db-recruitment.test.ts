@@ -282,7 +282,7 @@ describe('联合评价提交链路（JNT-012 覆盖写保留修改历史）', ()
       expect(extra.history[0].updatedAt).toBeTruthy()
       expect(extra.history[0].updatedAt).not.toBe(oldConcludedAt)
       // 时间推进后再次修改：新 history 条目 updatedAt 为修改时刻，区别于上一条的 concludedAt
-      vi.setSystemTime(new Date(new Date(extra.history[0].concludedAt).getTime() + 60_000))
+      vi.setSystemTime(new Date(new Date(extra.history[0].concludedAt!).getTime() + 60_000))
       const extra2 = upsertJointReviewExtra('jnt-001', 'u-006', 'club-002', {
         rating: 4, comment: '再次修改', authorName: '林晓峰', authorRole: 'club_leader',
       })
