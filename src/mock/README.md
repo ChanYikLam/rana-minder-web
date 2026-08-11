@@ -20,7 +20,6 @@
 | `governance.ts` | 治理库 | 重认证 proof、13 类高风险命令、真实数据开关、OIDC 配置、异常访问 |
 | `reset.ts` | 测试重置 | 跨用例状态归位 |
 | `errors.ts` | 错误库 | `resolveMockError` / `mockErrorBody` / `MOCK_ERROR_HTTP` |
-| `pagination.ts` | 分页 | cursor 分页工具 |
 | `mock-plugin.ts`（根目录） | Vite 插件 | `localMockPlugin` 拦截 `/api/*`，路由匹配 + multipart 解析 |
 
 ## 对外接口
