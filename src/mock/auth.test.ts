@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { resolveMockUser, clearMockSession, getActiveMockUser, getPermissions } from './auth'
+import { resolveMockUser, clearMockSession, getActiveMockUser, getPermissions, getDemoRoles, mockUsers } from './auth'
+import type { MockUser } from './auth'
 
 describe('mock 登录角色解析（自锚定）', () => {
   beforeEach(() => {
@@ -48,5 +49,35 @@ describe('平台管理员权限位（admin 域端点鉴权前提）', () => {
     expect(getPermissions(resolveMockUser('/api/admin/clubs'), '').includes('platform:delete:execute')).toBe(false)
     resolveMockUser('/api/admin/clubs?_mock_user=leader')
     expect(getPermissions(resolveMockUser('/api/admin/clubs'), '').includes('platform:delete:execute')).toBe(false)
+  })
+})
+
+describe('MRM-022：getDemoRoles 动态读取运行期 mockUsers（非模块加载快照）', () => {
+  beforeEach(() => {
+    clearMockSession()
+  })
+
+  it('getDemoRoles 返回当前 mockUsers 的完整身份目录', () => {
+    const roles = getDemoRoles()
+    expect(roles.some((r) => r.key === 'leader')).toBe(true)
+    expect(roles.some((r) => r.key === 'incomplete')).toBe(true)
+    expect(roles.find((r) => r.key === 'leader')?.role).toBe('club_leader')
+  })
+
+  it('运行期替换 mockUsers 后 getDemoRoles 反映新状态（修复前为加载时快照，不更新）', () => {
+    const before = getDemoRoles().length
+    // 模拟运行期新增演示身份：写回 mockUsers 后，getDemoRoles 应随调用时读取到新身份
+    ;(mockUsers as Record<string, MockUser>)['extra-demo'] = {
+      ...mockUsers.member,
+      id: 'user-extra-001',
+      currentClubId: 'club-001',
+    }
+    try {
+      const roles = getDemoRoles()
+      expect(roles.length).toBe(before + 1)
+      expect(roles.some((r) => r.key === 'extra-demo')).toBe(true)
+    } finally {
+      delete (mockUsers as Record<string, MockUser>)['extra-demo']
+    }
   })
 })

@@ -4,7 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 import { authMode, startLogin } from '@/services/auth'
-import { DEMO_ROLES } from '@/mock/auth'
+import { getDemoRoles } from '@/mock/auth'
 import type { MockRole } from '@/mock/auth'
 import { resolveLoginTarget, parseSameOriginRedirect } from './loginTarget'
 import {
@@ -29,7 +29,7 @@ const roleIcons: Record<MockRole['role'], typeof ShieldCheck> = {
   applicant: GraduationCap,
 }
 
-const mockRoles = DEMO_ROLES.map((r) => ({ ...r, icon: roleIcons[r.role] }))
+const mockRoles = getDemoRoles().map((r) => ({ ...r, icon: roleIcons[r.role] }))
 
 function resolveTargetAfterLogin(): string {
   return resolveLoginTarget({
