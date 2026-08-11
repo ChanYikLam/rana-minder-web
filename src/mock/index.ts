@@ -616,7 +616,9 @@ function mergePathParams(handler: MockMethod): MockMethod {
   return {
     ...handler,
     response(request: { url: string; body: unknown; query: Record<string, string>; headers: Record<string, string> }) {
-      const query = { ...pathParamsFrom(request.url, pattern), ...request.query }
+      // 路径参数优先：与 mock-plugin 分发层（{ ...searchParams, ...matched.params }）方向一致，
+      // 避免两层合并顺序相反造成隐性契约风险（query 覆盖路径参数）。
+      const query = { ...request.query, ...pathParamsFrom(request.url, pattern) }
       return (original as (r: typeof request) => unknown)({ ...request, query })
     },
   }
