@@ -47,8 +47,13 @@ async function loadClubs() {
 async function switchClub(club: MyClub) {
   if (club.clubId === workspace.currentClubId) return
   switching.value = true
-  const ok = await workspace.loadWorkspace(club.clubId)
-  switching.value = false
+  // 评审 I4：异常时也要复位 switching，避免下拉按钮永久转圈
+  let ok: boolean
+  try {
+    ok = await workspace.loadWorkspace(club.clubId)
+  } finally {
+    switching.value = false
+  }
   if (!ok) return
   // 同步会话工作空间与权限集，避免 store 为 club-002、session 仍为 club-001 的双源不一致
   // memberId 与社团级权限按新社团上下文重新解析后整体写入（而非合并缺省字段），

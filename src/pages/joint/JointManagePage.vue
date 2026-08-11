@@ -92,11 +92,13 @@ async function runAction(action: string, input?: Record<string, unknown>) {
 
 async function runChannel(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
-  // P2-32：截止时间必须为未来时间
-  const rawDeadline = input?.deadline as string | undefined
-  if (!rawDeadline || new Date(toIso(rawDeadline)).getTime() <= Date.now()) {
-    toast.error('截止时间必须晚于当前时间')
-    return
+  // P2-32：仅开放/恢复通道需要携带截止时间，且必须为未来时间；暂停/关闭不校验
+  if (action === 'open' || action === 'resume') {
+    const rawDeadline = input?.deadline as string | undefined
+    if (!rawDeadline || new Date(toIso(rawDeadline)).getTime() <= Date.now()) {
+      toast.error('截止时间必须晚于当前时间')
+      return
+    }
   }
   actionLoading.value = true
   const clubId = route.params.clubId as string

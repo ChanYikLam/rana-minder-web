@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import DynamicForm from './DynamicForm.vue'
 import type { FormField } from '@/types/domain/form'
 
@@ -382,5 +382,30 @@ describe('DynamicForm array 字段', () => {
     expect(emitted.arr).toHaveLength(1)
     expect(typeof emitted.arr[0]._uid).toBe('string')
     expect(emitted.arr[0].c1).toBe('旧数据')
+  })
+
+  it('P2-9：挂载后异步回填的 legacy 数据同样补齐 _uid（评审 I1 回归）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [arrayField, childField], modelValue: { arr: [] } },
+      global: { stubs: commonStubs },
+    })
+    await wrapper.setProps({ modelValue: { arr: [{ c1: '回填数据' }] } })
+    await flushPromises()
+    const calls = wrapper.emitted('update:modelValue')
+    expect(calls).toBeDefined()
+    const emitted = calls![calls!.length - 1]![0] as { arr: Record<string, unknown>[] }
+    expect(emitted.arr).toHaveLength(1)
+    expect(typeof emitted.arr[0]._uid).toBe('string')
+    expect(emitted.arr[0].c1).toBe('回填数据')
+  })
+
+  it('P2-9：已带 _uid 的行重复回填不重复 emit（幂等）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [arrayField, childField], modelValue: { arr: [{ _uid: 'row-1', c1: 'a' }] } },
+      global: { stubs: commonStubs },
+    })
+    await wrapper.setProps({ modelValue: { arr: [{ _uid: 'row-1', c1: 'b' }] } })
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 })

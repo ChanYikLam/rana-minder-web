@@ -87,15 +87,19 @@ function resetLocalState() {
   revokingTaskId.value = null
 }
 
+// 评审 I3：请求序号防护，快速切换社团/活动时乱序返回的旧响应不覆盖新列表
+let loadSeq = 0
+
 watch([clubId, actId], async ([cid, aid], [oldCid, oldAid]) => {
   if (!cid || !aid) {
     state.value = 'error'
     return
   }
   if (oldCid !== undefined && (oldCid !== cid || oldAid !== aid)) resetLocalState()
-  await loadInterviews()
-  await loadBookOptions()
-  await loadInterviewers()
+  const seq = ++loadSeq
+  await loadInterviews(seq)
+  await loadBookOptions(seq)
+  await loadInterviewers(seq)
 }, { immediate: true })
 
 function validateParams(): boolean {
@@ -113,10 +117,11 @@ const columns = [
   { key: 'scheduledTime', label: '时间' },
 ]
 
-async function loadInterviews() {
+async function loadInterviews(seq = loadSeq) {
   state.value = 'loading'
   if (!validateParams()) return
   const result = await get<{ items: InterviewRow[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviews`)
+  if (seq !== loadSeq) return
   if (result.kind === 'completed') {
     items.value = result.data.items
     if (selected.value) {
@@ -126,12 +131,13 @@ async function loadInterviews() {
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
-async function loadBookOptions() {
+async function loadBookOptions(seq = loadSeq) {
   if (!validateParams()) return
   const [r, a] = await Promise.all([
     get<{ items: RoundItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/rounds`),
     get<{ items: AppItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/applications`),
   ])
+  if (seq !== loadSeq) return
   if (r.kind === 'completed') rounds.value = r.data.items
   if (a.kind === 'completed') applications.value = a.data.items
 }
@@ -274,12 +280,13 @@ function openCancelRound(roundId: string) {
   cancelRoundError.value = ''
 }
 
-async function loadInterviewers() {
+async function loadInterviewers(seq = loadSeq) {
   if (!validateParams()) return
   const [t, c] = await Promise.all([
     get<{ defaultReviewers: { id: string; name: string; source: string }[]; tasks: InterviewerTaskItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers`),
     get<{ items: CandidateItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/candidates`),
   ])
+  if (seq !== loadSeq) return
   if (t.kind === 'completed') {
     // 防御：后端缺省字段时回落空数组，避免模板 .map 崩溃
     defaultReviewers.value = t.data.defaultReviewers ?? []

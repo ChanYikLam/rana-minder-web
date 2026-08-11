@@ -7,6 +7,7 @@ import { useNotificationViewStore } from '@/state/notificationViewStore'
 import { errorToPageState } from '@/services/error-map'
 import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
+import { toast } from 'vue-sonner'
 import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
 
 const notifStore = useNotificationViewStore()
@@ -101,6 +102,7 @@ async function handleMarkAllRead() {
     // 不整页 loading：保留列表可见，仅按钮局部禁用
     const code = await notifStore.markAllRead()
     if (code) {
+      toast.error('标记已读失败，请稍后重试')
       console.error('标记已读失败:', code)
     }
   } finally {

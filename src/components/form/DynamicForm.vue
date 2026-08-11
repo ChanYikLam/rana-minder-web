@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import FieldPermission from './FieldPermission.vue'
 import AttachmentUpload from './AttachmentUpload.vue'
 import DateTimePicker from './DateTimePicker.vue'
@@ -48,6 +48,9 @@ function ensureArrayUids() {
 }
 
 onMounted(ensureArrayUids)
+// 消费方通常在表单已挂载后才异步回填数据（如活动详情、历史版本），
+// 仅挂载时补齐会漏掉这些路径，需深度监听模型变化
+watch(() => props.modelValue, ensureArrayUids, { deep: true })
 
 // P1-23：进行中状态改为纯 prop 驱动（resolvingConflict/migratingVersion），
 // 父级完成/取消后置 false 即复位；删除内部置位 ref，避免"刷新中/迁移中"永久停留

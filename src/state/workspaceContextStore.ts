@@ -53,23 +53,27 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     }
 
     loading.value = true
-    const result = await organizationApi.getContext(clubId)
-    loading.value = false
+    // 评审 I4：异常时也要复位 loading，避免切社团转圈卡死
+    try {
+      const result = await organizationApi.getContext(clubId)
 
-    if (result.kind !== 'completed') {
-      clearWorkspace()
-      return false
+      if (result.kind !== 'completed') {
+        clearWorkspace()
+        return false
+      }
+
+      setWorkspace(
+        result.data.clubId,
+        result.data.clubName,
+        result.data.role,
+        result.data.permissions,
+        session.user?.id ?? null,
+        result.data.memberId ?? null,
+      )
+      return true
+    } finally {
+      loading.value = false
     }
-
-    setWorkspace(
-      result.data.clubId,
-      result.data.clubName,
-      result.data.role,
-      result.data.permissions,
-      session.user?.id ?? null,
-      result.data.memberId ?? null,
-    )
-    return true
   }
 
   function clearWorkspace() {
