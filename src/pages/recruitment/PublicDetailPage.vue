@@ -6,7 +6,7 @@ import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
-import { Calendar, Building2, ArrowLeft, Users, FileText, ChevronRight } from '@lucide/vue'
+import { Calendar, Building2, ArrowLeft, Users, FileText } from '@lucide/vue'
 
 interface ActivityDetail {
   id: string; clubId: string; clubName: string; title: string
@@ -78,10 +78,9 @@ onMounted(loadDetail)
           <div
             v-for="dept in detail.departments"
             :key="dept.id"
-            class="flex items-center justify-between rounded-lg border border-border p-3 hover:border-border-strong transition-colors"
+            class="flex items-center justify-between rounded-lg border border-border p-3"
           >
             <span class="text-sm text-text-primary">{{ dept.name }}</span>
-            <ChevronRight :size="16" class="text-text-secondary" />
           </div>
         </div>
       </Card>

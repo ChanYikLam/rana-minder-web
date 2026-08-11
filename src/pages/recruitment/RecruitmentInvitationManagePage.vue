@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Mail } from '@lucide/vue'
-import { Card, EmptyState, PageStateBoundary } from '@/components/common'
+import { Card, PageStateBoundary } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
@@ -32,6 +32,13 @@ async function loadData() {
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
+// P2-29：过期时间格式化为可读文案，不再直接渲染原始 ISO
+function formatDeadline(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 onMounted(loadData)
 </script>
 
@@ -39,14 +46,13 @@ onMounted(loadData)
   <PageStateBoundary :state="state" title="录取邀请管理" @retry="loadData">
     <div class="mx-auto max-w-2xl">
       <h1 class="mb-6 text-2xl font-bold text-text-primary">录取邀请管理</h1>
-      <EmptyState v-if="items.length === 0" type="no_data" title="暂无录取邀请" />
-      <div v-else class="space-y-3">
+      <div v-if="items.length > 0" class="space-y-3">
         <Card v-for="item in items" :key="item.id">
           <div class="flex items-center gap-3">
             <Mail :size="20" class="text-primary" />
             <div>
               <p class="text-sm font-medium text-text-primary">{{ item.applicantName }}</p>
-              <p class="text-xs text-text-secondary">{{ item.departmentName }} · 截止 {{ item.expiredAt }}</p>
+              <p class="text-xs text-text-secondary">{{ item.departmentName }} · 截止 {{ formatDeadline(item.expiredAt) }}</p>
             </div>
             <StateTag class="ml-auto" :status="item.status" />
           </div>

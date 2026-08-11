@@ -16,6 +16,8 @@ const props = defineProps<{
   results: SearchResult[]
   loading?: boolean
   placeholder?: string
+  emptyText?: string
+  failed?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -77,6 +79,13 @@ onUnmounted(() => {
       role="listbox"
     >
       <p v-if="props.loading" class="px-3 py-3 text-sm text-text-secondary">搜索中...</p>
+      <p
+        v-else-if="props.modelValue && !props.failed && props.results.length === 0"
+        class="px-3 py-3 text-sm text-text-secondary"
+        role="status"
+      >
+        {{ props.emptyText || '未找到匹配结果' }}
+      </p>
       <template v-for="[group, items] in grouped" :key="group">
         <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">{{ group }}</p>
         <button

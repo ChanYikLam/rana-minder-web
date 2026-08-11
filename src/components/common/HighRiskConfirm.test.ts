@@ -94,6 +94,21 @@ describe('HighRiskConfirm 高风险确认', () => {
     expect(wrapper.emitted('confirm')?.[0]).toEqual(['proof-1'])
   })
 
+  it('重认证进行中：重复触发不再并发提交（reauthBusy 守卫）', async () => {
+    let resolvePost: (v: unknown) => void = () => {}
+    mockPost.mockImplementation(() => new Promise((r) => { resolvePost = r }))
+    const wrapper = mountDialog({ reauthRequired: true })
+    await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
+    await wrapper.find('input[type="password"]').setValue('secret')
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('验证并执行'))!
+    await confirmBtn.trigger('click')
+    await confirmBtn.trigger('click')
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    resolvePost({ kind: 'completed', data: { proof: 'proof-1' } })
+    await flushPromises()
+    expect(wrapper.emitted('confirm')?.[0]).toEqual(['proof-1'])
+  })
+
   it('重认证失败：展示服务端 fieldErrors', async () => {
     mockPost.mockResolvedValue({
       kind: 'rejected',

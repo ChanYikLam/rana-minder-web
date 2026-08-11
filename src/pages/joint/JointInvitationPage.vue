@@ -7,7 +7,7 @@ import { get, post } from '@/services/client'
 import { toast } from 'vue-sonner'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
 import type { PageState } from '@/types/machine'
-import { CheckCircle2, XCircle, Clock, Mail, ArrowLeft } from '@lucide/vue'
+import { CheckCircle2, XCircle, Clock, Mail, ArrowLeft, AlertTriangle } from '@lucide/vue'
 
 interface JointInvitationDetail {
   id: string; jointId: string; jointTitle: string
@@ -184,6 +184,15 @@ onMounted(loadDetail)
           <p class="text-sm font-medium">正在同步至统一身份认证...</p>
         </div>
         <p class="text-xs text-text-secondary mt-1">同步完成后权限将自动生效</p>
+      </Card>
+
+      <!-- P2-40：未知状态（如 withdrawn）兜底提示，避免页面空白无反馈 -->
+      <Card v-else>
+        <div class="flex items-center gap-2 text-text-secondary">
+          <AlertTriangle :size="20" />
+          <p class="text-sm font-medium">邀请状态异常（{{ detail.status }}）</p>
+        </div>
+        <p class="text-xs text-text-secondary mt-1">该邀请当前状态无法识别，请联系管理员或稍后刷新重试。</p>
       </Card>
     </div>
   </PageStateBoundary>

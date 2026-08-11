@@ -7,7 +7,8 @@ import { get, post } from '@/services/client'
 import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
 import { toast } from 'vue-sonner'
 import { toastError } from '@/utils/toastError'
-import { useSessionViewStore } from '@/state/sessionViewStore'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
+import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import type { PageState } from '@/types/machine'
 import { ArrowRightLeft, Plus, AlertTriangle, RefreshCw } from '@lucide/vue'
 
@@ -22,7 +23,7 @@ interface DeptApply {
 interface Dept { id: string; name: string }
 
 const route = useRoute()
-const session = useSessionViewStore()
+const workspace = useWorkspaceContextStore()
 const state = ref<PageState>('loading')
 const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
 const items = ref<DeptApply[]>([])
@@ -68,8 +69,9 @@ function formatDate(iso: string): string {
 }
 
 // 自审拦截：申请人不能审批自己的申请 + 前端权限校验
+// P2-47：与 MemberExitPage 等组织页统一使用 workspace 权限来源（工厂/社团上下文一致）
 function canApprove(item: DeptApply): boolean {
-  return item.applicantId !== session.workspace?.memberId && session.hasPermission('club:member:manage')
+  return item.applicantId !== workspace.currentMemberId && workspace.hasPermission('club:member:manage')
 }
 
 function startReject(id: string) {
@@ -135,6 +137,8 @@ async function handleWithdraw(id: string) {
   if (r.kind === 'completed') {
     toast.success('申请已撤回')
     await loadData()
+  } else if (r.kind === 'accepted') {
+    toastAcceptedAction('撤回已受理，正在后台处理')
   } else if (r.kind === 'rejected' && r.error) {
     toastError(r, '撤回失败')
   }
@@ -217,7 +221,7 @@ onMounted(loadData)
               <button class="px-3 py-1.5 rounded-md border border-danger text-danger text-xs hover:bg-danger-subtle" :disabled="actingId === item.id" @click="startReject(item.id)">驳回</button>
             </template>
             <button
-              v-if="item.applicantId === session.workspace?.memberId"
+              v-if="item.applicantId === workspace.currentMemberId"
               class="px-3 py-1.5 rounded-md border border-border text-text-secondary text-xs hover:border-danger hover:text-danger"
               :disabled="actingId === item.id"
               @click="handleWithdraw(item.id)"

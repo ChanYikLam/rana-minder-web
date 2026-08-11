@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import DynamicForm from './DynamicForm.vue'
 import type { FormField } from '@/types/domain/form'
 
@@ -35,8 +35,23 @@ describe('DynamicForm multi_select 契约', () => {
       },
     })
     const options = wrapper.find('select').findAll('option')
-    expect(options[1].attributes('selected')).toBeDefined()
-    expect(options[2].attributes('selected')).toBeUndefined()
+    // P2-8：选中态由 select :value 响应式驱动，而非 option :selected 一次性属性
+    expect((options[1].element as HTMLOptionElement).selected).toBe(true)
+    expect((options[2].element as HTMLOptionElement).selected).toBe(false)
+  })
+
+  it('外部重置模型后选中态同步（:value 响应式而非 option :selected）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: {
+        fields: [field({ id: 'ms', type: 'multi_select' })],
+        modelValue: { ms: ['A'] },
+      },
+    })
+    expect((wrapper.find('select').element as HTMLSelectElement).selectedOptions.length).toBe(1)
+    await wrapper.setProps({ modelValue: { ms: ['C'] } })
+    const options = wrapper.find('select').findAll('option')
+    expect((options[3].element as HTMLOptionElement).selected).toBe(true)
+    expect((options[1].element as HTMLOptionElement).selected).toBe(false)
   })
 
   it('多选 change 提交 string[]，未选提交 []（空值语义与 schema 对齐）', async () => {
@@ -270,6 +285,32 @@ describe('DynamicForm 版本横幅', () => {
     expect(btn.text()).toContain('刷新中...')
     expect(btn.attributes('disabled')).toBeDefined()
   })
+
+  it('P1-23：prop 置回 false 后按钮复位可用（不再永久"刷新中/迁移中"）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [], modelValue: {}, versionConflict: true, resolvingConflict: true },
+      global: { stubs: commonStubs },
+    })
+    expect(wrapper.find('button').text()).toContain('刷新中...')
+    await wrapper.setProps({ resolvingConflict: false })
+    const btn = wrapper.find('button')
+    expect(btn.text()).toContain('刷新数据')
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
+
+  it('P1-23：不传 prop 时点击不产生内部置位残留，可重复触发', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [], modelValue: {}, versionConflict: true },
+      global: { stubs: commonStubs },
+    })
+    const btn = wrapper.find('button')
+    await btn.trigger('click')
+    await btn.trigger('click')
+    expect(wrapper.emitted('resolveConflict')).toHaveLength(2)
+    // 按钮文案/可用性不因点击而停留
+    expect(btn.text()).toContain('刷新数据')
+    expect(btn.attributes('disabled')).toBeUndefined()
+  })
 })
 
 describe('DynamicForm array 字段', () => {
@@ -330,5 +371,41 @@ describe('DynamicForm array 字段', () => {
     expect(wrapper.text()).not.toContain('添加')
     expect(wrapper.text()).not.toContain('删除')
     expect((wrapper.find('input').element as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('P2-9：legacy 无 _uid 行挂载时自动补齐稳定 key', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [arrayField, childField], modelValue: { arr: [{ c1: '旧数据' }] } },
+      global: { stubs: commonStubs },
+    })
+    const emitted = wrapper.emitted('update:modelValue')?.[0]![0] as { arr: Record<string, unknown>[] }
+    expect(emitted.arr).toHaveLength(1)
+    expect(typeof emitted.arr[0]._uid).toBe('string')
+    expect(emitted.arr[0].c1).toBe('旧数据')
+  })
+
+  it('P2-9：挂载后异步回填的 legacy 数据同样补齐 _uid（评审 I1 回归）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [arrayField, childField], modelValue: { arr: [] } },
+      global: { stubs: commonStubs },
+    })
+    await wrapper.setProps({ modelValue: { arr: [{ c1: '回填数据' }] } })
+    await flushPromises()
+    const calls = wrapper.emitted('update:modelValue')
+    expect(calls).toBeDefined()
+    const emitted = calls![calls!.length - 1]![0] as { arr: Record<string, unknown>[] }
+    expect(emitted.arr).toHaveLength(1)
+    expect(typeof emitted.arr[0]._uid).toBe('string')
+    expect(emitted.arr[0].c1).toBe('回填数据')
+  })
+
+  it('P2-9：已带 _uid 的行重复回填不重复 emit（幂等）', async () => {
+    const wrapper = mount(DynamicForm, {
+      props: { fields: [arrayField, childField], modelValue: { arr: [{ _uid: 'row-1', c1: 'a' }] } },
+      global: { stubs: commonStubs },
+    })
+    await wrapper.setProps({ modelValue: { arr: [{ _uid: 'row-1', c1: 'b' }] } })
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 })

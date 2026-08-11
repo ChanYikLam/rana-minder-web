@@ -46,4 +46,17 @@ describe('PersonalCenterPage 个人中心', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('待处理评审')
   })
+
+  it('P2-42：非激活 tab 失败不拖垮整页', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [{ id: 't1', type: 'review', title: '待处理评审', description: '有 3 条待评审', deadline: '2026-08-10T00:00:00Z', link: '/x' }] } })
+    // 第 2 个请求（/me/ongoing）失败，但当前激活 tab 是 todo
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ id: 't1', type: 'review', title: '待处理评审', description: '有 3 条待评审', deadline: '2026-08-10T00:00:00Z', link: '/x' }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    const wrapper = mount(PersonalCenterPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    // 当前 tab（todo）数据正常，页面仍渲染
+    expect(wrapper.text()).toContain('待处理评审')
+  })
 })

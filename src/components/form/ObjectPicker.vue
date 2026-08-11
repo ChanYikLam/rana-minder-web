@@ -40,7 +40,7 @@ const filtered = computed(() => {
   return props.groups
     .map((group) => ({
       ...group,
-      items: group.items.filter((it) => isSubsequence(normalized(it.label + it.subtitle || ''), q)),
+      items: group.items.filter((it) => isSubsequence(normalized(`${it.label}${it.subtitle ? ` ${it.subtitle}` : ''}`), q)),
     }))
     .filter((group) => group.items.length > 0)
 })

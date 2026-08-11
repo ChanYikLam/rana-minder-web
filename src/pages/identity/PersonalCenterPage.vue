@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get, post } from '@/services/client'
-import { errorToPageState, errorCodeOf } from '@/services/error-map'
+import { errorToPageState, errorCodeOf, type ErrorCode } from '@/services/error-map'
+import type { ApiResult } from '@/types/contracts'
 import { toast } from 'vue-sonner'
 import { navigateByLink } from '@/router/safeLink'
 import type { PageState } from '@/types/machine'
@@ -18,8 +19,6 @@ type TabKey = 'todo' | 'ongoing' | 'history' | 'schedule'
 
 const route = useRoute()
 const router = useRouter()
-
-const activeTab = computed<TabKey>(() => (route.meta.tab as TabKey) || 'todo')
 
 const tabs: { key: TabKey; label: string; icon: typeof ClipboardList }[] = [
   { key: 'todo', label: '待我处理', icon: ClipboardList },
@@ -36,27 +35,46 @@ const schedule = ref<ScheduleItem[]>([])
 const confirmingId = ref<string | null>(null)
 const withdrawing = ref(false)
 
+// P2-42：各 tab 数据独立加载，单点失败不再拖垮整页；
+// 页面整体状态由当前激活 tab 决定，其余 tab 失败仅记录，切到该 tab 时再呈现错误
+const tabErrors = ref<Partial<Record<TabKey, ErrorCode>>>({})
+
+const activeTab = computed<TabKey>(() => (route.meta.tab as TabKey) || 'todo')
+
 async function loadData() {
   state.value = 'loading'
-  const [todoRes, ongoingRes, historyRes, scheduleRes] = await Promise.all([
+  const [todoRes, ongoingRes, historyRes, scheduleRes] = await Promise.allSettled([
     get<{ items: TodoItem[] }>('/me/todo'),
     get<{ items: OngoingItem[] }>('/me/ongoing'),
     get<{ items: HistoryItem[] }>('/me/history'),
     get<{ items: ScheduleItem[] }>('/me/schedule'),
   ])
 
-  const allCompleted = [todoRes, ongoingRes, historyRes, scheduleRes].every((r) => r.kind === 'completed')
-  if (allCompleted) {
-    todos.value = (todoRes as { kind: 'completed'; data: { items: TodoItem[] } }).data.items
-    ongoing.value = (ongoingRes as { kind: 'completed'; data: { items: OngoingItem[] } }).data.items
-    history.value = (historyRes as { kind: 'completed'; data: { items: HistoryItem[] } }).data.items
-    schedule.value = (scheduleRes as { kind: 'completed'; data: { items: ScheduleItem[] } }).data.items
-    state.value = 'normal'
-  } else {
-    // P3-3：取首个失败请求的错误码（任一失败即整页失败，任一失败结果都能代表本次失败）
-    const failed = [todoRes, ongoingRes, historyRes, scheduleRes].find((r) => r.kind !== 'completed')!
-    state.value = errorToPageState(errorCodeOf(failed))
+  // P2-42：各 tab 独立处理；请求本身不抛异常（rejected 结果），allSettled 兜底网络层异常
+  const rejected = (msg: string): ApiResult<unknown> => ({
+    kind: 'rejected', error: { code: 'IFC-ERR-016', message: msg },
+  })
+  const normalized: ApiResult<unknown>[] = [todoRes, ongoingRes, historyRes, scheduleRes].map((r) =>
+    r.status === 'fulfilled' ? r.value : rejected('加载失败'),
+  )
+  const [todoR, ongoingR, historyR, scheduleR] = normalized
+
+  if (todoR.kind === 'completed') todos.value = (todoR.data as { items: TodoItem[] }).items
+  if (ongoingR.kind === 'completed') ongoing.value = (ongoingR.data as { items: OngoingItem[] }).items
+  if (historyR.kind === 'completed') history.value = (historyR.data as { items: HistoryItem[] }).items
+  if (scheduleR.kind === 'completed') schedule.value = (scheduleR.data as { items: ScheduleItem[] }).items
+
+  const store = (key: TabKey, r: ApiResult<unknown>) => {
+    if (r.kind === 'rejected') tabErrors.value[key] = errorCodeOf(r)
+    else delete tabErrors.value[key]
   }
+  store('todo', todoR)
+  store('ongoing', ongoingR)
+  store('history', historyR)
+  store('schedule', scheduleR)
+
+  // 当前激活 tab 失败才整页错误，其余 tab 的失败不影响整页
+  state.value = tabErrors.value[activeTab.value] ? errorToPageState(tabErrors.value[activeTab.value]!) : 'normal'
 }
 
 async function handleWithdraw(item: OngoingItem) {
@@ -95,6 +113,12 @@ function formatTime(iso: string): string {
 function isOverdue(deadline: string): boolean {
   return new Date(deadline).getTime() < Date.now()
 }
+
+// P2-42：切换 tab 时按该 tab 的加载结果刷新整页状态
+watch(activeTab, (key) => {
+  if (state.value === 'loading') return
+  state.value = tabErrors.value[key] ? errorToPageState(tabErrors.value[key]!) : 'normal'
+})
 
 onMounted(loadData)
 </script>

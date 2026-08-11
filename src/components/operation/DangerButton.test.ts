@@ -4,10 +4,22 @@ import DangerButton from './DangerButton.vue'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 describe('DangerButton 危险操作按钮', () => {
-  it('无确认标题：直接 emit confirm', async () => {
+  it('无确认标题：默认确认文案，拒绝时不 emit（P2-4）', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
     const wrapper = mount(DangerButton, { props: { label: '删除' }, global: { stubs: pageStubs } })
     await wrapper.findAll('button').find((b) => b.text().includes('删除'))!.trigger('click')
+    expect(wrapper.emitted('confirm')).toBeUndefined()
+    vi.unstubAllGlobals()
+  })
+
+  it('无确认标题：确认通过时 emit', async () => {
+    const confirmSpy = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmSpy)
+    const wrapper = mount(DangerButton, { props: { label: '删除' }, global: { stubs: pageStubs } })
+    await wrapper.findAll('button').find((b) => b.text().includes('删除'))!.trigger('click')
+    expect(confirmSpy).toHaveBeenCalledWith('确认要执行「执行危险操作」吗？')
     expect(wrapper.emitted('confirm')).toHaveLength(1)
+    vi.unstubAllGlobals()
   })
 
   it('disabled：不 emit', async () => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get, post } from '@/services/client'
 import { errorToPageState, errorCodeOf } from '@/services/error-map'
@@ -23,6 +23,10 @@ const selectedFieldId = ref<string | null>(null)
 const saving = ref(false)
 const previewOpen = ref(false)
 const publishing = ref(false)
+
+// P1-17：未保存更改追踪——任何字段变更置 dirty，保存/发布成功或重载后复位
+const dirty = ref(false)
+let fieldIdSeq = 0
 
 const selectedField = computed(() => {
   if (!selectedFieldId.value) return null
@@ -63,26 +67,58 @@ async function loadData() {
     formId.value = result.data.id || id
     formStatus.value = result.data.status || 'draft'
     currentVersion.value = typeof result.data.version === 'number' ? result.data.version : 1
+    dirty.value = false
     state.value = 'normal'
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
 function addField(type: string) {
   const newField: Field = {
-    id: `f-${Date.now()}`, type, label: '新字段', required: false, readonly: false,
+    // P2-62：同毫秒 Date.now() 可能冲突，追加自增序号保证唯一
+    id: `f-${Date.now()}-${++fieldIdSeq}`, type, label: '新字段', required: false, readonly: false,
     permission: 'read_write', options: null, description: null,
   }
   fields.value.push(newField)
   selectedFieldId.value = newField.id
+  dirty.value = true
 }
 
 function removeField(id: string) {
   fields.value = fields.value.filter((f) => f.id !== id)
   if (selectedFieldId.value === id) selectedFieldId.value = null
+  dirty.value = true
 }
 
 function selectField(id: string) {
   selectedFieldId.value = id
+}
+
+// P2-62：GripVertical 拖拽手柄 → 原生 HTML5 拖拽重排字段
+const dragIndex = ref<number | null>(null)
+
+function onDragStart(index: number, event: DragEvent) {
+  dragIndex.value = index
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', String(index))
+  }
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function onDrop(targetIndex: number, event: DragEvent) {
+  event.preventDefault()
+  const from = dragIndex.value
+  dragIndex.value = null
+  if (from === null || from === targetIndex) return
+  const next = [...fields.value]
+  const [moved] = next.splice(from, 1)
+  next.splice(targetIndex, 0, moved)
+  fields.value = next
+  dirty.value = true
 }
 
 function updateSelectedField(updates: Partial<Field>) {
@@ -91,6 +127,7 @@ function updateSelectedField(updates: Partial<Field>) {
   if (idx !== -1) {
     fields.value[idx] = { ...fields.value[idx], ...updates }
   }
+  dirty.value = true
 }
 
 async function handleSave() {
@@ -109,6 +146,7 @@ async function handleSave() {
     const data = result.data as { version?: number; status?: string }
     if (typeof data?.version === 'number') currentVersion.value = data.version
     else currentVersion.value = nextVersion
+    dirty.value = false
     toast.success(`表单已保存（v${currentVersion.value}）`)
   } else if (result.kind === 'concurrency_conflict') {
     // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
@@ -125,6 +163,20 @@ async function handlePublish() {
   // 前置防呆：仅 draft 态可发布（published/deprecated 应隐藏按钮，这里兜底）
   if (formStatus.value !== 'draft') {
     toast.error('仅草稿状态可发布')
+    return
+  }
+  // P1-17：存在未保存更改时发布的是旧版本，先要求保存
+  if (dirty.value) {
+    toast.error('存在未保存的更改，请先保存后再发布')
+    return
+  }
+  // P2-62：发布前字段校验
+  if (fields.value.length === 0) {
+    toast.error('请至少添加一个字段后再发布')
+    return
+  }
+  if (fields.value.some((f) => !f.label || !f.label.trim())) {
+    toast.error('存在未填写标签的字段，请完善后再发布')
     return
   }
   publishing.value = true
@@ -199,6 +251,14 @@ async function handleClone() {
 }
 
 onMounted(loadData)
+
+// P1-17：未保存更改时离开页面需确认，防止改动静默丢失
+onBeforeRouteLeave(() => {
+  if (dirty.value) {
+    return window.confirm('存在未保存的更改，确定离开吗？')
+  }
+  return true
+})
 </script>
 
 <template>
@@ -267,6 +327,11 @@ onMounted(loadData)
               :key="field.id"
               class="flex items-center gap-2 rounded-lg border cursor-pointer p-3 hover:border-primary transition-colors"
               :class="selectedFieldId === field.id ? 'border-primary bg-primary-subtle' : 'border-border'"
+              :draggable="true"
+              @dragstart="onDragStart(index, $event)"
+              @dragover.prevent="onDragOver($event)"
+              @drop="onDrop(index, $event)"
+              @dragend="dragIndex = null"
               @click="selectField(field.id)"
             >
               <GripVertical :size="16" class="text-muted-foreground cursor-grab" />

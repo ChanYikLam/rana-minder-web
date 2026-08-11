@@ -89,8 +89,12 @@ describe('ActivityManagePage 招新活动管理', () => {
     expect(wrapper.text()).toContain('收紧规则')
 
     await wrapper.findAll('button').find((b) => b.text().includes('关闭通道'))!.trigger('click')
+    // P2-21：需填写关闭原因后才提交
+    expect(wrapper.text()).toContain('请填写关闭通道的原因')
+    await wrapper.find('textarea').setValue('报名名额已满')
+    await wrapper.findAll('button').find((b) => b.text() === '确认')!.trigger('click')
     await flushPromises()
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/channel', { action: 'close', reason: '报满关闭' })
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/channel', { action: 'close', reason: '报名名额已满' })
     wrapper.unmount()
   })
 
@@ -167,10 +171,13 @@ describe('ActivityManagePage 招新活动管理', () => {
     const wrapper = mount(ActivityManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
-    // 暂停
+    // 暂停：需填写原因（P2-21）
     await wrapper.findAll('button').find((b) => b.text().includes('暂停活动'))!.trigger('click')
+    expect(wrapper.text()).toContain('请填写暂停活动的原因')
+    await wrapper.find('textarea').setValue('通道拥堵，临时调整')
+    await wrapper.findAll('button').find((b) => b.text() === '确认')!.trigger('click')
     await flushPromises()
-    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/pause', { reason: '临时调整' })
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/pause', { reason: '通道拥堵，临时调整' })
     // 暂停后显示恢复按钮
     expect(wrapper.text()).toContain('恢复活动')
 

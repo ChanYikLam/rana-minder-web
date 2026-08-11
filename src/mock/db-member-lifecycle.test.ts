@@ -186,6 +186,15 @@ describe('任命命令（create / cancel / execute）', () => {
     expect(createAppointmentCommand('club-001', { action: 'dismiss', memberId: 'mem-002', memberName: '王浩然', departmentId: null, departmentName: null, title: null, scheduledAt: null, actorName: '系统' }).ok).toBe(true)
   })
 
+  it('transfer/appoint 末位负责人改任普通职位同样被守卫拒绝；保留负责人级职位可放行', () => {
+    // mem-004 是 club-001 唯一负责人，改任干事 → 零负责人窗口，拒绝
+    expect(createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-004', memberName: '张明远', departmentId: 'dept-002', departmentName: '人事部', title: '干事', scheduledAt: null, actorName: '系统' })).toMatchObject({ ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' })
+    // appoint 到普通职位同样拒绝
+    expect(createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-004', memberName: '张明远', departmentId: 'dept-002', departmentName: '人事部', title: '干事', scheduledAt: null, actorName: '系统' }).ok).toBe(false)
+    // 保留负责人级职位（title 仍为负责人）可放行
+    expect(createAppointmentCommand('club-001', { action: 'transfer', memberId: 'mem-004', memberName: '张明远', departmentId: 'dept-002', departmentName: '人事部', title: '负责人', scheduledAt: null, actorName: '系统' }).ok).toBe(true)
+  })
+
   it('executeAppointmentCommand：首败演示 → exec_failed → 重试成功（appoint 写职位与 join 历史）', () => {
     const created = createAppointmentCommand('club-001', { action: 'appoint', memberId: 'mem-003', memberName: '李思颖', departmentId: 'dept-001', departmentName: '技术部', title: '干事', scheduledAt: null, actorName: '系统' })
     const cmdId = created.command!.id
@@ -319,6 +328,14 @@ describe('辞职申请（create / decide）', () => {
   it('decideResignationRequest：末位负责人审批被守卫拒绝', () => {
     const created = createResignationRequest('club-001', 'mem-004', '张明远', '技术部', '负责人', '个人原因')
     expect(decideResignationRequest(created.id, 'approve', '李思颖')).toMatchObject({ ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' })
+  })
+
+  it('decideResignationRequest：自审拦截——审批人不可批准自己的辞职申请（P1-13）', () => {
+    const created = createResignationRequest('club-001', 'mem-003', '李思颖', '人事部', '部长', '家庭原因')
+    expect(decideResignationRequest(created.id, 'approve', '李思颖', 'mem-003')).toMatchObject({ ok: false, error: '不能审批自己的辞职申请' })
+    expect(created.status).toBe('under_review')
+    // 他人审批不受影响（用 reject 避免污染全局成员状态）
+    expect(decideResignationRequest(created.id, 'reject', '张明远', 'mem-004').ok).toBe(true)
   })
 
   it('decideResignationRequest：驳回成功', () => {

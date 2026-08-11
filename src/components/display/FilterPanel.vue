@@ -49,7 +49,10 @@ function toggle(key: string, val: string) {
 }
 
 function applyShortcut(fieldKey: string, offsetDays: number) {
-  const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000)
+  const target = new Date()
+  target.setDate(target.getDate() + offsetDays)
+  // P2-12：按本地时区对齐到当日 23:59:59 再转 ISO，避免 toISOString() 的 UTC 换算把截止日提前/推后一整天
+  target.setHours(23, 59, 59, 999)
   values.value[fieldKey] = [target.toISOString()]
   emitChange()
 }

@@ -88,7 +88,7 @@ describe('ClubSwitcher 社团切换', () => {
     // 新社团上下文：无成员身份（memberId=null），权限为社团级视图权限
     mocks.getContext.mockResolvedValue({
       kind: 'completed',
-      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'hr', permissions: ['club:member:view-self'], memberId: null },
+      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'hr', permissions: ['club:member:view-self', 'club:dashboard:view'], memberId: null },
     })
 
     const wrapper = await mountSwitcher()
@@ -105,8 +105,32 @@ describe('ClubSwitcher 社团切换', () => {
       memberId: undefined,
     })
     // 权限合并：保留 platform:*，仅以新社团权限覆盖 club:* 域
-    expect(session.permissions).toEqual(['platform:club:manage', 'club:member:view-self'])
+    expect(session.permissions).toEqual(['platform:club:manage', 'club:member:view-self', 'club:dashboard:view'])
+    // P2-6：新社团有 club:dashboard:view 时跳转新社团看板
     expect(mocks.push).toHaveBeenCalledWith('/org/club-002/dashboard')
+  })
+
+  it('切换成功：新社团无 dashboard 权限时回退平台管理（P2-6）', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001', 'mem-001')
+    seedSession(['platform:club:manage', 'club:dashboard:view'])
+    mocks.getMyClubs.mockResolvedValue({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' }] },
+    })
+    // 新社团上下文仅含成员级权限，无 dashboard 权限——不再硬跳无权限页
+    mocks.getContext.mockResolvedValue({
+      kind: 'completed',
+      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'hr', permissions: ['club:member:view-self'], memberId: 'mem-020' },
+    })
+
+    const wrapper = await mountSwitcher()
+    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
+    await item.trigger('click')
+    await flushPromises()
+
+    expect(mocks.push).toHaveBeenCalledWith('/admin/clubs')
+    wrapper.unmount()
   })
 
   it('切换成功：新社团有成员身份时写入新 memberId', async () => {
@@ -176,7 +200,9 @@ describe('ClubSwitcher 社团切换', () => {
 
     const wrapper = await mountSwitcher()
 
-    expect(wrapper.text()).toContain('暂无加入的社团')
+    // P2-14：加载失败明确提示错误并可重试，不再误导"暂无加入的社团"
+    expect(wrapper.text()).toContain('社团列表加载失败')
+    expect(wrapper.text()).toContain('重试')
   })
 
   it('重复加载去重：加载成功后不重复请求', async () => {

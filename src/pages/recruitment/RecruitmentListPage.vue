@@ -56,7 +56,11 @@ onMounted(loadData)
           v-for="act in items"
           :key="act.id"
           class="cursor-pointer"
+          role="link"
+          tabindex="0"
+          :aria-label="`查看 ${act.title}`"
           @click="router.push(`/org/${route.params.clubId}/recruitment/${act.id}`)"
+          @keydown="(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); router.push(`/org/${route.params.clubId}/recruitment/${act.id}`) } }"
         >
           <div class="flex items-start justify-between">
             <div class="flex-1">

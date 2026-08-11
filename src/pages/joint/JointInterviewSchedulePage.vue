@@ -72,6 +72,8 @@ async function handleBookSlot() {
   booking.value = false
   if (result.kind === 'completed') {
     toast.success('时段已预约')
+    // P2-41：预约成功后清空选中态，避免已约/已满时段仍高亮
+    selectedSlotId.value = null
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')

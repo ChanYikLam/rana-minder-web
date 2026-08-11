@@ -179,7 +179,8 @@ const deptSeries = computed<ChartSeries[]>(() =>
   (stats.value?.byDepartment ?? []).map((d) => ({ label: d.name, value: d.count })),
 )
 
-const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt).length)
+// P2-46：口径与列表徽标一致——仅统计在任（active）且有任期到期提醒的成员，排除离职残留 termEndAt
+const upcomingTermCount = computed(() => members.value.filter((m) => m.status === 'active' && m.termEndAt).length)
 </script>
 
 <template>
@@ -387,7 +388,7 @@ const upcomingTermCount = computed(() => members.value.filter((m) => m.termEndAt
                   <p class="text-sm font-medium text-text-primary">{{ m.name }}</p>
                   <StateTag :status="m.status" />
                   <SyncIndicator v-if="m.status === 'pending_casdoor_sync'" status="syncing" label="关系同步中" />
-                  <span v-if="m.termEndAt" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-warning-subtle text-warning" title="任期将到期">
+                  <span v-if="m.status === 'active' && m.termEndAt" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-warning-subtle text-warning" title="任期将到期">
                     <CalendarClock :size="11" /> 任期 {{ m.termEndAt.slice(0, 10) }} 到期
                     <template v-if="m.termDaysLeft !== null && m.termDaysLeft >= 0">· 剩 {{ m.termDaysLeft }} 天</template>
                   </span>

@@ -2072,7 +2072,7 @@ if (!r.ok) return businessError(r.error || '操作失败')
       const req = db.resignationRequests.find((r) => r.id === query.requestId)
       if (scope && req && req.departmentName !== scope) return forbidden()
       const decision = body.input?.decision === 'approve' ? 'approve' : 'reject'
-      const r = db.decideResignationRequest(query.requestId, decision, member.name)
+      const r = db.decideResignationRequest(query.requestId, decision, member.name, actor ?? undefined)
       if (!r.ok) return businessError(r.error || '操作失败')
       return { code: 0, data: { id: query.requestId, status: decision === 'approve' ? 'approved' : 'rejected' } }
     },
@@ -2742,18 +2742,19 @@ response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       if (!getPermissions(user, query.clubId).includes('club:config:manage')) return forbidden()
       const key = emailConfigKey('club', query.clubId)
-      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; fromName: string; encryption: string }>
+      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; smtpPassword: string; fromName: string; encryption: string }>
       const result = saveEmailConfig(key, {
         smtpHost: String(input.smtpHost ?? ''),
         smtpPort: Number(input.smtpPort) || 465,
         smtpUser: String(input.smtpUser ?? ''),
+        smtpPassword: String(input.smtpPassword ?? ''),
         fromName: String(input.fromName ?? ''),
         encryption: (['ssl', 'tls', 'none'].includes(String(input.encryption)) ? String(input.encryption) : 'ssl') as 'ssl' | 'tls' | 'none',
       })
       if (!result.ok) {
         return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '发信配置未通过测试，请先发送测试邮件', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
       }
-      return { code: 0, data: { ...result.config, savedAt: new Date().toISOString() } }
+      return { code: 0, data: { ...result.config, smtpPassword: undefined, savedAt: new Date().toISOString() } }
     },
   },
   // 测试邮件配置（通过后标记 verified）
@@ -3419,7 +3420,7 @@ response: ({ url }: { url: string }) => {
       const user = resolveMockUser(url)
       const clubId = query.clubId
       if (!getPermissions(user, clubId).includes('club:export:execute')) return forbidden()
-      const type = body.input?.type || '成员名单'
+      const type = body.input?.type || 'members'
       const scope = exportScopeFor(user, clubId)
       // 先结算再判复用：超时的 generating 先落 failed，避免被误判为"进行中"而复用；同时 GC 掉过期任务，
       // 保证反复 POST 后数组有回落途径（MRM-009）
@@ -4060,18 +4061,19 @@ response: ({ url }: { url: string }) => {
     method: 'post',
     response: ({ url, body }: { url: string; body: { input: Record<string, unknown> } }) => {
       if (!isPlatformAdmin(url)) return forbidden()
-      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; fromName: string; encryption: string }>
+      const input = (body.input ?? body) as Partial<{ smtpHost: string; smtpPort: number; smtpUser: string; smtpPassword: string; fromName: string; encryption: string }>
       const result = saveEmailConfig(emailConfigKey('platform'), {
         smtpHost: String(input.smtpHost ?? ''),
         smtpPort: Number(input.smtpPort) || 465,
         smtpUser: String(input.smtpUser ?? ''),
+        smtpPassword: String(input.smtpPassword ?? ''),
         fromName: String(input.fromName ?? ''),
         encryption: (['ssl', 'tls', 'none'].includes(String(input.encryption)) ? String(input.encryption) : 'ssl') as 'ssl' | 'tls' | 'none',
       })
       if (!result.ok) {
         return { statusCode: 422, body: { code: 'IFC-ERR-006', message: '发信配置未通过测试，请先发送测试邮件', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
       }
-      return { code: 0, data: { ...result.config, savedAt: new Date().toISOString() } }
+      return { code: 0, data: { ...result.config, smtpPassword: undefined, savedAt: new Date().toISOString() } }
     },
   },
   {

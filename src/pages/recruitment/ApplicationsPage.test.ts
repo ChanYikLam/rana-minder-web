@@ -75,4 +75,31 @@ describe('ApplicationsPage 报名申请管理', () => {
     expect(wrapper.text()).toContain('张三')
     wrapper.unmount()
   })
+
+  it('P2-18：快速切 Tab 时乱序返回的旧响应不覆盖列表', async () => {
+    let resolveA!: (v: unknown) => void
+    let resolveB!: (v: unknown) => void
+    mockGet
+      .mockResolvedValueOnce({ kind: 'completed', data: { items: [app] } })
+      .mockImplementationOnce(() => new Promise((r) => { resolveA = r }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveB = r }))
+    const wrapper = mount(ApplicationsPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    // 切到"已接受"（请求 A 挂起），再切到"已拒绝"（请求 B 挂起）
+    const tabA = wrapper.findAll('button').find((b) => b.text().includes('已接受'))!
+    const tabB = wrapper.findAll('button').find((b) => b.text().includes('已拒绝'))!
+    await tabA.trigger('click')
+    await tabB.trigger('click')
+    // B 先返回：展示 B 的结果
+    resolveB({ kind: 'completed', data: { items: [{ ...app, status: 'rejected', applicantName: '王五' }] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('王五')
+    // A 后返回（乱序）：应被丢弃，列表仍是 B 的结果
+    resolveA({ kind: 'completed', data: { items: [{ ...app, status: 'accepted', applicantName: '李四' }] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('王五')
+    expect(wrapper.text()).not.toContain('李四')
+    wrapper.unmount()
+  })
 })

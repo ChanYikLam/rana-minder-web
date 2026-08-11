@@ -31,6 +31,12 @@ const detail = {
   applicantCount: 10, version: 1,
 }
 
+const clubItems = [
+  { id: 'club-001', name: '计算机协会' },
+  { id: 'club-002', name: '电子设计协会' },
+  { id: 'club-003', name: '数学建模协会' },
+]
+
 describe('JointManagePage 联合活动管理', () => {
   beforeEach(() => {
     mockGet.mockReset()
@@ -160,6 +166,7 @@ describe('JointManagePage 联合活动管理', () => {
 
   it('创建态：成功后跳转详情页', async () => {
     mockRoute.meta.mode = 'create'
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: clubItems } })
     mockPost.mockResolvedValue({ kind: 'completed', data: { id: 'jnt-new' } })
     const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
@@ -169,6 +176,11 @@ describe('JointManagePage 联合活动管理', () => {
     await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
     await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
     await flushPromises()
+    // P2-31：选择至少两个参与社团
+    const clubBtns = wrapper.findAll('button').filter((b) => b.text().includes('电子设计协会') || b.text().includes('数学建模协会'))
+    await clubBtns[0]!.trigger('click')
+    await clubBtns[1]!.trigger('click')
+    await flushPromises()
 
     const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))
     expect(createBtn).toBeDefined()
@@ -176,19 +188,50 @@ describe('JointManagePage 联合活动管理', () => {
     await flushPromises()
 
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint', expect.objectContaining({ title: '计算机+电子联合招新' }))
+    // P2-22：deadline 已转为 ISO 契约
+    expect((mockPost.mock.calls[0]![1] as { deadline: string }).deadline).toMatch(/Z$/)
     expect(mockPush).toHaveBeenCalledWith('/org/club-001/joint/jnt-new')
     expect(mockToastError).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
+  it('创建态：未选足两个社团时拦截（P2-31）', async () => {
+    mockRoute.meta.mode = 'create'
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: clubItems } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: { id: 'jnt-new' } })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
+    await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
+    await flushPromises()
+    // 只选一个社团
+    const clubBtn = wrapper.findAll('button').find((b) => b.text().includes('电子设计协会'))!
+    await clubBtn.trigger('click')
+    await flushPromises()
+
+    const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))!
+    await createBtn.trigger('click')
+    await flushPromises()
+
+    expect(mockToastError).toHaveBeenCalledWith('参与社团至少选择两个')
+    expect(mockPost).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('创建失败：toast 错误提示且不跳转（之前 kind!==completed 完全静默）', async () => {
     mockRoute.meta.mode = 'create'
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: clubItems } })
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'JNT-001', message: '标题重复' } })
     const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
     await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
     await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
+    await flushPromises()
+    const clubBtns = wrapper.findAll('button').filter((b) => b.text().includes('电子设计协会') || b.text().includes('数学建模协会'))
+    await clubBtns[0]!.trigger('click')
+    await clubBtns[1]!.trigger('click')
     await flushPromises()
 
     const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))
@@ -203,12 +246,17 @@ describe('JointManagePage 联合活动管理', () => {
 
   it('创建失败：服务端 message 缺失时回退到「创建失败，请稍后重试」', async () => {
     mockRoute.meta.mode = 'create'
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: clubItems } })
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'JNT-001' } })
     const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
     await wrapper.find('input[type="text"]').setValue('计算机+电子联合招新')
     await wrapper.find('input[type="datetime-local"]').setValue('2026-09-01T00:00')
+    await flushPromises()
+    const clubBtns = wrapper.findAll('button').filter((b) => b.text().includes('电子设计协会') || b.text().includes('数学建模协会'))
+    await clubBtns[0]!.trigger('click')
+    await clubBtns[1]!.trigger('click')
     await flushPromises()
 
     const createBtn = wrapper.findAll('button').find((b) => b.text().includes('创建联合活动'))
@@ -218,6 +266,46 @@ describe('JointManagePage 联合活动管理', () => {
 
     expect(mockToastError).toHaveBeenCalledWith('创建失败，请稍后重试')
     expect(mockPush).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('通道操作：暂停/关闭不带 deadline，不被截止时间校验误拦（评审 C1 回归）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { ...detail, status: 'published' } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    const pauseBtn = wrapper.findAll('button').find((b) => b.text().includes('暂停通道'))
+    expect(pauseBtn).toBeDefined()
+    await pauseBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/channel', { action: 'pause' })
+    expect(mockToastError).not.toHaveBeenCalled()
+
+    mockPost.mockClear()
+    const closeBtn = wrapper.findAll('button').find((b) => b.text().includes('关闭通道'))
+    expect(closeBtn).toBeDefined()
+    await closeBtn!.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/org/club-001/joint/jnt-1/channel', { action: 'close', reason: '报满关闭' })
+    expect(mockToastError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('通道操作：开放/恢复携带过去截止时间被拦截（P2-32）', async () => {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { ...detail, status: 'published', channelStatus: 'closed' } })
+    mockPost.mockResolvedValue({ kind: 'completed', data: {} })
+    const wrapper = mount(JointManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.find('#joint-channel-deadline').setValue('2020-01-01T00:00')
+    await flushPromises()
+    const openBtn = wrapper.findAll('button').find((b) => b.text().includes('开放/重开通道'))
+    expect(openBtn).toBeDefined()
+    await openBtn!.trigger('click')
+    await flushPromises()
+    expect(mockToastError).toHaveBeenCalledWith('截止时间必须晚于当前时间')
+    expect(mockPost).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

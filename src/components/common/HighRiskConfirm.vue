@@ -126,6 +126,8 @@ function handleNext() {
 }
 
 async function handleConfirm() {
+  // P2-2：重认证请求进行中时忽略重复触发（按钮 loading 与 Enter 键都要防）
+  if (reauthBusy.value) return
   if (isReauthExpired.value) {
     reauthError.value = '认证已过期，请重新打开确认'
     return
@@ -142,17 +144,20 @@ async function handleConfirm() {
   }
   reauthBusy.value = true
   reauthError.value = ''
-  const result = await post('/auth/reauth', { password: reauthPassword.value })
-  reauthBusy.value = false
-  if (result.kind === 'completed') {
-    step.value = 'executing'
-    const proof = (result as { kind: 'completed'; data?: { proof?: string } }).data?.proof
-    emit('confirm', proof)
-  } else if (result.kind === 'rejected' && result.error) {
-    const fieldMsg = (result.error as { fieldErrors?: Record<string, string[]> }).fieldErrors?.password?.[0]
-    reauthError.value = fieldMsg || (result.error as { message?: string }).message || '密码错误，请重试'
-  } else {
-    reauthError.value = '验证失败，请稍后重试'
+  try {
+    const result = await post('/auth/reauth', { password: reauthPassword.value })
+    if (result.kind === 'completed') {
+      step.value = 'executing'
+      const proof = (result as { kind: 'completed'; data?: { proof?: string } }).data?.proof
+      emit('confirm', proof)
+    } else if (result.kind === 'rejected' && result.error) {
+      const fieldMsg = (result.error as { fieldErrors?: Record<string, string[]> }).fieldErrors?.password?.[0]
+      reauthError.value = fieldMsg || (result.error as { message?: string }).message || '密码错误，请重试'
+    } else {
+      reauthError.value = '验证失败，请稍后重试'
+    }
+  } finally {
+    reauthBusy.value = false
   }
 }
 

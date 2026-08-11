@@ -17,6 +17,9 @@ import {
   clubKillSwitchState,
   clubKillSwitches,
   emailOutbox,
+  saveEmailConfig,
+  getEmailConfig,
+  emailConfigKey,
 } from './notifications'
 import { resetNotifications } from './reset'
 
@@ -213,5 +216,18 @@ describe('P1-009 邮件渠道（US-NTF-02）', () => {
     expect(email.toUserId).toBe('user-applicant-002')
     expect(email.toEmail).toBe('applicant2@example.edu.cn')
     expect(email.subject).toBe('【RanaMinder】收到录取邀请')
+  })
+
+  it('SMTP 配置保存：密钥可写入且未传新密钥时保留原密钥（P1-14）', () => {
+    const key = emailConfigKey('club', 'club-001')
+    // 先标记 verified，允许配置落库
+    saveEmailConfig(key, { verified: true })
+    saveEmailConfig(key, { smtpHost: 'smtp.example.com', smtpUser: 'no-reply', smtpPassword: 'secret-123', fromName: '电子设计协会', encryption: 'ssl' })
+    // 密码已存储
+    const cfg = getEmailConfig(key)
+    expect(cfg.smtpPassword).toBe('secret-123')
+    // 保存其他字段（未携带密码）不覆盖已有密钥
+    saveEmailConfig(key, { smtpHost: 'smtp.example.com', smtpPort: 465, smtpUser: 'no-reply', smtpPassword: '', fromName: '电子设计协会', encryption: 'ssl' })
+    expect(getEmailConfig(key).smtpPassword).toBe('secret-123')
   })
 })

@@ -101,6 +101,8 @@ describe('ActivityCreatePage 创建招新活动', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('发布活动'))!.trigger('click')
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment', expect.objectContaining({ title: '秋季招新', formId: 'form-1', departments: [{ id: expect.any(String), name: '技术部' }] }))
+    // P2-22：deadline 由 datetime-local 本地值转为 ISO 契约（不再原样发送）
+    expect((mockPost.mock.calls[0]![1] as { deadline: string }).deadline).toMatch(/Z$/)
     expect(mockPush).toHaveBeenCalledWith('/org/club-001/recruitment/act-9')
     wrapper.unmount()
   })
@@ -122,7 +124,8 @@ describe('ActivityCreatePage 创建招新活动', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('下一步'))!.trigger('click')
     await wrapper.findAll('button').find((b) => b.text().includes('发布活动'))!.trigger('click')
     await flushPromises()
-    expect(mockToastError).toHaveBeenCalledWith('发布失败，请稍后重试')
+    // P2-23：展示服务端 error.message（'x'）而非仅 fallback
+    expect(mockToastError).toHaveBeenCalledWith('x')
     expect(mockPush).not.toHaveBeenCalled()
     wrapper.unmount()
   })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card, DataTable } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
@@ -41,7 +41,7 @@ const bookForm = ref({ applicantId: '', roundId: '', slotId: '' })
 const roundAdminOpen = ref(false)
 const roundForm = ref({ name: '', mode: 'club_unified' as 'club_unified' | 'dept_separate', deadline: '', slotStart: '', slotEnd: '', slotCapacity: 10 })
 const roundError = ref('')
-const skipForm = ref({ applicantId: '', reason: '' })
+const skipForm = ref({ applicantId: '', reason: '', roundId: '' })
 const updatingRound = ref<string | null>(null)
 const newRoundDeadline = ref('')
 const cancelRoundId = ref<string | null>(null)
@@ -60,10 +60,46 @@ const taskForm = ref<{ userId: string; scope: 'activity' | 'round'; roundId: str
 const taskError = ref('')
 const revokingTaskId = ref<string | null>(null)
 
-watch([clubId, actId], ([cid, aid]) => {
+// P1-19：切换社团/活动时重置全部本地状态，避免残留上一活动的表单/选中项/列表
+function resetLocalState() {
+  items.value = []
+  selected.value = null
+  invalidReason.value = ''
+  bookOpen.value = false
+  bookForm.value = { applicantId: '', roundId: '', slotId: '' }
+  rounds.value = []
+  applications.value = []
+  roundAdminOpen.value = false
+  roundForm.value = { name: '', mode: 'club_unified', deadline: '', slotStart: '', slotEnd: '', slotCapacity: 10 }
+  roundError.value = ''
+  skipForm.value = { applicantId: '', reason: '', roundId: '' }
+  updatingRound.value = null
+  newRoundDeadline.value = ''
+  cancelRoundId.value = null
+  cancelRoundReason.value = ''
+  cancelRoundError.value = ''
+  interviewerOpen.value = false
+  defaultReviewers.value = []
+  tasks.value = []
+  candidates.value = []
+  taskForm.value = { userId: '', scope: 'activity', roundId: '' }
+  taskError.value = ''
+  revokingTaskId.value = null
+}
+
+// 评审 I3：请求序号防护，快速切换社团/活动时乱序返回的旧响应不覆盖新列表
+let loadSeq = 0
+
+watch([clubId, actId], async ([cid, aid], [oldCid, oldAid]) => {
   if (!cid || !aid) {
     state.value = 'error'
+    return
   }
+  if (oldCid !== undefined && (oldCid !== cid || oldAid !== aid)) resetLocalState()
+  const seq = ++loadSeq
+  await loadInterviews(seq)
+  await loadBookOptions(seq)
+  await loadInterviewers(seq)
 }, { immediate: true })
 
 function validateParams(): boolean {
@@ -81,10 +117,11 @@ const columns = [
   { key: 'scheduledTime', label: '时间' },
 ]
 
-async function loadInterviews() {
+async function loadInterviews(seq = loadSeq) {
   state.value = 'loading'
   if (!validateParams()) return
   const result = await get<{ items: InterviewRow[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviews`)
+  if (seq !== loadSeq) return
   if (result.kind === 'completed') {
     items.value = result.data.items
     if (selected.value) {
@@ -94,12 +131,13 @@ async function loadInterviews() {
   } else { state.value = errorToPageState(errorCodeOf(result)) }
 }
 
-async function loadBookOptions() {
+async function loadBookOptions(seq = loadSeq) {
   if (!validateParams()) return
   const [r, a] = await Promise.all([
     get<{ items: RoundItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/rounds`),
     get<{ items: AppItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/applications`),
   ])
+  if (seq !== loadSeq) return
   if (r.kind === 'completed') rounds.value = r.data.items
   if (a.kind === 'completed') applications.value = a.data.items
 }
@@ -147,6 +185,8 @@ async function handleBook() {
     bookOpen.value = false
     bookForm.value = { applicantId: '', roundId: '', slotId: '' }
     await loadInterviews()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('预约已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '预约失败')
   }
@@ -182,6 +222,8 @@ async function handleCreateRound() {
     roundForm.value = { name: '', mode: 'club_unified', deadline: '', slotStart: '', slotEnd: '', slotCapacity: 10 }
     roundError.value = ''
     await loadRounds()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('创建轮次已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '创建轮次失败')
   }
@@ -200,6 +242,8 @@ async function handleUpdateRound(roundId: string) {
   newRoundDeadline.value = ''
   if (result.kind === 'completed') {
     await loadRounds()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('更新截止时间已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '更新失败')
   }
@@ -223,6 +267,8 @@ async function handleCancelRound(roundId: string) {
     cancelRoundReason.value = ''
     cancelRoundError.value = ''
     await loadRounds()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('取消轮次已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '取消失败')
   }
@@ -234,12 +280,13 @@ function openCancelRound(roundId: string) {
   cancelRoundError.value = ''
 }
 
-async function loadInterviewers() {
+async function loadInterviewers(seq = loadSeq) {
   if (!validateParams()) return
   const [t, c] = await Promise.all([
     get<{ defaultReviewers: { id: string; name: string; source: string }[]; tasks: InterviewerTaskItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers`),
     get<{ items: CandidateItem[] }>(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/candidates`),
   ])
+  if (seq !== loadSeq) return
   if (t.kind === 'completed') {
     // 防御：后端缺省字段时回落空数组，避免模板 .map 崩溃
     defaultReviewers.value = t.data.defaultReviewers ?? []
@@ -273,6 +320,8 @@ async function handleAssignTask() {
     taskForm.value = { userId: '', scope: 'activity', roundId: '' }
     taskError.value = ''
     await loadInterviewers()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('指派临时面试官已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '指派失败')
   }
@@ -287,6 +336,8 @@ async function handleRevokeTask(taskId: string) {
   revokingTaskId.value = null
   if (result.kind === 'completed') {
     await loadInterviewers()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('撤销任务已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '撤销失败')
   }
@@ -298,11 +349,12 @@ async function handleSkipRound() {
     roundError.value = '请选择申请人与填写跳轮原因'
     return
   }
-  const roundId = bookForm.value.roundId || rounds.value[0]?.id
-  if (!roundId) {
-    roundError.value = '没有可用的面试轮次'
+  // P1-20：跳轮目标轮次由跳轮表单显式指定，不再复用预约表单/默认首个轮次
+  if (!skipForm.value.roundId) {
+    roundError.value = '请选择要跳过的轮次'
     return
   }
+  const roundId = skipForm.value.roundId
   if (actionLoading.value) return
   actionLoading.value = true
   roundError.value = ''
@@ -312,9 +364,11 @@ async function handleSkipRound() {
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
-    skipForm.value = { applicantId: '', reason: '' }
+    skipForm.value = { applicantId: '', reason: '', roundId: '' }
     roundError.value = ''
     await Promise.all([loadRounds(), loadInterviews()])
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('跳轮已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '跳轮失败')
   }
@@ -328,19 +382,8 @@ const canInvalidate = computed(() => {
   return !['cancelled', 'invalidated', 'completed'].includes(selected.value.status)
 })
 
-onMounted(async () => {
-  await loadInterviews()
-  await loadBookOptions()
-  await loadInterviewers()
-})
+// P1-19：路由切换活动/社团时全量重载，见上方 watch 单入口
 
-watch(
-  () => [route.params.clubId, route.params.activityId],
-  () => {
-    validateParams()
-    if (state.value !== 'error') loadInterviews()
-  }
-)
 </script>
 
 <template>
@@ -575,10 +618,14 @@ watch(
                     <option value="" disabled>选择申请人</option>
                     <option v-for="a in applications.filter((x) => x.status === 'submitted')" :key="a.applicantId" :value="a.applicantId">{{ a.applicantName }}</option>
                   </select>
+                  <select v-model="skipForm.roundId" class="px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary">
+                    <option value="" disabled>选择要跳过的轮次</option>
+                    <option v-for="r in rounds.filter((x) => x.status === 'open')" :key="r.id" :value="r.id">{{ r.name }}</option>
+                  </select>
                   <input v-model="skipForm.reason" class="px-2 h-9 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary" placeholder="跳轮原因（必填）" />
                   <button
                     class="px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
-                    :disabled="actionLoading || !skipForm.applicantId || !skipForm.reason.trim()"
+                    :disabled="actionLoading || !skipForm.applicantId || !skipForm.reason.trim() || !skipForm.roundId"
                     @click="handleSkipRound"
                   >
                     {{ actionLoading ? '处理中...' : '执行跳轮' }}

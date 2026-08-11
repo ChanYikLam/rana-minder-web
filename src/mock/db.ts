@@ -604,10 +604,14 @@ export function createAppointmentCommand(clubId: string, input: { action: Appoin
     if (input.action !== 'appoint') return { ok: false, error: '非成员仅可发起任命，不支持调岗/免职' }
     if (!input.departmentId || !input.title) return { ok: false, error: '非成员任命必须指定部门与职位' }
   }
-  if (input.action === 'dismiss' && input.memberId) {
+  if (input.memberId) {
     const member = findMember(clubId, input.memberId)
     const isLeader = !!member?.positions.find((p) => p.status === 'active' && p.title === '负责人')
-    if (isLeader && isLastLeader(clubId, input.memberId)) return { ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' }
+    // 末位负责人守卫：免职直接拒绝；任命/调岗改任到非负责人级职位同样会产生零负责人窗口，一并拦截
+    if (isLeader && isLastLeader(clubId, input.memberId)) {
+      const removed = input.action === 'dismiss' || (input.title ?? '') !== '负责人'
+      if (removed) return { ok: false, error: '最后一名负责人不能无交接离任，请先安排交接' }
+    }
   }
   const command: MockAppointmentCommand = {
     id: 'apc-' + Date.now(), clubId, action: input.action,
@@ -866,10 +870,12 @@ export function resignationRequestsOfMember(clubId: string, memberId: string): M
   return resignationRequests.filter((r) => r.clubId === clubId && r.memberId === memberId)
 }
 
-export function decideResignationRequest(requestId: string, decision: 'approve' | 'reject', actorName: string): { ok: boolean; error?: string } {
+export function decideResignationRequest(requestId: string, decision: 'approve' | 'reject', actorName: string, actorId?: string): { ok: boolean; error?: string } {
   const req = resignationRequests.find((r) => r.id === requestId)
   if (!req) return { ok: false, error: '申请不存在' }
   if (req.status !== 'under_review') return { ok: false, error: '该申请已处理' }
+  // P1-13：自审拦截——负责人/人事不得审批自己的辞职申请（与退出审批规则对齐）
+  if (actorId && req.memberId === actorId) return { ok: false, error: '不能审批自己的辞职申请' }
   if (decision === 'reject') {
     const t = assertTransition('SM-MEM-005', req.status, 'rejected', 'reject')
     if (!t.ok) return { ok: false, error: t.reason || '该申请已处理' }

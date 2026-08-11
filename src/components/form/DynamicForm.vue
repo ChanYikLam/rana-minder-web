@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FormField, FileMeta } from '@/types/domain/form'
-import { computed, ref } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import FieldPermission from './FieldPermission.vue'
 import AttachmentUpload from './AttachmentUpload.vue'
 import DateTimePicker from './DateTimePicker.vue'
@@ -26,11 +26,36 @@ const emit = defineEmits<{
   'migrateVersion': []
 }>()
 
-const resolving = ref(false)
-const migrating = ref(false)
+// P2-9：legacy 数组数据缺少 _uid 时一次性补齐稳定 key，
+// 避免删除中间项后 index key 错位导致 DOM/输入状态漂移
+function ensureArrayUids() {
+  let dirty = false
+  const next: DynamicFormValue = { ...props.modelValue }
+  for (const field of props.fields) {
+    if (field.type !== 'array') continue
+    const val = next[field.id]
+    if (!Array.isArray(val)) continue
+    next[field.id] = val.map((row: unknown) => {
+      const record = row as Record<string, unknown> | null
+      if (record && typeof record === 'object' && !record._uid) {
+        dirty = true
+        return { ...record, _uid: crypto.randomUUID() }
+      }
+      return row
+    })
+  }
+  if (dirty) emit('update:modelValue', next)
+}
 
-const isResolving = computed(() => props.resolvingConflict ?? resolving.value)
-const isMigrating = computed(() => props.migratingVersion ?? migrating.value)
+onMounted(ensureArrayUids)
+// 消费方通常在表单已挂载后才异步回填数据（如活动详情、历史版本），
+// 仅挂载时补齐会漏掉这些路径，需深度监听模型变化
+watch(() => props.modelValue, ensureArrayUids, { deep: true })
+
+// P1-23：进行中状态改为纯 prop 驱动（resolvingConflict/migratingVersion），
+// 父级完成/取消后置 false 即复位；删除内部置位 ref，避免"刷新中/迁移中"永久停留
+const isResolving = computed(() => props.resolvingConflict === true)
+const isMigrating = computed(() => props.migratingVersion === true)
 
 function fieldValue(field: FormField): unknown {
   return props.modelValue[field.id]
@@ -65,7 +90,9 @@ function toggleCheckbox(field: FormField, opt: string, checked: boolean) {
 /** select 取值契约：单选取 string（空 = ''），multi_select 取 string[]（空 = []） */
 function selectChangeValue(field: FormField, el: HTMLSelectElement): string | string[] {
   if (field.type !== 'multi_select') return el.value
-  return Array.from(el.selectedOptions).map((o) => o.value)
+  return Array.from(el.selectedOptions)
+    .map((o) => o.value)
+    .filter((v) => v !== '')
 }
 
 /** multi_select 回显规范化：始终返回 string[]（空 = []），兼容历史 string 存储，避免回显与提交类型漂移 */
@@ -73,12 +100,6 @@ function multiSelectValue(field: FormField): string[] {
   const v = fieldValue(field)
   if (Array.isArray(v)) return v as string[]
   return typeof v === 'string' && v !== '' ? [v] : []
-}
-
-/** option 选中态：multi_select 用数组 includes 匹配，单选用相等 */
-function isOptionSelected(field: FormField, opt: string): boolean {
-  const v = fieldValue(field)
-  return field.type === 'multi_select' ? multiSelectValue(field).includes(opt) : v === opt
 }
 
 function arrayItems(field: FormField): Array<{ id: string; index: number }> {
@@ -143,13 +164,11 @@ function arrayItemValue(field: FormField, index: number, childId: string): strin
 
 function handleResolveConflict() {
   if (isResolving.value) return
-  resolving.value = true
   emit('resolveConflict')
 }
 
 function handleMigrateVersion() {
   if (isMigrating.value) return
-  migrating.value = true
   emit('migrateVersion')
 }
 
@@ -225,10 +244,11 @@ const inputErrorClass = 'border-danger'
           :multiple="field.type === 'multi_select'"
           :disabled="isReadOnly(field)"
           :required="field.required"
+          :value="field.type === 'multi_select' ? multiSelectValue(field) : (fieldValue(field) as string) || ''"
           @change="updateField(field, selectChangeValue(field, $event.target as HTMLSelectElement))"
         >
           <option value="" disabled>请选择</option>
-          <option v-for="opt in field.options || []" :key="opt" :value="opt" :selected="isOptionSelected(field, opt)">
+          <option v-for="opt in field.options || []" :key="opt" :value="opt">
             {{ opt }}
           </option>
         </select>

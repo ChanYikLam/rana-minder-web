@@ -97,12 +97,13 @@ const filteredCandidates = computed(() => {
 // 不能免职自己
 const isSelf = computed(() => selectedMember.value?.isMember && selectedMember.value?.id === session.workspace?.memberId)
 
-// 末位负责人不可免职（需先交接）
+// 末位负责人不可免职/改任普通职位（需先交接，防止零负责人窗口）
 const { isLastLeader: isLastLeaderGuard } = useLastLeaderGuard(members)
 const isLastLeader = computed(() => {
-  if (!selectedMember.value || action.value !== 'dismiss') return false
-  if (!selectedMember.value.isMember) return false
-  return isLastLeaderGuard(selectedMember.value)
+  if (!selectedMember.value || !selectedMember.value.isMember) return false
+  if (!isLastLeaderGuard(selectedMember.value)) return false
+  if (action.value === 'dismiss') return true
+  return targetTitle.value !== '负责人'
 })
 
 const canExecute = computed(() => {
@@ -113,6 +114,10 @@ const canExecute = computed(() => {
   }
   if (isSelf.value) return false
   if (isLastLeader.value) return false
+  // P2-45：正式成员分支同样要求部门/职位非空，避免提交空 departmentId/title
+  if (action.value === 'appoint' || action.value === 'transfer') {
+    if (!targetDept.value || !targetTitle.value) return false
+  }
   if (isScheduled.value && !scheduledAt.value) return false
   return true
 })
@@ -317,7 +322,7 @@ onMounted(loadData)
           </div>
           <div v-else-if="isLastLeader" class="rounded-lg bg-warning-subtle p-3 mb-3 mt-3 flex items-center gap-2">
             <AlertTriangle :size="16" class="text-warning" />
-            <p class="text-xs text-warning">最后一位负责人，需先交接方可免职</p>
+            <p class="text-xs text-warning">{{ action === 'dismiss' ? '最后一位负责人，需先交接方可免职' : '最后一位负责人，改任普通职位将产生零负责人，需先交接' }}</p>
           </div>
 
           <button class="w-full mt-4 h-9 rounded-md text-sm font-medium text-text-on-primary disabled:opacity-40 disabled:cursor-not-allowed" :class="action === 'dismiss' ? 'bg-danger' : 'bg-primary'" :disabled="!canExecute || submitting" @click="onExecuteClick">

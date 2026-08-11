@@ -51,12 +51,17 @@ const statusTabs = [
   { value: 'draft', label: '草稿' },
 ]
 
+// P2-18：请求序号防护，快速切 Tab 时乱序返回的旧响应不覆盖列表
+let loadSeq = 0
+
 async function loadData() {
+  const seq = ++loadSeq
   state.value = 'loading'
   const clubId = route.params.clubId as string
   const activityId = route.params.activityId as string
   const query = activeStatus.value !== 'all' ? `?status=${activeStatus.value}` : ''
   const result = await get<{ items: Application[] }>(`/org/${clubId}/recruitment/${activityId}/applications${query}`)
+  if (seq !== loadSeq) return
   if (result.kind === 'completed') {
     items.value = (result as { kind: 'completed'; data: { items: Application[] } }).data.items
     state.value = 'normal'
@@ -196,8 +201,9 @@ onMounted(loadData)
                 <div v-if="app.status === 'exited'" class="flex flex-wrap items-center gap-2">
                   <input
                     v-model="deadlineInput[app.id]"
+                    type="datetime-local"
                     class="px-2 h-8 rounded-md border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
-                    placeholder="恢复窗口截止（ISO）"
+                    aria-label="恢复窗口截止时间"
                   />
                   <button
                     class="px-3 h-8 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
@@ -241,8 +247,9 @@ onMounted(loadData)
                   />
                   <input
                     v-model="deadlineInput[app.id]"
+                    type="datetime-local"
                     class="px-2 h-8 rounded-md border border-border bg-elevated text-xs text-text-primary focus:outline-2 focus:outline-primary"
-                    placeholder="补充截止（ISO）"
+                    aria-label="补充截止时间"
                   />
                   <button
                     v-if="app.status === 'submitted'"
@@ -349,6 +356,8 @@ onMounted(loadData)
       :succeeded="publishSucceeded"
       :error-message="publishError"
       @confirm="handlePublishResult"
+      @update:error-message="(v) => publishError = v"
+      @retry="publishError = ''"
     />
   </PageStateBoundary>
 </template>

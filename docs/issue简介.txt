@@ -1,0 +1,47 @@
+========================================
+  Issue：申请人上传的附件面试官无法查看
+========================================
+
+严重级别：P1
+模块：招新（REC）/ 评价与结论
+报告日期：2026-08-08
+修复状态：待修复
+
+【现象】
+面试官在评价页面无法查看申请人提交的报名表单内容及附件，
+无法下载申请人上传的作品集/简历等文件。
+
+【根因】
+1. 申请详情 API（/api/org/.../applications/:applicantId）仅允许
+   club:recruitment:manage 权限，面试官被 403 拦截
+   -> src/mock/recruitment-api.ts:627
+
+2. ReviewPage 未加载/展示申请表单答案与附件
+   -> src/pages/recruitment/ReviewPage.vue
+
+3. 只读视图文件字段仅显示"已上传附件"文字，无下载链接
+   -> src/pages/recruitment/ApplicationPage.vue:135
+
+4. Mock 文件状态返回 'clean'，FilePreviewPage 要求 'approved'
+   才显示下载按钮，状态不匹配
+   -> src/mock/index.ts:2256
+
+【涉及文件】
+- src/mock/recruitment-api.ts        （权限校验 + 文件状态）
+- src/pages/recruitment/ReviewPage.vue （增加表单/附件展示）
+- src/pages/recruitment/ApplicationPage.vue （渲染附件链接）
+- src/mock/index.ts                   （统一文件状态）
+- src/pages/form/FilePreviewPage.vue  （下载按钮条件）
+
+【修复方案摘要】
+1. 申请详情接口增加 canInterview 权限校验
+2. ReviewPage 加载并展示申请表单答案，文件渲染为可点击链接
+3. 只读视图文件字段增加跳转 FilePreviewPage 的链接
+4. 统一 mock 文件状态为 'approved'
+
+【数据流】
+申请人上传 -> /files/upload -> fileId 存入 answers -> 提交申请
+                                                        |
+面试官查看 -> ReviewPage（缺展示）-> 申请详情 API（403）-> 无法获取 fileId
+                                                        |
+即使获得 fileId -> /files/:fileId -> status='clean'≠'approved' -> 无下载按钮

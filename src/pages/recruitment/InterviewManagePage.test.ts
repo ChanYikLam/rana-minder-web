@@ -1,18 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost, mockPut } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn(), mockPut: vi.fn() }))
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { clubId: 'club-001', activityId: 'act-1' } }),
-}))
+// 共享可变 route，供 P1-19 切换活动用例触发路由 watch
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  const route = reactive({ params: { clubId: 'club-001', activityId: 'act-1' } })
+  ;(globalThis as Record<string, unknown>).__testRoute = route
+  return { useRoute: () => route }
+})
 vi.mock('@/services/client', () => ({
   get: (...args: unknown[]) => mockGet(...args),
   post: (...args: unknown[]) => mockPost(...args),
   put: (...args: unknown[]) => mockPut(...args),
 }))
 vi.mock('vue-sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
 import { toast } from 'vue-sonner'
@@ -40,6 +45,9 @@ describe('InterviewManagePage 面试管理', () => {
     mockPost.mockReset()
     mockPut.mockReset()
     vi.clearAllMocks()
+    // 恢复默认路由参数，避免 P1-19 用例修改后串扰后续用例
+    const route = (globalThis as Record<string, unknown>).__testRoute as { params: Record<string, string> }
+    if (route) route.params = { clubId: 'club-001', activityId: 'act-1' }
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -244,19 +252,98 @@ describe('InterviewManagePage 面试管理', () => {
     const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
     await flushPromises()
 
-    // 展开轮次管理以显示跳轮表单（select 顺序：0=创建轮次mode 1=跳轮申请人）
+    // 展开轮次管理以显示跳轮表单（select 顺序：0=创建轮次mode 1=跳轮申请人 2=跳轮目标轮次）
     await wrapper.findAll('button').find((b) => b.text().includes('轮次管理'))!.trigger('click')
     const skipBtn = wrapper.findAll('button').find((b) => b.text().includes('执行跳轮'))
     expect(skipBtn, '执行跳轮按钮').toBeTruthy()
 
     const selects = wrapper.findAll('select')
     await selects[1].setValue('a2')
+    await selects[2].setValue('r1')
     const reasonInput = wrapper.findAll('input').find((i) => i.attributes('placeholder') === '跳轮原因（必填）')
     await reasonInput!.setValue('已有实习offer')
     await flushPromises()
     await skipBtn!.trigger('click')
     await flushPromises()
     expect(mockPost).toHaveBeenCalledWith('/org/club-001/recruitment/act-1/rounds/r1/skip', { applicantId: 'a2', reason: '已有实习offer' })
+    wrapper.unmount()
+  })
+
+  it('P1-20：跳轮未选目标轮次时按钮禁用，不再默认首个轮次', async () => {
+    mockPageGet([interviewRow], [openRound], [{ applicantId: 'a2', applicantName: '李四', status: 'submitted' }])
+    const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('轮次管理'))!.trigger('click')
+    const selects = wrapper.findAll('select')
+    await selects[1].setValue('a2')
+    const reasonInput = wrapper.findAll('input').find((i) => i.attributes('placeholder') === '跳轮原因（必填）')
+    await reasonInput!.setValue('已有实习offer')
+    await flushPromises()
+
+    const skipBtn = wrapper.findAll('button').find((b) => b.text().includes('执行跳轮'))
+    expect(skipBtn!.attributes('disabled'), '未选轮次时禁用').toBeDefined()
+
+    // 显式选择目标轮次后才可用
+    await selects[2].setValue('r1')
+    await flushPromises()
+    expect(skipBtn!.attributes('disabled'), '选中轮次后可用').toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('P1-19：切换活动时重置本地状态并全量重载，不残留上一活动数据', async () => {
+    const route = (globalThis as Record<string, unknown>).__testRoute as { params: Record<string, string> }
+    mockPageGet([interviewRow], [openRound], [{ applicantId: 'a1', applicantName: '张三', status: 'submitted' }])
+    const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('张三')
+
+    // 制造本地残留：选中一行 + 打开代预约面板
+    await wrapper.find('tbody tr[role="row"]').trigger('click')
+    await wrapper.findAll('button').find((b) => b.text().includes('代预约面试'))!.trigger('click')
+    expect(wrapper.text()).toContain('代申请人预约面试')
+
+    // 切换到另一活动：应重置面板/选中项并全量重载新活动数据
+    route.params = { clubId: 'club-001', activityId: 'act-2' }
+    mockGet.mockReset()
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ id: 'iv-9', applicantName: '王五', roundName: '一轮', status: 'pending', departmentName: '技术部' }] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [openRound] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [] } })
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { defaultReviewers: [], tasks: [] } })
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [] } })
+    await nextTick()
+    await flushPromises()
+    await flushPromises()
+
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-2/interviews')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-2/rounds')
+    expect(mockGet).toHaveBeenCalledWith('/org/club-001/recruitment/act-2/interviewers')
+    expect(wrapper.text()).toContain('王五')
+    expect(wrapper.text()).not.toContain('张三')
+    // 面板已关闭、选中行已清空
+    expect(wrapper.text()).not.toContain('代申请人预约面试')
+    expect(wrapper.text()).not.toContain('2023001')
+    wrapper.unmount()
+  })
+
+  it('P1-202：操作返回 accepted 时提示已受理，不误报失败（跳轮为例）', async () => {
+    mockPageGet([interviewRow], [openRound], [{ applicantId: 'a2', applicantName: '李四', status: 'submitted' }])
+    mockPost.mockResolvedValue({ kind: 'accepted', data: { taskId: 'task-1', status: 'processing' } })
+    const wrapper = mount(InterviewManagePage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('轮次管理'))!.trigger('click')
+    const selects = wrapper.findAll('select')
+    await selects[1].setValue('a2')
+    await selects[2].setValue('r1')
+    const reasonInput = wrapper.findAll('input').find((i) => i.attributes('placeholder') === '跳轮原因（必填）')
+    await reasonInput!.setValue('已有实习offer')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('执行跳轮'))!.trigger('click')
+    await flushPromises()
+
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith('跳轮已受理，正在后台处理')
     wrapper.unmount()
   })
 

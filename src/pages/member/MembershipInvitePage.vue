@@ -14,6 +14,9 @@ import { toastError } from '@/utils/toastError'
 import type { PageState } from '@/types/machine'
 import { Mail, UserPlus, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from '@lucide/vue'
 
+/** P2-48：邀请有效期常量（天）——与 mock 契约一致，避免散落的魔法数 */
+const INVITE_EXPIRE_DAYS = 7
+
 interface Invite {
   id: string
   candidateId?: string
@@ -195,7 +198,8 @@ async function handleSend() {
   const r = await post(`/org/${clubId}/members/invite`, {
     candidateId: selectedCandidate.value.id,
     departmentId: targetDept.value || null,
-    expireDays: 7,
+    // P2-48：邀请有效期 7 天，仅服务端可配置；前端沿用既有契约（与邀请卡截止时间展示一致）
+    expireDays: INVITE_EXPIRE_DAYS,
   })
   sendSubmitting.value = false
   if (r.kind === 'completed') {
@@ -359,10 +363,11 @@ onMounted(loadData)
                 :results="searchResults"
                 :loading="candidateSearching"
                 placeholder="姓名或学号..."
+                empty-text="未找到匹配的候选人"
+                :failed="searchFailed"
                 @update:model-value="scheduleSearch"
                 @select="onSelectCandidate"
               />
-              <p v-if="candidateKeyword.trim() && !candidateSearching && candidates.length === 0 && !searchFailed" class="mt-2 text-xs text-text-secondary" role="alert">未找到匹配的候选人</p>
             </div>
             <div>
               <label class="block text-xs text-text-secondary mb-1">加入部门（可选）</label>
@@ -397,6 +402,8 @@ onMounted(loadData)
         @confirm="acceptTarget && handleRespond(acceptTarget, 'accept')"
         @update:open="(v) => { if (!v) { acceptTarget = null; resetAcceptState() } }"
         @cancel="resetAcceptState"
+        @update:error-message="(v) => acceptError = v"
+        @retry="resetAcceptState"
       />
     </div>
   </PageStateBoundary>

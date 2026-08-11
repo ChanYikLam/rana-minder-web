@@ -50,6 +50,9 @@ async function handleRespond(action: 'accept' | 'reject') {
     }
   } else if (result.kind === 'accepted') {
     toastAcceptedAction(action === 'accept' ? '接受邀请已受理，正在后台处理' : '拒绝邀请已受理，正在后台处理')
+  } else if (result.kind === 'rejected' && result.error) {
+    // P2-27：展示服务端 error.message
+    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
   } else {
     toast.error('操作失败，请稍后重试')
   }
@@ -65,6 +68,8 @@ async function handleSyncConfirm() {
     toast.success('成员身份已生效')
     // 重新拉取详情：sync_failed 重试成功后 status/casdoorSync 均由后端更新
     await loadDetail()
+  } else if (result.kind === 'accepted') {
+    toastAcceptedAction('同步确认已受理，正在后台处理')
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
   }

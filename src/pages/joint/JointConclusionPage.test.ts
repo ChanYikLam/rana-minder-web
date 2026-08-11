@@ -60,4 +60,35 @@ describe('JointConclusionPage 联合结论与邀请', () => {
     expect(wrapper.text()).toContain('李四')
     wrapper.unmount()
   })
+
+  it('P1-18：同名申请人按 applicantId 分组不串号，邀请按 applicantId 挂靠对应组', async () => {
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/conclusions')) {
+        return Promise.resolve({
+          kind: 'completed',
+          data: {
+            items: [
+              { id: 'c-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', clubName: '计算机协会', status: 'concluded', conclusion: 'admit', reviewFlag: false, rating: 4, comment: '', concludedAt: '2026-01-01T00:00:00', myClub: true },
+              { id: 'c-2', applicantId: 'u-2', applicantName: '张三', clubId: 'club-002', clubName: '技术协会', status: 'concluded', conclusion: 'admit', reviewFlag: false, rating: 5, comment: '', concludedAt: '2026-01-01T00:00:00', myClub: false },
+            ],
+          },
+        })
+      }
+      return Promise.resolve({
+        kind: 'completed',
+        data: {
+          items: [
+            { id: 'inv-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', status: 'accepted', sentAt: 'x', expiredAt: 'x' },
+          ],
+        },
+      })
+    })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    // 同名两人各自成组（2 个组头），不被按姓名合并
+    expect(wrapper.findAll('p.text-base.font-medium')).toHaveLength(2)
+    // 邀请仅出现在 u-1（计算机协会）组下，u-2 组无邀请 —— 按姓名匹配的旧实现会两处都出现
+    expect(wrapper.text().split('已发送的邀请')).toHaveLength(2)
+    wrapper.unmount()
+  })
 })

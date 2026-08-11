@@ -17,6 +17,8 @@ interface NavGroup {
 
 const props = defineProps<{ groups: NavGroup[] }>()
 
+const emit = defineEmits<{ navigate: [] }>()
+
 const route = useRoute()
 const instanceId = useId()
 const expandedGroups = ref<Set<string>>(new Set())
@@ -82,6 +84,7 @@ function isItemActive(path: string): boolean {
           :to="item.path"
           class="block px-3 py-1.5 rounded-md text-xs transition-colors"
           :class="isItemActive(item.path) ? 'text-primary bg-primary-subtle font-medium' : 'text-text-secondary hover:text-primary hover:bg-subtle'"
+          @click="emit('navigate')"
         >
           {{ item.label }}
         </router-link>

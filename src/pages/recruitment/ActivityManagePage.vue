@@ -104,7 +104,6 @@ const canCloseChannel = computed(() => {
 // 规则收紧（REC-007/044）
 const tightenOpen = ref(false)
 const tightenForm = ref({ reason: '', days: 7 })
-const tightenResult = ref<{ affectedCount: number } | null>(null)
 
 async function runTighten() {
   if (!detail.value || actionLoading.value) return
@@ -114,7 +113,6 @@ async function runTighten() {
   }
   actionLoading.value = true
   tightenError.value = ''
-  tightenResult.value = null
   const clubId = route.params.clubId as string
   const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/rules/tighten`, {
     reason: tightenForm.value.reason.trim(),
@@ -122,12 +120,41 @@ async function runTighten() {
   })
   actionLoading.value = false
   if (result.kind === 'completed') {
-    tightenResult.value = result.data as { affectedCount: number }
+    // P2-19：收紧结果以 toast 呈现（面板随后关闭，原醒内文案永不可见，属死状态）
+    const affected = (result.data as { affectedCount: number })?.affectedCount ?? 0
+    toast.success(`已为 ${affected} 名已提交申请人开放补救窗口，通道已暂停`)
     tightenOpen.value = false
     await loadDetail()
   } else if (result.kind === 'rejected' && result.error) {
     toast.error((result.error as { message?: string }).message || '操作失败')
   }
+}
+
+// P2-21：暂停活动/关闭通道的原因由用户填写，不再硬编码"临时调整"/"报满关闭"
+const pendingReasonAction = ref<null | 'pause' | 'close'>(null)
+const pendingReason = ref('')
+const pendingReasonError = ref('')
+
+function askReason(action: 'pause' | 'close') {
+  pendingReasonAction.value = action
+  pendingReason.value = ''
+  pendingReasonError.value = ''
+}
+
+async function confirmReasonAction() {
+  if (!detail.value || actionLoading.value) return
+  if (!pendingReason.value.trim()) {
+    pendingReasonError.value = '必须填写操作原因'
+    return
+  }
+  pendingReasonError.value = ''
+  if (pendingReasonAction.value === 'pause') {
+    await runAction('pause', { reason: pendingReason.value.trim() })
+  } else if (pendingReasonAction.value === 'close') {
+    await runChannel('close', { reason: pendingReason.value.trim() })
+  }
+  pendingReasonAction.value = null
+  pendingReason.value = ''
 }
 
 // 活动编辑
@@ -235,7 +262,7 @@ onMounted(loadDetail)
               <button
                 class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
                 :disabled="actionLoading"
-                @click="runAction('pause', { reason: '临时调整' })"
+                @click="askReason('pause')"
               >
                 <PauseCircle :size="15" /> 暂停活动
               </button>
@@ -289,7 +316,7 @@ onMounted(loadDetail)
                 v-if="canCloseChannel"
                 class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-subtle text-text-primary text-sm font-medium hover:bg-muted disabled:opacity-60"
                 :disabled="actionLoading"
-                @click="runChannel('close', { reason: '报满关闭' })"
+                @click="askReason('close')"
               >
                 <DoorClosed :size="15" /> 关闭通道
               </button>
@@ -317,6 +344,33 @@ onMounted(loadDetail)
               >
                 <RefreshCw :size="15" /> 恢复通道
               </button>
+            </div>
+            <div v-if="pendingReasonAction" class="mt-3 space-y-2 rounded-lg border border-border bg-elevated p-3">
+              <p class="text-xs text-text-secondary">
+                请填写{{ pendingReasonAction === 'pause' ? '暂停活动' : '关闭通道' }}的原因（将留痕）。
+              </p>
+              <textarea
+                v-model="pendingReason"
+                rows="2"
+                class="w-full px-3 py-2 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                placeholder="操作原因（必填）"
+              />
+              <div class="flex items-center gap-2">
+                <button
+                  class="px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"
+                  :disabled="actionLoading"
+                  @click="confirmReasonAction"
+                >
+                  {{ actionLoading ? '执行中...' : '确认' }}
+                </button>
+                <button
+                  class="px-3 h-9 rounded-md border border-border text-text-secondary text-sm hover:bg-subtle"
+                  @click="pendingReasonAction = null"
+                >
+                  取消
+                </button>
+                <p v-if="pendingReasonError" class="text-xs text-destructive">{{ pendingReasonError }}</p>
+              </div>
             </div>
             <div v-if="tightenOpen" class="mt-3 space-y-2 rounded-lg border border-border bg-elevated p-3">
               <p class="text-xs text-text-secondary">
@@ -352,9 +406,6 @@ onMounted(loadDetail)
                 </button>
               </div>
               <p v-if="tightenError" class="text-xs text-destructive">{{ tightenError }}</p>
-              <p v-if="tightenResult" class="text-xs text-primary">
-                已为 {{ tightenResult.affectedCount }} 名已提交申请人开放补救窗口，通道已暂停。
-              </p>
             </div>
           </div>
 
@@ -478,6 +529,8 @@ onMounted(loadDetail)
         :succeeded="riskSucceeded"
         :error-message="riskError"
         @confirm="riskAction === 'complete' ? runAction('complete') : runAction('cancel', { reason: '社团主动取消', confirmAcceptedSync: true })"
+        @update:error-message="(v) => riskError = v"
+        @retry="riskError = ''"
       />
     </div>
   </PageStateBoundary>

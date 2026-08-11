@@ -106,6 +106,8 @@ onMounted(loadData)
         :executing="busy"
         :error-message="reasonError || undefined"
         @confirm="handleForceComplete"
+        @update:error-message="(v) => reasonError = v"
+        @retry="reasonError = ''"
       >
         <template #extra>
           <input

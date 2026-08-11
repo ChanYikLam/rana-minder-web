@@ -138,8 +138,13 @@ const { searching, seq, schedule } = useDebouncedSearch({
 // 输入 300ms 防抖；清空关键字立即重置并作废在途请求
 watch(keyword, (kw) => schedule(kw))
 
+// P2-59：Group 详情请求加代次保护，先 A 后 B、A 晚返回时不覆盖后选的 B
+let groupDetailSeq = 0
+
 async function onSelectGroup(r: SearchResult) {
+  const mySeq = ++groupDetailSeq
   const detail = await get<GroupDetail>('/admin/groups/' + r.id)
+  if (mySeq !== groupDetailSeq) return
   if (detail.kind !== 'completed') return
   selectedGroup.value = (detail as { kind: 'completed'; data: GroupDetail }).data
   form.value.name = form.value.name || selectedGroup.value.name
@@ -206,7 +211,9 @@ onMounted(loadInitial)
           v-model="keyword"
           :results="searchResults"
           :loading="searching"
+          :failed="searchFailed"
           placeholder="输入 Group 名称或路径搜索"
+          empty-text="无匹配 Group：需满足社团级层级且未重复绑定；部门/职位级 Group 不可作为社团接入。"
           @select="onSelectGroup"
         />
         <div v-if="selectedGroup" class="mt-4 rounded-md border border-success/40 bg-success-subtle/40 p-3">
@@ -215,9 +222,6 @@ onMounted(loadInitial)
           </p>
           <p class="text-xs text-text-secondary mt-1">{{ selectedGroup.path }} · {{ selectedGroup.members.length }} 名成员</p>
         </div>
-        <p v-if="searchResults.length === 0 && keyword.trim() && !searching && !searchFailed" class="mt-2 text-xs text-text-secondary">
-          无匹配 Group：需满足社团级层级且未重复绑定；部门/职位级 Group 不可作为社团接入。
-        </p>
       </Card>
 
       <!-- Step 2: 基本信息 -->

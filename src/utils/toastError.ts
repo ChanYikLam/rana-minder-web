@@ -1,9 +1,10 @@
 import { toast } from 'vue-sonner'
 import type { ApiError } from '@/types/contracts'
 import { ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
+import { toastAcceptedAction } from '@/utils/acceptedResult'
 
 export interface ToastErrorResult {
-  kind: string
+  kind: 'rejected' | 'accepted' | 'external_uncertain' | 'dependency_unavailable' | 'concurrency_conflict' | string
   error?: ApiError
 }
 
@@ -18,6 +19,16 @@ export function toastError(
   result: ToastErrorResult,
   fallback: string,
 ): void {
+  if (result.kind === 'accepted') {
+    // 202/IFC-ERR-014：异步受理不是失败，统一提示已受理，避免引导重复提交
+    toastAcceptedAction()
+    return
+  }
+  if (result.kind === 'external_uncertain') {
+    // IFC-ERR-013：结果暂时无法确认，提示不要重复提交（不再落入失败误报）
+    toast.info(ERROR_MESSAGES['IFC-ERR-013'])
+    return
+  }
   toast.error(errorMessage(result.error, fallback))
 }
 
@@ -26,6 +37,14 @@ export function toastErrorWithSupport(
   result: ToastErrorResult,
   fallback: string,
 ): void {
+  if (result.kind === 'accepted') {
+    toastAcceptedAction()
+    return
+  }
+  if (result.kind === 'external_uncertain') {
+    toast.info(ERROR_MESSAGES['IFC-ERR-013'])
+    return
+  }
   const error = result.error
   if (!error) {
     toast.error(fallback)

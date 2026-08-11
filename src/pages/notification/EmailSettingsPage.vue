@@ -14,7 +14,7 @@ import { useSessionViewStore } from '@/state/sessionViewStore'
 const route = useRoute()
 const session = useSessionViewStore()
 const state = ref<PageState>('loading')
-const config = ref({ smtpHost: '', smtpPort: 465, smtpUser: '', fromName: '', encryption: 'ssl', verified: false })
+const config = ref({ smtpHost: '', smtpPort: 465, smtpUser: '', smtpPassword: '', fromName: '', encryption: 'ssl', verified: false })
 const testing = ref(false)
 const testError = ref<string | null>(null)
 const saving = ref(false)
@@ -44,6 +44,9 @@ const UI_TO_KIND: Record<keyof typeof preferences.value, string> = {
 }
 const fullPreferences = ref<Record<string, boolean>>({})
 
+// 是否已存在密钥（保存过或轮换过），用于占位文案
+const keySet = computed(() => config.value.verified || config.value.smtpPassword !== '')
+
 const scope = computed(() => (route.meta.scope as string) || 'personal')
 const scopeLabel = computed(() => {
   const map: Record<string, string> = { personal: '个人邮件偏好', club: '社团发信配置', platform: '平台发信配置' }
@@ -53,26 +56,25 @@ const scopeLabel = computed(() => {
 const isConfig = computed(() => scope.value !== 'personal')
 
 async function loadData() {
-  if (!isConfig.value) {
-    state.value = 'loading'
-    const apiScope = resolveApiScope(route)
-    if (apiScope) {
-      const result = await get<{ preferences: Record<string, boolean> }>(`${apiScope.prefix}/notifications/preferences`)
-      if (result.kind === 'completed') {
-        fullPreferences.value = result.data.preferences
-        for (const [kind, uiKey] of Object.entries(KIND_TO_UI)) {
-          if (typeof fullPreferences.value[kind] === 'boolean') {
-            preferences.value[uiKey] = fullPreferences.value[kind]
-          }
-        }
-      }
-    }
-    state.value = 'normal'
-    return
-  }
   state.value = 'loading'
   const apiScope = resolveApiScope(route)
   if (!apiScope) { state.value = 'error'; return }
+  if (!isConfig.value) {
+    const result = await get<{ preferences: Record<string, boolean> }>(`${apiScope.prefix}/notifications/preferences`)
+    if (result.kind === 'completed') {
+      fullPreferences.value = result.data.preferences
+      for (const [kind, uiKey] of Object.entries(KIND_TO_UI)) {
+        if (typeof fullPreferences.value[kind] === 'boolean') {
+          preferences.value[uiKey] = fullPreferences.value[kind]
+        }
+      }
+      state.value = 'normal'
+    } else {
+      // P1-15：偏好加载失败不得静默吞错（否则保存会以空对象覆写未展示的偏好类型），降级为可重试错误态
+      state.value = errorToPageState(errorCodeOf(result))
+    }
+    return
+  }
   const result = await get<typeof config.value>(`${apiScope.prefix}/notifications/email-config`)
   if (result.kind === 'completed') {
     config.value = result.data
@@ -91,6 +93,7 @@ async function handleTest() {
     smtpHost: config.value.smtpHost,
     smtpPort: config.value.smtpPort,
     smtpUser: config.value.smtpUser,
+    smtpPassword: config.value.smtpPassword,
     fromName: config.value.fromName,
     encryption: config.value.encryption,
   })
@@ -135,6 +138,19 @@ async function handleRefillKey() {
 }
 
 async function handleSave() {
+  // P2-55：客户端校验补齐（host 非空、端口范围、账号非空），与 placeholder 承诺一致
+  if (!config.value.smtpHost.trim()) {
+    toast.error('请填写 SMTP 服务器地址')
+    return
+  }
+  if (!Number.isInteger(config.value.smtpPort) || config.value.smtpPort < 1 || config.value.smtpPort > 65535) {
+    toast.error('端口需为 1-65535 之间的整数')
+    return
+  }
+  if (!config.value.smtpUser.trim()) {
+    toast.error('请填写发信账号')
+    return
+  }
   saving.value = true
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
@@ -142,6 +158,7 @@ async function handleSave() {
     smtpHost: config.value.smtpHost,
     smtpPort: config.value.smtpPort,
     smtpUser: config.value.smtpUser,
+    smtpPassword: config.value.smtpPassword,
     fromName: config.value.fromName,
     encryption: config.value.encryption,
   })
@@ -226,12 +243,12 @@ onMounted(loadData)
               <label class="block text-sm font-medium text-text-primary mb-1">发信密钥</label>
               <div class="flex gap-2">
                 <input
+                  v-model="config.smtpPassword"
                   type="password"
-                  value=""
-                  placeholder="••••••••（已配置，不回显明文）"
-                  class="flex-1 h-10 px-3 rounded-md border border-border bg-muted text-sm text-text-secondary focus:outline-2 focus:outline-primary"
-                  readonly
-                  aria-label="发信密钥（已脱敏）"
+                  :placeholder="config.verified || keySet ? '••••••••（已配置，可输入新密钥覆盖）' : '输入发信密钥'"
+                  class="flex-1 h-10 px-3 rounded-md border border-border bg-elevated text-sm text-text-primary focus:outline-2 focus:outline-primary"
+                  autocomplete="new-password"
+                  aria-label="发信密钥"
                 />
                 <button
                   class="px-3 h-10 rounded-md border border-border text-sm text-text-primary hover:bg-subtle disabled:opacity-60"
@@ -241,7 +258,7 @@ onMounted(loadData)
                   {{ refilling ? '处理中...' : '重新填写' }}
                 </button>
               </div>
-              <p class="text-xs text-text-secondary mt-1">密钥不明文回显，只能重新填写或轮换</p>
+              <p class="text-xs text-text-secondary mt-1">密钥不明文回显；已配置密钥会保留，输入新密钥可覆盖</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-text-primary mb-1">发件人名称</label>

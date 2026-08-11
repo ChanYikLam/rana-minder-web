@@ -170,7 +170,7 @@ function closeMobileNav() {
     <!-- Body: Sidebar + Content -->
     <div class="flex flex-1">
       <aside
-        class="flex flex-col w-56 border-r bg-elevated overflow-y-auto"
+        class="hidden lg:flex flex-col w-56 border-r bg-elevated overflow-y-auto"
         role="complementary"
         aria-label="主导航"
       >
@@ -214,13 +214,13 @@ function closeMobileNav() {
         <!-- 社团管理 -->
         <template v-if="canAccessWorkspace">
           <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">社团管理</p>
-          <WorkspaceNav :groups="navGroups" />
+          <WorkspaceNav :groups="navGroups" @navigate="closeMobileNav" />
         </template>
 
         <!-- 平台 -->
         <template v-if="isAdmin">
           <p class="px-3 pt-2 pb-1 text-xs font-medium text-text-secondary">平台</p>
-          <WorkspaceNav :groups="adminNavGroups" />
+          <WorkspaceNav :groups="adminNavGroups" @navigate="closeMobileNav" />
         </template>
       </aside>
 
@@ -315,11 +315,11 @@ function closeMobileNav() {
           </nav>
           <template v-if="canAccessWorkspace">
             <p class="px-4 pt-2 pb-1 text-xs font-medium text-text-secondary">社团管理</p>
-            <WorkspaceNav :groups="navGroups" />
+            <WorkspaceNav :groups="navGroups" @navigate="closeMobileNav" />
           </template>
           <template v-if="isAdmin">
             <p class="px-4 pt-2 pb-1 text-xs font-medium text-text-secondary">平台</p>
-            <WorkspaceNav :groups="adminNavGroups" />
+            <WorkspaceNav :groups="adminNavGroups" @navigate="closeMobileNav" />
           </template>
         </div>
       </DrawerContent>

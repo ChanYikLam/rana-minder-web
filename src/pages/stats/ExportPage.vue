@@ -99,13 +99,18 @@ function stopAllPolling() {
   pollingTimers.clear()
 }
 
+const EXPORT_TYPE_MEMBERS = 'members'
+const EXPORT_TYPE_LABELS: Record<string, string> = {
+  [EXPORT_TYPE_MEMBERS]: '成员名单',
+}
+
 async function handleCreate() {
   const apiScope = resolveApiScope(route)
   if (!apiScope) return
   executing.value = true
   succeeded.value = false
   errorMessage.value = ''
-  const result = await post(`${apiScope.prefix}/exports`, { type: '成员名单' })
+  const result = await post(`${apiScope.prefix}/exports`, { type: EXPORT_TYPE_MEMBERS })
   executing.value = false
   if (result.kind === 'completed') {
     const task = (result.data as ExportTask) || null
@@ -235,7 +240,7 @@ onBeforeUnmount(stopAllPolling)
                 <FileText :size="18" />
               </div>
               <div>
-                <p class="text-sm font-medium text-text-primary">{{ task.type }}</p>
+                <p class="text-sm font-medium text-text-primary">{{ EXPORT_TYPE_LABELS[task.type] ?? task.type }}</p>
                 <p class="text-xs text-text-secondary">{{ formatSize(task.fileSize) }} · 创建于 {{ formatTime(task.createdAt) }}</p>
               </div>
             </div>
@@ -274,19 +279,23 @@ onBeforeUnmount(stopAllPolling)
       :error-message="errorMessage"
       @confirm="handleCreate"
       @cancel="resetConfirmState"
+      @update:error-message="(v) => errorMessage = v"
+      @retry="resetConfirmState"
     />
 
     <HighRiskConfirm
       v-model:open="downloadConfirmOpen"
-      :title="`下载导出文件：${downloadTarget?.type ?? ''}`"
+      :title="`下载导出文件：${downloadTarget ? (EXPORT_TYPE_LABELS[downloadTarget.type] ?? downloadTarget.type) : ''}`"
       description="下载会校验当前权限与作用域，每次下载会写入审计日志。"
-      :targets="downloadTarget ? [{ id: downloadTarget.id, label: downloadTarget.type, detail: `${formatSize(downloadTarget.fileSize)} · ${downloadTarget.downloadUrl}` }] : []"
+      :targets="downloadTarget ? [{ id: downloadTarget.id, label: EXPORT_TYPE_LABELS[downloadTarget.type] ?? downloadTarget.type, detail: `${formatSize(downloadTarget.fileSize)} · ${downloadTarget.downloadUrl}` }] : []"
       impact-summary="下载属于高风险命令：含敏感字段或大量成员信息时会触发重认证；请填写下载原因用于审计。"
       confirm-label="确认下载"
       reauth-required
       :executing="downloading"
       :error-message="downloadError"
       @confirm="confirmDownload"
+      @update:error-message="(v) => downloadError = v"
+      @retry="downloadError = ''"
     >
       <template #extra>
         <label class="block text-sm font-medium text-text-primary mb-1.5">下载原因（必填，至少 5 字，用于审计）</label>

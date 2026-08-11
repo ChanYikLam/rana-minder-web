@@ -12,6 +12,7 @@ const { mockGet, mockPost, mockPush } = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { clubId: 'club-001', formId: 'form-001' }, path: '/org/club-001/forms/designer/form-001', meta: {} }),
   useRouter: () => ({ push: mockPush }),
+  onBeforeRouteLeave: () => {},
 }))
 
 vi.mock('@/services/client', () => ({
@@ -170,6 +171,74 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     // 未重载，仍为草稿态且发布按钮保留
     expect(wrapper.text()).toContain('草稿')
     expect(wrapper.findAll('button').find((b) => b.text().includes('发布'))).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('未保存更改时发布被拦截（P1-17）', async () => {
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDesigner('draft', 1) })
+    const wrapper = mount(FormDesignerPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 修改字段触发 dirty → 发布被拦截且不发请求
+    const addBtn = wrapper.findAll('button').find((b) => b.text().includes('短文本'))
+    await addBtn!.trigger('click')
+    await nextTick()
+    await wrapper.findAll('button').find((b) => b.text().includes('发布'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).not.toHaveBeenCalled()
+    expect(mockToastError).toHaveBeenCalledWith('存在未保存的更改，请先保存后再发布')
+    wrapper.unmount()
+  })
+
+  it('空标签字段发布被拦截（P2-62）', async () => {
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed' as const,
+      data: mockDesigner('draft', 1, [{ id: 'f1', type: 'text', label: '', required: false, readonly: false, permission: 'read_write', options: null, description: null }]),
+    })
+    const wrapper = mount(FormDesignerPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('发布'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).not.toHaveBeenCalled()
+    expect(mockToastError).toHaveBeenCalledWith('存在未填写标签的字段，请完善后再发布')
+    wrapper.unmount()
+  })
+
+  it('拖拽重排字段顺序并标记未保存（P2-62 GripVertical）', async () => {
+    mockGet.mockResolvedValueOnce({
+      kind: 'completed' as const,
+      data: mockDesigner('draft', 1, [
+        { id: 'f1', type: 'text', label: '姓名', required: false, readonly: false, permission: 'read_write', options: null, description: null },
+        { id: 'f2', type: 'text', label: '联系手机', required: false, readonly: false, permission: 'read_write', options: null, description: null },
+      ]),
+    })
+    const wrapper = mount(FormDesignerPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    const canvasCard = wrapper.findAll('.card').find((c) => c.text().includes('表单画布'))!
+    const rows = canvasCard.findAll('[draggable]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.text()).toContain('姓名')
+    expect(rows[1]!.text()).toContain('联系手机')
+
+    // 从第 1 行（姓名）拖到第 2 行位置 → 顺序互换
+    await rows[0]!.trigger('dragstart')
+    await rows[1]!.trigger('drop')
+    await nextTick()
+
+    const after = canvasCard.findAll('[draggable]')
+    expect(after[0]!.text()).toContain('联系手机')
+    expect(after[1]!.text()).toContain('姓名')
+
+    // 拖拽产生未保存更改：发布被拦截
+    await wrapper.findAll('button').find((b) => b.text().includes('发布'))!.trigger('click')
+    await flushPromises()
+    expect(mockPost).not.toHaveBeenCalled()
+    expect(mockToastError).toHaveBeenCalledWith('存在未保存的更改，请先保存后再发布')
     wrapper.unmount()
   })
 

@@ -68,6 +68,11 @@ async function loadCandidates() {
       loadFailed.value = true
       candidatesError.value = true
     }
+  } catch (err) {
+    // P2-63：abort 中断属于预期取消，不产生 unhandled rejection
+    if (err instanceof DOMException && err.name === 'AbortError') return
+    loadFailed.value = true
+    candidatesError.value = true
   } finally {
     loadingCandidates.value = false
   }
@@ -366,6 +371,8 @@ const executingTotal = computed(() => (retryingIds.value.length ? retryingIds.va
       :error-message="confirmError"
       @confirm="confirmExecute"
       @cancel="cancelConfirm"
+      @update:error-message="(v) => confirmError = v"
+      @retry="confirmError = ''"
     >
       <template #extra>
         <label class="block text-sm font-medium text-text-primary mb-1.5">执行原因（必填，至少 5 字，用于审计）</label>
