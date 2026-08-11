@@ -178,4 +178,39 @@ describe('P1-005 Group→Template 映射生命周期', () => {
     expect(mappings.find((m) => m.groupId === 'grp-vice-004')?.templateId).toBe('tpl-002')
     expect(mappings.find((m) => m.groupId === 'grp-lead-004')?.templateId).toBe('tpl-001')
   })
+
+  it('MRM-A2：completeWizard 将 path 形态的 deptGroups/roleGroups 解析回 group ID，模板映射 groupId 契约一致', () => {
+    const result = createClubAccess({
+      groupId: 'grp-004',
+      name: 'path形态向导社',
+      description: '测试',
+      leaderGroupId: 'grp-lead-004',
+      deptGroups: [],
+      roleGroups: [],
+      leaderRoleGroup: '',
+    })
+    expect(result.ok).toBe(true)
+    const clubId = (result.data as { clubId: string }).clubId
+    // 历史/手写数据：向导直接以 path 形态保存部门/职位引用（绕过 saveWizardStep 的 ID 校验）
+    const wizardClub = clubAccesses.find((c) => c.clubId === clubId)!
+    wizardClub.wizard = {
+      ...wizardClub.wizard!,
+      deptGroups: ['/学校学生组织/摄影协会/创作部'],
+      roleGroups: ['/学校学生组织/摄影协会/副负责人'],
+    }
+
+    const r = completeWizard(clubId)
+    expect(r.ok).toBe(true)
+
+    const club = clubAccesses.find((c) => c.clubId === clubId)!
+    // deptGroupIds/roleGroupIds 存储的是 group ID，而非 path
+    expect(club.deptGroupIds).toEqual(['grp-dept-004'])
+    expect(club.roleGroupIds).toEqual(['grp-vice-004'])
+    // 模板映射的 groupId 是 ID 形态，前端可按 groupId 关联 Group 详情
+    const mappings = getTemplateMappings(clubId)
+    expect(mappings.find((m) => m.groupId === 'grp-dept-004')?.templateId).toBe('tpl-003')
+    expect(mappings.find((m) => m.groupId === 'grp-vice-004')?.templateId).toBe('tpl-002')
+    // 不应存在以 path 作为 groupId 的映射
+    expect(mappings.some((m) => m.groupId.startsWith('/'))).toBe(false)
+  })
 })
