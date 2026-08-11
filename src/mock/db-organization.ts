@@ -680,6 +680,24 @@ export function saveWizardStep(clubId: string, input: { step: number; selectedGr
   return { ok: true, data: listClubAccesses().find((c) => c.clubId === clubId) }
 }
 
+/**
+ * MRM-A2：向导保存的部门/职位引用在极端/历史数据下可能混入 path 形态（如
+ * '/学校学生组织/计算机协会/技术部'）而非 group ID。deptGroupIds/roleGroupIds
+ * 作为模板映射的 groupId 契约必须是 ID，统一在此解析回 group ID：
+ * - 已是 ID（groups 中可命中 id）则原样保留；
+ * - 是 path（groups 中命中 path）则解析为对应 id；
+ * - 两者都命中不了则原样透传（由后续 ensureMapping 按字符串建映射，不抛错）。
+ */
+function resolveGroupIds(entries: string[] | undefined): string[] {
+  if (!entries || entries.length === 0) return []
+  return entries.map((entry) => {
+    const byId = findGroup(entry)
+    if (byId) return entry
+    const byPath = groups.find((g) => g.path === entry)
+    return byPath ? byPath.id : entry
+  })
+}
+
 export function completeWizard(clubId: string): { ok: boolean; error?: string; data?: ClubAccessItem } {
   const club = findClub(clubId)
   if (!club) return { ok: false, error: '未找到该社团' }
@@ -699,8 +717,9 @@ export function completeWizard(clubId: string): { ok: boolean; error?: string; d
   club.groupId = groupId
   club.leaderGroupId = leaderGroupId
   club.leaderName = memberNames[leaderGroup.members[0]] ?? null
-  club.deptGroupIds = club.wizard?.deptGroups ?? club.deptGroupIds ?? []
-  club.roleGroupIds = club.wizard?.roleGroups ?? club.roleGroupIds ?? []
+  // MRM-A2：部门/职位引用统一解析为 group ID（兼容历史 path 形态，保证模板映射 groupId 契约）
+  club.deptGroupIds = resolveGroupIds(club.wizard?.deptGroups ?? club.deptGroupIds ?? [])
+  club.roleGroupIds = resolveGroupIds(club.wizard?.roleGroups ?? club.roleGroupIds ?? [])
   club.boundAt = nowIso()
   club.mappingVersion += 1
   club.status = 'enabled'
