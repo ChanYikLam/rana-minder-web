@@ -86,9 +86,17 @@ describe('P2-014/015/016 评审整改回归（导出鉴权/触发器收敛/配�
   })
 
   it('P2-2：成员级外部变更触发器不再注册 HTTP 路由（演示入口收敛为 db 直调）', () => {
-    expect(() =>
-      invokeHandler('/api/org/:clubId/members/:memberId/trigger-external-change', 'post', '/api/org/club-001/members/mem-001/trigger-external-change', { input: {} }),
-    ).toThrow(/handler 未找到/)
+    // 直接验证 handlers 清单中不含该路由（不依赖 invokeHandler 找不到 handler 时 throw 的负向断言）
+    expect(
+      handlers.some((h) => h.url === '/api/org/:clubId/members/:memberId/trigger-external-change' && h.method === 'post'),
+    ).toBe(false)
+    // db 层触发器仍可用：演示入口收敛为 db 直调，不依赖 HTTP 路由
+    const member = db.findMember('club-001', 'mem-001')
+    expect(member).toBeTruthy()
+    const r = db.triggerMemberExternalChange('club-001', 'mem-001', 'external_change')
+    expect(r.ok).toBe(true)
+    expect(r.registered).toBe(true)
+    expect(r.anomaly?.kind).toBe('external_change')
   })
 
   it('P2-3：admin config POST 落内存库，GET 回读保存值（重进页面不还原）', async () => {
