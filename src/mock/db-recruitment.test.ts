@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, afterEach } from 'vitest'
+import { beforeEach, describe, expect, it, afterEach, vi } from 'vitest'
 
 import { mockUsers, USER_APPLICANT_MAP } from './auth'
 import { saveJointApplicationDraft, submitJointApplication, createJointInvitation, interviewerTimeConflict, bookInterview, tightenRecruitmentRules, applyAdjustmentTimeouts, resolveAdjustment, submitApplication, saveApplicationDraft, closeChannel, recruitmentApplications, submitReview, cancelRound, recruitmentReviews, applicantNameOf, applicantStudentIdOf, markAttendance, requestSupplement, assignInterviewerTask, cancelJointActivity, tasksOfActivity, jointActivities, interviewerTasks, markJointAttendance, bookJointInterview, jointSlots, jointInterviews, jointReviewExtras, upsertJointReviewExtra } from './db-recruitment'
@@ -266,6 +266,31 @@ describe('联合评价提交链路（JNT-012 覆盖写保留修改历史）', ()
     expect(extra.history[1].comment).toBe('第一次修改')
     expect(extra.history[1].version).toBe(2)
     expect(extra.version).toBe(3)
+  })
+
+  it('MRM-021：history 条目的 updatedAt 记录本次修改时间，而非复用旧 concludedAt', () => {
+    vi.useFakeTimers()
+    try {
+      const seed = jointReviewExtras.find((e) => e.jointId === 'jnt-001' && e.applicantId === 'u-006' && e.clubId === 'club-002')!
+      const oldConcludedAt = seed.concludedAt
+      const extra = upsertJointReviewExtra('jnt-001', 'u-006', 'club-002', {
+        rating: 5, comment: '修改评语', authorName: '林晓峰', authorRole: 'club_leader',
+      })
+      expect(extra.history.length).toBe(1)
+      // 旧值的时间字段保留为旧的 concludedAt（评价当时），而 updatedAt 是本次修改发生的时间
+      expect(extra.history[0].concludedAt).toBe(oldConcludedAt)
+      expect(extra.history[0].updatedAt).toBeTruthy()
+      expect(extra.history[0].updatedAt).not.toBe(oldConcludedAt)
+      // 时间推进后再次修改：新 history 条目 updatedAt 为修改时刻，区别于上一条的 concludedAt
+      vi.setSystemTime(new Date(new Date(extra.history[0].concludedAt!).getTime() + 60_000))
+      const extra2 = upsertJointReviewExtra('jnt-001', 'u-006', 'club-002', {
+        rating: 4, comment: '再次修改', authorName: '林晓峰', authorRole: 'club_leader',
+      })
+      expect(extra2.history.length).toBe(2)
+      expect(extra2.history[1].updatedAt).not.toBe(extra2.history[1].concludedAt)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

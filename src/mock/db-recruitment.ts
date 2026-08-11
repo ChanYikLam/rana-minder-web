@@ -675,7 +675,7 @@ export function upsertJointReviewExtra(jointId: string, applicantId: string, clu
     // JNT-012：修改时保留旧值、新值、时间 → 写入 history
     existing.history = [
       ...(existing.history || []),
-      { rating: existing.rating, comment: existing.comment, concludedAt: existing.concludedAt, version: existing.version, updatedAt: existing.concludedAt || new Date().toISOString() },
+      { rating: existing.rating, comment: existing.comment, concludedAt: existing.concludedAt, version: existing.version, updatedAt: new Date().toISOString() },
     ]
     existing.rating = input.rating
     existing.comment = input.comment
