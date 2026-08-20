@@ -160,9 +160,9 @@ async function handleSave() {
     toast.error('请填写发信账号')
     return
   }
-  saving.value = true
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { saving.value = false; return }
+  if (!apiScope) return
+  saving.value = true
   try {
     const result = await post(`${apiScope.prefix}/notifications/email-config`, {
       smtpHost: config.value.smtpHost,

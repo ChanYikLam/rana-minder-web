@@ -182,10 +182,10 @@ async function handlePublish() {
     toast.error('存在未填写标签的字段，请完善后再发布')
     return
   }
-  publishing.value = true
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { publishing.value = false; return }
+  if (!apiScope) return
+  publishing.value = true
   try {
     const result = await post(`${apiScope.prefix}/forms/designer/${id}/publish`, { version: currentVersion.value })
     if (result.kind === 'completed') {

@@ -164,10 +164,10 @@ async function handleSubmit() {
     toast.error('请完善必填项并确认附件检查完成后再提交')
     return
   }
-  submitting.value = true
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { submitting.value = false; return }
+  if (!apiScope) return
+  submitting.value = true
   try {
     // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键
     const dataFingerprint = buildFingerprint(formData.value)
