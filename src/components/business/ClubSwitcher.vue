@@ -171,7 +171,7 @@ onMounted(loadClubs)
         </DropdownMenuItem>
         <p v-if="loadError" class="px-2 py-4 text-sm text-text-secondary">
           社团列表加载失败
-          <button class="mt-1 w-full text-primary hover:underline" @click="() => loadClubs()">重试</button>
+          <button class="mt-1 w-full text-primary hover:underline" @click="() => loadClubs(true)">重试</button>
         </p>
         <p v-else-if="clubs.length === 0" class="px-2 py-4 text-sm text-text-secondary">暂无加入的社团</p>
       </template>

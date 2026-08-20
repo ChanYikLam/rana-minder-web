@@ -332,4 +332,42 @@ describe('ClubSwitcher 社团切换', () => {
     expect(mocks.getMyClubs).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
+
+  it('P2-16：强制刷新失败后保留旧缓存，点击重试能强制重新拉取', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
+    const session = seedSession()
+    // 首次加载成功，缓存 club-001
+    mocks.getMyClubs.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }] },
+    })
+    // lastLoadedAt 强制刷新失败：clubs 仍保留旧数据、clubsSessionKey 不变，但进入错误态
+    mocks.getMyClubs.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    // 重试成功
+    mocks.getMyClubs.mockResolvedValueOnce({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }, { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' }] },
+    })
+
+    const wrapper = await mountSwitcher()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
+
+    // 会话重载触发强制刷新，但本次失败 → 展示错误态，旧列表仍保留
+    session.lastLoadedAt = Date.now()
+    await flushPromises()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('社团列表加载失败')
+
+    // 点击重试：因旧缓存命中短路，普通 loadClubs() 会被 return；改为 loadClubs(true) 后应强制重新拉取
+    const retry = wrapper.findAll('button').find((b) => b.text().includes('重试'))!
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(3)
+    // 重试成功，错误态消失、新社团出现在菜单
+    expect(wrapper.text()).not.toContain('社团列表加载失败')
+    expect(wrapper.findAll('.dd-item').some((i) => i.text().includes('电子设计协会'))).toBe(true)
+    wrapper.unmount()
+  })
 })
