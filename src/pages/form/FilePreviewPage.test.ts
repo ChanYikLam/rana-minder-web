@@ -27,7 +27,10 @@ const approvedFile = {
 
 describe('FilePreviewPage 文件预览', () => {
   beforeEach(() => vi.clearAllMocks())
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it('已通过检查：展示文件信息与下载按钮', async () => {
     mockGet.mockResolvedValue({ kind: 'completed', data: approvedFile })
@@ -36,6 +39,21 @@ describe('FilePreviewPage 文件预览', () => {
     expect(wrapper.text()).toContain('简历.pdf')
     expect(wrapper.text()).toContain('2.0 KB')
     expect(wrapper.text()).toContain('下载文件')
+  })
+
+  it('accepted 异步受理：轮询至 completed 后自动展示文件', async () => {
+    vi.useFakeTimers()
+    mockGet
+      .mockResolvedValueOnce({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } })
+      .mockResolvedValue({ kind: 'completed', data: approvedFile })
+    const wrapper = mount(FilePreviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('简历.pdf')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.text()).toContain('简历.pdf')
+    expect(wrapper.text()).toContain('下载文件')
+    wrapper.unmount()
   })
 
   it('检查中：不可下载并提示安全检查中', async () => {
