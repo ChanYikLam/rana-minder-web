@@ -6,41 +6,20 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import { identityApi } from '@/services'
+import { useMyClubs, type MyClub } from '@/composables/useMyClubs'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useSessionViewStore, mergeClubPermissions } from '@/state/sessionViewStore'
 import { useStateView } from '@/composables/useStateView'
-import type { WorkspaceContext } from '@/types/domain'
-
-interface MyClub {
-  clubId: string
-  clubName: string
-  role: WorkspaceContext['role']
-}
 
 const router = useRouter()
 const workspace = useWorkspaceContextStore()
 const session = useSessionViewStore()
 const { roleLabel } = useStateView()
 
-const clubs = ref<MyClub[]>([])
-const loading = ref(false)
-const loadError = ref(false)
-const switching = ref(false)
+// 数据获取下沉 useMyClubs composable，组件只消费 clubs/loading/loadError 并驱动交互
+const { clubs, loading, loadError, load: loadClubs } = useMyClubs()
 
-async function loadClubs() {
-  if (clubs.value.length > 0 || loading.value) return
-  loading.value = true
-  loadError.value = false
-  const result = await identityApi.getMyClubs()
-  loading.value = false
-  if (result.kind === 'completed') {
-    clubs.value = result.data.clubs
-  } else {
-    // P2-14：拉取失败不再静默——否则菜单误导"暂无加入的社团"
-    loadError.value = true
-  }
-}
+const switching = ref(false)
 
 // P2-6：落点跟随权限（与 loginTarget.ts / 根守卫同一口径），无 club:dashboard:view 时不再硬跳 dashboard
 // 直落无权限页，而是回退个人中心/平台管理
