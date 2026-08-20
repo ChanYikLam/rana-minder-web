@@ -303,8 +303,8 @@ onMounted(() => {
                 <p v-if="hasAnswerFiles(field.id)" class="text-xs text-text-secondary">{{ field.label }}</p>
                 <div v-if="hasAnswerFiles(field.id)" class="mt-1 space-y-1">
                   <router-link
-                    v-for="(f, idx) in answerFiles(application.answers?.[field.id])"
-                    :key="`${field.id}-${idx}`"
+                    v-for="(f) in answerFiles(application.answers?.[field.id])"
+                    :key="f.id"
                     :to="`/files/${f.id}`"
                     class="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
                   >
@@ -384,8 +384,8 @@ onMounted(() => {
               <p class="text-xs text-text-secondary mb-1">同轮评价（{{ selected.reviews.length }} 条）</p>
               <div class="space-y-2">
                 <div
-                  v-for="(r, idx) in selected.reviews"
-                  :key="idx"
+                  v-for="(r) in selected.reviews"
+                  :key="r.id"
                   class="rounded-lg border border-border bg-elevated p-3"
                 >
                   <div class="flex items-center justify-between mb-1">

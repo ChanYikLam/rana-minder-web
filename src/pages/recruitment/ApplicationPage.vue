@@ -374,8 +374,8 @@ onUnmounted(() => {
                 <p v-if="hasAnswerFiles(field.id)" class="text-xs text-text-secondary">{{ field.label }}</p>
                 <div v-if="hasAnswerFiles(field.id)" class="mt-1 space-y-1">
                   <router-link
-                    v-for="(f, idx) in answerFiles(field.id)"
-                    :key="`${field.id}-${idx}`"
+                    v-for="(f) in answerFiles(field.id)"
+                    :key="f.id"
                     :to="`/files/${f.id}`"
                     class="inline-flex items-center gap-1 text-sm text-primary hover:underline"
                   >

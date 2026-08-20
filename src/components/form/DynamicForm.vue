@@ -327,7 +327,7 @@ const inputErrorClass = 'border-danger'
         <p
           v-for="(msg, ei) in getFieldErrors(field.id)"
           :id="`dyn-err-${field.id}-${ei}`"
-          :key="ei"
+          :key="`${field.id}-${ei}`"
           class="text-xs text-danger"
           role="alert"
         >
@@ -359,7 +359,7 @@ const inputErrorClass = 'border-danger'
         <p
           v-for="(msg, ei) in getFieldErrors(field.id)"
           :id="`dyn-err-${field.id}-${ei}`"
-          :key="ei"
+          :key="`${field.id}-${ei}`"
           class="text-xs text-danger"
           role="alert"
         >
@@ -454,7 +454,7 @@ const inputErrorClass = 'border-danger'
               <p
                 v-for="(msg, ei) in getFieldErrors(`${field.id}.${item.index}.${child.id}`)"
                 :id="`dyn-err-${field.id}.${item.index}.${child.id}-${ei}`"
-                :key="ei"
+                :key="`${field.id}.${item.id}.${child.id}-${ei}`"
                 class="text-xs text-danger"
                 role="alert"
               >
