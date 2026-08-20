@@ -32,19 +32,22 @@ async function loadData() {
 }
 
 async function handleSave() {
-  saving.value = true
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { saving.value = false; return }
-  // 学年/届次为平台级字段（P2-3）：社团域提交时剥离，避免空串误写入社团配置
-  const payload = { ...config.value } as Record<string, unknown>
-  if (!isAdmin.value) {
-    delete payload.academicYear
-    delete payload.cohort
-  }
-  const result = await post(`${apiScope.prefix}/config`, payload)
-  saving.value = false
-  if (result.kind !== 'completed') {
-    toast.error('保存失败，请重试')
+  if (!apiScope) return
+  saving.value = true
+  try {
+    // 学年/届次为平台级字段（P2-3）：社团域提交时剥离，避免空串误写入社团配置
+    const payload = { ...config.value } as Record<string, unknown>
+    if (!isAdmin.value) {
+      delete payload.academicYear
+      delete payload.cohort
+    }
+    const result = await post(`${apiScope.prefix}/config`, payload)
+    if (result.kind !== 'completed') {
+      toast.error('保存失败，请重试')
+    }
+  } finally {
+    saving.value = false
   }
 }
 

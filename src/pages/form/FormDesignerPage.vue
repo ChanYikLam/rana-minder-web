@@ -131,30 +131,33 @@ function updateSelectedField(updates: Partial<Field>) {
 }
 
 async function handleSave() {
-  saving.value = true
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { saving.value = false; return }
-  const nextVersion = currentVersion.value + 1
-  const result = await post(`${apiScope.prefix}/forms/designer/${id}/save`, {
-    fields: fields.value,
-    version: nextVersion,
-    expectedVersion: currentVersion.value,
-  })
-  saving.value = false
-  if (result.kind === 'completed') {
-    const data = result.data as { version?: number; status?: string }
-    if (typeof data?.version === 'number') currentVersion.value = data.version
-    else currentVersion.value = nextVersion
-    dirty.value = false
-    toast.success(`表单已保存（v${currentVersion.value}）`)
-  } else if (result.kind === 'concurrency_conflict') {
-    // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
-    toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
-  } else {
-    toast.error('保存失败，请稍后重试')
+  if (!apiScope) return
+  saving.value = true
+  try {
+    const nextVersion = currentVersion.value + 1
+    const result = await post(`${apiScope.prefix}/forms/designer/${id}/save`, {
+      fields: fields.value,
+      version: nextVersion,
+      expectedVersion: currentVersion.value,
+    })
+    if (result.kind === 'completed') {
+      const data = result.data as { version?: number; status?: string }
+      if (typeof data?.version === 'number') currentVersion.value = data.version
+      else currentVersion.value = nextVersion
+      dirty.value = false
+      toast.success(`表单已保存（v${currentVersion.value}）`)
+    } else if (result.kind === 'concurrency_conflict') {
+      // IFC-ERR-008：版本冲突，需刷新后重试（P3-1）
+      toast.error((result.error as { message?: string }).message || '版本冲突：表单已被其他操作修改，请刷新后重试')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
+    } else {
+      toast.error('保存失败，请稍后重试')
+    }
+  } finally {
+    saving.value = false
   }
 }
 
@@ -183,15 +186,18 @@ async function handlePublish() {
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
   if (!apiScope) { publishing.value = false; return }
-  const result = await post(`${apiScope.prefix}/forms/designer/${id}/publish`, { version: currentVersion.value })
-  publishing.value = false
-  if (result.kind === 'completed') {
-    toast.success(`表单 v${currentVersion.value} 已发布`)
-    await loadData()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '发布失败')
-  } else {
-    toast.error('发布失败，请稍后重试')
+  try {
+    const result = await post(`${apiScope.prefix}/forms/designer/${id}/publish`, { version: currentVersion.value })
+    if (result.kind === 'completed') {
+      toast.success(`表单 v${currentVersion.value} 已发布`)
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '发布失败')
+    } else {
+      toast.error('发布失败，请稍后重试')
+    }
+  } finally {
+    publishing.value = false
   }
 }
 

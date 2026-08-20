@@ -54,14 +54,17 @@ async function loadData() {
 
 async function reauthenticate() {
   reauthenticating.value = true
-  const result = await identityApi.reauthenticate()
-  reauthenticating.value = false
-  if (result.kind === 'completed') {
-    reauthProof.value = result.data.proof
-    toast.success('身份验证已完成')
-    return
+  try {
+    const result = await identityApi.reauthenticate()
+    if (result.kind === 'completed') {
+      reauthProof.value = result.data.proof
+      toast.success('身份验证已完成')
+      return
+    }
+    toast.error('身份验证失败，请重新登录后再试')
+  } finally {
+    reauthenticating.value = false
   }
-  toast.error('身份验证失败，请重新登录后再试')
 }
 
 async function execute() {
@@ -70,20 +73,23 @@ async function execute() {
   executingConfirm.value = true
   step.value = 'executing'
   results.value = []
-  const result = await post<{ results: DeleteResult[]; auditRef: string }>('/admin/delete/execute', {
-    targetIds: preview.value!.targets.map((t) => t.id),
-    reason: reason.value.trim(),
-    previewVersion: preview.value.previewVersion,
-    reauthProof: reauthProof.value,
-  }, { expectedVersion: preview.value.previewVersion })
-  executingConfirm.value = false
-  if (result.kind === 'completed') {
-    results.value = result.data.results
-    auditRef.value = result.data.auditRef
-    step.value = 'result'
-  } else {
-    toast.error('删除执行失败，请重试')
-    step.value = 'confirm'
+  try {
+    const result = await post<{ results: DeleteResult[]; auditRef: string }>('/admin/delete/execute', {
+      targetIds: preview.value!.targets.map((t) => t.id),
+      reason: reason.value.trim(),
+      previewVersion: preview.value.previewVersion,
+      reauthProof: reauthProof.value,
+    }, { expectedVersion: preview.value.previewVersion })
+    if (result.kind === 'completed') {
+      results.value = result.data.results
+      auditRef.value = result.data.auditRef
+      step.value = 'result'
+    } else {
+      toast.error('删除执行失败，请重试')
+      step.value = 'confirm'
+    }
+  } finally {
+    executingConfirm.value = false
   }
 }
 

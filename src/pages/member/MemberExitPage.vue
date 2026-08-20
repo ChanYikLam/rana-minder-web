@@ -85,20 +85,23 @@ async function handleSubmitExitRequest() {
     return
   }
   exitSubmitting.value = true
-  const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/exit-requests`, { reason: exitReason.value.trim() })
-  exitSubmitting.value = false
-  if (r.kind === 'completed') {
-    toast.success('退出申请已提交，等待负责人/人事审批')
-    exitOpen.value = false
-    exitReason.value = ''
-    await loadData()
-  } else if (r.kind === 'accepted') {
-    toastAcceptedAction('退出申请已受理，正在后台处理')
-  } else if (r.kind === 'rejected' && r.error) {
-    toast.error((r.error as { message?: string }).message || '提交失败')
-  } else {
-    toast.error('提交失败，请稍后重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post(`/org/${clubId}/members/exit-requests`, { reason: exitReason.value.trim() })
+    if (r.kind === 'completed') {
+      toast.success('退出申请已提交，等待负责人/人事审批')
+      exitOpen.value = false
+      exitReason.value = ''
+      await loadData()
+    } else if (r.kind === 'accepted') {
+      toastAcceptedAction('退出申请已受理，正在后台处理')
+    } else if (r.kind === 'rejected' && r.error) {
+      toast.error((r.error as { message?: string }).message || '提交失败')
+    } else {
+      toast.error('提交失败，请稍后重试')
+    }
+  } finally {
+    exitSubmitting.value = false
   }
 }
 
@@ -178,21 +181,24 @@ async function handleConfirmAction() {
   }
   if (!actingId.value || !actingAction.value) return
   actingSubmitting.value = true
-  const clubId = route.params.clubId as string
-  const action = actingAction.value
-  const targetId = actingId.value
-  const r = await post(`/org/${clubId}/members/exit`, {
-    memberId: targetId,
-    action,
-    reason: reason.value.trim(),
-  })
-  actingSubmitting.value = false
-  if (r.kind === 'completed') {
-    toast.success(action === 'remove' ? '成员已移除' : '已标记退出')
-    closeAction()
-    await loadData()
-  } else {
-    toastError(r, action === 'remove' ? '移除失败，请重试' : '标记失败，请重试')
+  try {
+    const clubId = route.params.clubId as string
+    const action = actingAction.value
+    const targetId = actingId.value
+    const r = await post(`/org/${clubId}/members/exit`, {
+      memberId: targetId,
+      action,
+      reason: reason.value.trim(),
+    })
+    if (r.kind === 'completed') {
+      toast.success(action === 'remove' ? '成员已移除' : '已标记退出')
+      closeAction()
+      await loadData()
+    } else {
+      toastError(r, action === 'remove' ? '移除失败，请重试' : '标记失败，请重试')
+    }
+  } finally {
+    actingSubmitting.value = false
   }
 }
 
@@ -207,26 +213,29 @@ async function handleConfirmRemove(proof?: string) {
     return
   }
   actingSubmitting.value = true
-  removeSucceeded.value = false
-  removeError.value = ''
-  const clubId = route.params.clubId as string
-  const targetId = actingId.value
-  const r = await post(`/org/${clubId}/members/exit`, {
-    memberId: targetId,
-    action: 'remove',
-    reason: reason.value.trim(),
-    reauthProof: proof,
-  })
-  actingSubmitting.value = false
-  if (r.kind === 'completed') {
-    removeSucceeded.value = true
-    toast.success('成员已移除')
-    closeAction()
-    await loadData()
-  } else if (r.kind === 'accepted') {
-    removeError.value = '操作已受理，正在后台处理，请稍后刷新查看结果'
-  } else {
-    removeError.value = (r as { error?: { message?: string } }).error?.message || '移除失败，请重试'
+  try {
+    removeSucceeded.value = false
+    removeError.value = ''
+    const clubId = route.params.clubId as string
+    const targetId = actingId.value
+    const r = await post(`/org/${clubId}/members/exit`, {
+      memberId: targetId,
+      action: 'remove',
+      reason: reason.value.trim(),
+      reauthProof: proof,
+    })
+    if (r.kind === 'completed') {
+      removeSucceeded.value = true
+      toast.success('成员已移除')
+      closeAction()
+      await loadData()
+    } else if (r.kind === 'accepted') {
+      removeError.value = '操作已受理，正在后台处理，请稍后刷新查看结果'
+    } else {
+      removeError.value = (r as { error?: { message?: string } }).error?.message || '移除失败，请重试'
+    }
+  } finally {
+    actingSubmitting.value = false
   }
 }
 
@@ -272,20 +281,23 @@ async function handleSubmitResignation() {
     return
   }
   resignSubmitting.value = true
-  const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/resignation`, { reason: resignReason.value.trim() })
-  resignSubmitting.value = false
-  if (r.kind === 'completed') {
-    toast.success('辞职申请已提交，等待负责人审批')
-    resignOpen.value = false
-    resignReason.value = ''
-    await loadData()
-  } else if (r.kind === 'accepted') {
-    toastAcceptedAction('辞职申请已受理，正在后台处理')
-  } else if (r.kind === 'rejected' && r.error) {
-    toast.error((r.error as { message?: string }).message || '提交失败')
-  } else {
-    toast.error('提交失败，请稍后重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post(`/org/${clubId}/members/resignation`, { reason: resignReason.value.trim() })
+    if (r.kind === 'completed') {
+      toast.success('辞职申请已提交，等待负责人审批')
+      resignOpen.value = false
+      resignReason.value = ''
+      await loadData()
+    } else if (r.kind === 'accepted') {
+      toastAcceptedAction('辞职申请已受理，正在后台处理')
+    } else if (r.kind === 'rejected' && r.error) {
+      toast.error((r.error as { message?: string }).message || '提交失败')
+    } else {
+      toast.error('提交失败，请稍后重试')
+    }
+  } finally {
+    resignSubmitting.value = false
   }
 }
 

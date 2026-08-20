@@ -38,23 +38,26 @@ async function loadDetail() {
 async function handleRespond(action: 'accept' | 'reject') {
   if (!detail.value || responding.value) return
   responding.value = true
-  const result = await post(`/me/invitations/recruitment/${detail.value.id}/respond`, { action })
-  responding.value = false
-  if (result.kind === 'completed') {
-    detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
-    if (action === 'accept') {
-      detail.value.casdoorSync = 'processing'
-      toast.success('已接受邀请，等待身份同步生效')
+  try {
+    const result = await post(`/me/invitations/recruitment/${detail.value.id}/respond`, { action })
+    if (result.kind === 'completed') {
+      detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
+      if (action === 'accept') {
+        detail.value.casdoorSync = 'processing'
+        toast.success('已接受邀请，等待身份同步生效')
+      } else {
+        toast.success('已拒绝邀请')
+      }
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction(action === 'accept' ? '接受邀请已受理，正在后台处理' : '拒绝邀请已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      // P2-27：展示服务端 error.message
+      toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
     } else {
-      toast.success('已拒绝邀请')
+      toast.error('操作失败，请稍后重试')
     }
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction(action === 'accept' ? '接受邀请已受理，正在后台处理' : '拒绝邀请已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    // P2-27：展示服务端 error.message
-    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
-  } else {
-    toast.error('操作失败，请稍后重试')
+  } finally {
+    responding.value = false
   }
 }
 
@@ -62,16 +65,19 @@ async function handleRespond(action: 'accept' | 'reject') {
 async function handleSyncConfirm() {
   if (!detail.value || syncing.value) return
   syncing.value = true
-  const result = await post(`/me/invitations/recruitment/${detail.value.id}/sync-confirm`)
-  syncing.value = false
-  if (result.kind === 'completed') {
-    toast.success('成员身份已生效')
-    // 重新拉取详情：sync_failed 重试成功后 status/casdoorSync 均由后端更新
-    await loadDetail()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('同步确认已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
+  try {
+    const result = await post(`/me/invitations/recruitment/${detail.value.id}/sync-confirm`)
+    if (result.kind === 'completed') {
+      toast.success('成员身份已生效')
+      // 重新拉取详情：sync_failed 重试成功后 status/casdoorSync 均由后端更新
+      await loadDetail()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('同步确认已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
+    }
+  } finally {
+    syncing.value = false
   }
 }
 

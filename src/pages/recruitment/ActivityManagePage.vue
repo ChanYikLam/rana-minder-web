@@ -57,25 +57,28 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   riskError.value = ''
   riskSucceeded.value = false
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/${action}`, { ...(input || {}) })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    // P1：complete/cancel 成功后需关闭弹窗并置位 succeeded，避免 HighRiskConfirm 永久停留“正在执行...”
-    if (action === 'complete' || action === 'cancel') {
-      riskSucceeded.value = true
-      riskOpen.value = false
+  try {
+    const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/${action}`, { ...(input || {}) })
+    if (result.kind === 'completed') {
+      // P1：complete/cancel 成功后需关闭弹窗并置位 succeeded，避免 HighRiskConfirm 永久停留“正在执行...”
+      if (action === 'complete' || action === 'cancel') {
+        riskSucceeded.value = true
+        riskOpen.value = false
+      }
+      await loadDetail()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('操作已受理，正在后台处理')
+      if (action === 'complete' || action === 'cancel') riskOpen.value = false
+    } else if (result.kind === 'rejected' && result.error) {
+      const message = (result.error as { message?: string }).message || '操作失败'
+      riskError.value = message
+      toast.error(message)
+    } else {
+      riskError.value = '操作失败，请稍后重试'
+      toast.error('操作失败，请稍后重试')
     }
-    await loadDetail()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('操作已受理，正在后台处理')
-    if (action === 'complete' || action === 'cancel') riskOpen.value = false
-  } else if (result.kind === 'rejected' && result.error) {
-    const message = (result.error as { message?: string }).message || '操作失败'
-    riskError.value = message
-    toast.error(message)
-  } else {
-    riskError.value = '操作失败，请稍后重试'
-    toast.error('操作失败，请稍后重试')
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -83,12 +86,15 @@ async function runChannel(action: string, input?: Record<string, unknown>) {
   if (!detail.value || actionLoading.value) return
   actionLoading.value = true
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/channel`, { action, ...(input || {}) })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    await loadDetail()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  try {
+    const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/channel`, { action, ...(input || {}) })
+    if (result.kind === 'completed') {
+      await loadDetail()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -114,19 +120,22 @@ async function runTighten() {
   actionLoading.value = true
   tightenError.value = ''
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/rules/tighten`, {
-    reason: tightenForm.value.reason.trim(),
-    deadlineDays: Number(tightenForm.value.days) || 7,
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    // P2-19：收紧结果以 toast 呈现（面板随后关闭，原醒内文案永不可见，属死状态）
-    const affected = (result.data as { affectedCount: number })?.affectedCount ?? 0
-    toast.success(`已为 ${affected} 名已提交申请人开放补救窗口，通道已暂停`)
-    tightenOpen.value = false
-    await loadDetail()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  try {
+    const result = await post(`/org/${clubId}/recruitment/${detail.value.id}/rules/tighten`, {
+      reason: tightenForm.value.reason.trim(),
+      deadlineDays: Number(tightenForm.value.days) || 7,
+    })
+    if (result.kind === 'completed') {
+      // P2-19：收紧结果以 toast 呈现（面板随后关闭，原醒内文案永不可见，属死状态）
+      const affected = (result.data as { affectedCount: number })?.affectedCount ?? 0
+      toast.success(`已为 ${affected} 名已提交申请人开放补救窗口，通道已暂停`)
+      tightenOpen.value = false
+      await loadDetail()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -178,20 +187,23 @@ async function handleSaveEdit() {
   actionLoading.value = true
   editError.value = ''
   const clubId = route.params.clubId as string
-  // P2-8 乐观锁：携带当前版本号，服务端比对不一致返回 409（IFC-ERR-008）
-  const result = await put(`/org/${clubId}/recruitment/${detail.value.id}`, {
-    title: editForm.value.title.trim(),
-    description: editForm.value.description.trim(),
-  }, { expectedVersion: detail.value.version })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    editOpen.value = false
-    await loadDetail()
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error((result.error as { message?: string }).message || '数据版本已变化，请刷新后重试')
-    await loadDetail()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '保存失败')
+  try {
+    // P2-8 乐观锁：携带当前版本号，服务端比对不一致返回 409（IFC-ERR-008）
+    const result = await put(`/org/${clubId}/recruitment/${detail.value.id}`, {
+      title: editForm.value.title.trim(),
+      description: editForm.value.description.trim(),
+    }, { expectedVersion: detail.value.version })
+    if (result.kind === 'completed') {
+      editOpen.value = false
+      await loadDetail()
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error((result.error as { message?: string }).message || '数据版本已变化，请刷新后重试')
+      await loadDetail()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '保存失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 

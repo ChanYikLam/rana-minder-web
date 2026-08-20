@@ -193,26 +193,29 @@ function formatDateTime(iso?: string | null): string {
 
 async function handleSubmitReview() {
   if (!selected.value || rating.value === 0) return
-  submitting.value = true
   const scope = routeScope()
-  if (!scope) { submitting.value = false; return }
-  // 契约：conclude 按 applicantId 定位申请人（行 id 为 app-xxx，不能作为评价标识）
-  const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/${selected.value.applicantId}/conclude`, {
-    rating: rating.value,
-    comment: comment.value,
-  }, { expectedVersion: selected.value.myReviewVersion ?? undefined })
-  submitting.value = false
-  if (result.kind === 'completed') {
-    toast.success('评价已提交')
-    await loadReviews()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('评价已受理，正在后台处理')
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error('该评价已在其他窗口被修改，已刷新最新内容，请重新提交')
-    await loadReviews()
-  } else {
-    const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
-    toast.error(message)
+  if (!scope) return
+  submitting.value = true
+  try {
+    // 契约：conclude 按 applicantId 定位申请人（行 id 为 app-xxx，不能作为评价标识）
+    const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/${selected.value.applicantId}/conclude`, {
+      rating: rating.value,
+      comment: comment.value,
+    }, { expectedVersion: selected.value.myReviewVersion ?? undefined })
+    if (result.kind === 'completed') {
+      toast.success('评价已提交')
+      await loadReviews()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('评价已受理，正在后台处理')
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error('该评价已在其他窗口被修改，已刷新最新内容，请重新提交')
+      await loadReviews()
+    } else {
+      const message = (result as { error?: { message?: string } }).error?.message || '提交失败，请重试'
+      toast.error(message)
+    }
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -220,20 +223,23 @@ async function handleSubmitReview() {
 const submitLabel = computed(() => (selected.value?.peerViewLocked || selected.value?.myRating == null ? '提交评价' : '更新评价'))
 
 async function handlePublishAll() {
+  const scope = routeScope()
+  if (!scope) return
   submitting.value = true
   publishSucceeded.value = false
   publishError.value = ''
-  const scope = routeScope()
-  if (!scope) { submitting.value = false; return }
-  const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/publish`)
-  submitting.value = false
-  if (result.kind === 'completed') {
-    publishSucceeded.value = true
-    await loadReviews()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('发布已受理，正在后台处理')
-  } else {
-    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
+  try {
+    const result = await post(`/org/${scope.clubId}/recruitment/${scope.activityId}/reviews/publish`)
+    if (result.kind === 'completed') {
+      publishSucceeded.value = true
+      await loadReviews()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('发布已受理，正在后台处理')
+    } else {
+      publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
+    }
+  } finally {
+    submitting.value = false
   }
 }
 

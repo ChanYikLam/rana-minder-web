@@ -68,28 +68,34 @@ const bookLabel = computed(() => {
 async function handleBookSlot() {
   if (!selectedSlotId.value || !detail.value) return
   booking.value = true
-  const result = await post(`/me/interviews/joint/${detail.value.jointId}/book`, { slotId: selectedSlotId.value })
-  booking.value = false
-  if (result.kind === 'completed') {
-    toast.success('时段已预约')
-    // P2-41：预约成功后清空选中态，避免已约/已满时段仍高亮
-    selectedSlotId.value = null
-    await loadDetail()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
+  try {
+    const result = await post(`/me/interviews/joint/${detail.value.jointId}/book`, { slotId: selectedSlotId.value })
+    if (result.kind === 'completed') {
+      toast.success('时段已预约')
+      // P2-41：预约成功后清空选中态，避免已约/已满时段仍高亮
+      selectedSlotId.value = null
+      await loadDetail()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
+    }
+  } finally {
+    booking.value = false
   }
 }
 
 async function handleLeave() {
   if (!detail.value || leaving.value) return
   leaving.value = true
-  const result = await post(`/me/interviews/joint/${detail.value.jointId}/leave`)
-  leaving.value = false
-  if (result.kind === 'completed') {
-    toast.success('已登记请假，可重新选择时段')
-    await loadDetail()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '请假失败，请稍后重试')
+  try {
+    const result = await post(`/me/interviews/joint/${detail.value.jointId}/leave`)
+    if (result.kind === 'completed') {
+      toast.success('已登记请假，可重新选择时段')
+      await loadDetail()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '请假失败，请稍后重试')
+    }
+  } finally {
+    leaving.value = false
   }
 }
 

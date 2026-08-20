@@ -83,57 +83,66 @@ async function loadData() {
 }
 
 async function handleTest() {
+  const apiScope = resolveApiScope(route)
+  if (!apiScope) return
   testing.value = true
   testError.value = null
-  const apiScope = resolveApiScope(route)
-  if (!apiScope) { testing.value = false; return }
-  const result = await post(`${apiScope.prefix}/notifications/email-config/test`, {
-    scope: scope.value,
-    recipient: session.user?.email || config.value.smtpUser,
-    smtpHost: config.value.smtpHost,
-    smtpPort: config.value.smtpPort,
-    smtpUser: config.value.smtpUser,
-    smtpPassword: config.value.smtpPassword,
-    fromName: config.value.fromName,
-    encryption: config.value.encryption,
-  })
-  testing.value = false
-  if (result.kind === 'completed') {
-    toast.success('测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收')
-  } else {
-    // 保留通用引导文案，同时透出服务端具体原因（如连接超时），便于定位
-    const detail = result.kind === 'rejected' && result.error?.message ? `（${result.error.message}）` : ''
-    testError.value = `测试邮件发送失败，请稍后重试${detail}`
+  try {
+    const result = await post(`${apiScope.prefix}/notifications/email-config/test`, {
+      scope: scope.value,
+      recipient: session.user?.email || config.value.smtpUser,
+      smtpHost: config.value.smtpHost,
+      smtpPort: config.value.smtpPort,
+      smtpUser: config.value.smtpUser,
+      smtpPassword: config.value.smtpPassword,
+      fromName: config.value.fromName,
+      encryption: config.value.encryption,
+    })
+    if (result.kind === 'completed') {
+      toast.success('测试邮件已发送至 ' + (session.user?.email || config.value.smtpUser) + '，请查收')
+    } else {
+      // 保留通用引导文案，同时透出服务端具体原因（如连接超时），便于定位
+      const detail = result.kind === 'rejected' && result.error?.message ? `（${result.error.message}）` : ''
+      testError.value = `测试邮件发送失败，请稍后重试${detail}`
+    }
+  } finally {
+    testing.value = false
   }
 }
 
 async function handleSavePreferences() {
-  savingPrefs.value = true
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { savingPrefs.value = false; return }
-  const nextPrefs: Record<string, boolean> = { ...fullPreferences.value }
-  for (const [uiKey, kind] of Object.entries(UI_TO_KIND)) {
-    nextPrefs[kind] = preferences.value[uiKey as keyof typeof preferences.value]
-  }
-  const result = await post(`${apiScope.prefix}/notifications/preferences`, nextPrefs)
-  savingPrefs.value = false
-  if (result.kind === 'completed') {
-    toast.success('偏好已保存')
-  } else {
-    toast.error('偏好保存失败，请稍后重试')
+  if (!apiScope) return
+  savingPrefs.value = true
+  try {
+    const nextPrefs: Record<string, boolean> = { ...fullPreferences.value }
+    for (const [uiKey, kind] of Object.entries(UI_TO_KIND)) {
+      nextPrefs[kind] = preferences.value[uiKey as keyof typeof preferences.value]
+    }
+    const result = await post(`${apiScope.prefix}/notifications/preferences`, nextPrefs)
+    if (result.kind === 'completed') {
+      toast.success('偏好已保存')
+    } else {
+      toast.error('偏好保存失败，请稍后重试')
+    }
+  } finally {
+    savingPrefs.value = false
   }
 }
 
 async function handleRefillKey() {
-  refilling.value = true
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { refilling.value = false; return }
-  const result = await post(`${apiScope.prefix}/notifications/email-config/rotate-key`, {})
-  refilling.value = false
-  if (result.kind === 'completed') {
-    toast.success('密钥已轮换，请重新填写')
-  } else {
-    toast.error('密钥轮换失败，请稍后重试')
+  if (!apiScope) return
+  refilling.value = true
+  try {
+    const result = await post(`${apiScope.prefix}/notifications/email-config/rotate-key`, {})
+    if (result.kind === 'completed') {
+      toast.success('密钥已轮换，请重新填写')
+    } else {
+      toast.error('密钥轮换失败，请稍后重试')
+    }
+  } finally {
+    refilling.value = false
   }
 }
 
@@ -154,22 +163,25 @@ async function handleSave() {
   saving.value = true
   const apiScope = resolveApiScope(route)
   if (!apiScope) { saving.value = false; return }
-  const result = await post(`${apiScope.prefix}/notifications/email-config`, {
-    smtpHost: config.value.smtpHost,
-    smtpPort: config.value.smtpPort,
-    smtpUser: config.value.smtpUser,
-    smtpPassword: config.value.smtpPassword,
-    fromName: config.value.fromName,
-    encryption: config.value.encryption,
-  })
-  saving.value = false
-  if (result.kind === 'completed') {
-    config.value.verified = true
-    toast.success('发信配置已保存')
-  } else {
-    // IFC-ERR-006：未通过测试的配置不可保存（US-NTF-02），展示服务端具体原因
-    const msg = result.kind === 'rejected' && result.error?.message ? result.error.message : '保存失败，请稍后重试'
-    toast.error(msg)
+  try {
+    const result = await post(`${apiScope.prefix}/notifications/email-config`, {
+      smtpHost: config.value.smtpHost,
+      smtpPort: config.value.smtpPort,
+      smtpUser: config.value.smtpUser,
+      smtpPassword: config.value.smtpPassword,
+      fromName: config.value.fromName,
+      encryption: config.value.encryption,
+    })
+    if (result.kind === 'completed') {
+      config.value.verified = true
+      toast.success('发信配置已保存')
+    } else {
+      // IFC-ERR-006：未通过测试的配置不可保存（US-NTF-02），展示服务端具体原因
+      const msg = result.kind === 'rejected' && result.error?.message ? result.error.message : '保存失败，请稍后重试'
+      toast.error(msg)
+    }
+  } finally {
+    saving.value = false
   }
 }
 

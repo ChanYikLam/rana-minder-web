@@ -162,19 +162,22 @@ async function handleCreate() {
     return
   }
   createSubmitting.value = true
-  const clubId = route.params.clubId as string
-  const r = await post<{ id: string; status: string }>(`/org/${clubId}/members/department-apply`, {
-    type: createType.value,
-    targetDeptId: createType.value === 'leave' ? null : createDept.value,
-    reason: createReason.value.trim(),
-  })
-  createSubmitting.value = false
-  if (r.kind === 'completed') {
-    toast.success('申请已提交')
-    showCreate.value = false
-    await loadData()
-  } else {
-    toastError(r, '提交失败，请重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post<{ id: string; status: string }>(`/org/${clubId}/members/department-apply`, {
+      type: createType.value,
+      targetDeptId: createType.value === 'leave' ? null : createDept.value,
+      reason: createReason.value.trim(),
+    })
+    if (r.kind === 'completed') {
+      toast.success('申请已提交')
+      showCreate.value = false
+      await loadData()
+    } else {
+      toastError(r, '提交失败，请重试')
+    }
+  } finally {
+    createSubmitting.value = false
   }
 }
 

@@ -154,23 +154,26 @@ async function onSelectGroup(r: SearchResult) {
 
 async function submit() {
   importing.value = true
-  const result = await post<{ id: string; status: string }>('/admin/clubs/wizard', {
-    groupId: selectedGroup.value?.id,
-    name: form.value.name,
-    description: form.value.description,
-    leaderGroupId: form.value.leaderRoleGroup,
-    email: form.value.email,
-    deptGroups: form.value.deptGroups,
-    roleGroups: form.value.roleGroups,
-    leaderRoleGroup: form.value.leaderRoleGroup,
-  })
-  importing.value = false
-  if (result.kind === 'completed') {
-    submitted.value = (result as { kind: 'completed'; data: { id: string; status: string } }).data
-    step.value = 'done'
-    toast.success('接入条目已创建')
-  } else {
-    toast.error('提交失败：请返回校验页修正')
+  try {
+    const result = await post<{ id: string; status: string }>('/admin/clubs/wizard', {
+      groupId: selectedGroup.value?.id,
+      name: form.value.name,
+      description: form.value.description,
+      leaderGroupId: form.value.leaderRoleGroup,
+      email: form.value.email,
+      deptGroups: form.value.deptGroups,
+      roleGroups: form.value.roleGroups,
+      leaderRoleGroup: form.value.leaderRoleGroup,
+    })
+    if (result.kind === 'completed') {
+      submitted.value = (result as { kind: 'completed'; data: { id: string; status: string } }).data
+      step.value = 'done'
+      toast.success('接入条目已创建')
+    } else {
+      toast.error('提交失败：请返回校验页修正')
+    }
+  } finally {
+    importing.value = false
   }
 }
 

@@ -43,18 +43,21 @@ async function loadData() {
 }
 
 async function handleCreate() {
-  creating.value = true
   const prefix = correctionsPrefix()
-  if (!prefix) { creating.value = false; toast.error('页面作用域不可用，无法提交'); return }
-  const result = await post(prefix, { ...form.value })
-  creating.value = false
-  if (result.kind === 'completed') {
-    showForm.value = false
-    form.value = { targetType: '', targetId: '', reason: '', evidence: '' }
-    flashSubmitted('纠错申请已提交，等待审核')
-    await loadData()
-  } else {
-    toastError(result, '提交失败，请重试')
+  if (!prefix) { toast.error('页面作用域不可用，无法提交'); return }
+  creating.value = true
+  try {
+    const result = await post(prefix, { ...form.value })
+    if (result.kind === 'completed') {
+      showForm.value = false
+      form.value = { targetType: '', targetId: '', reason: '', evidence: '' }
+      flashSubmitted('纠错申请已提交，等待审核')
+      await loadData()
+    } else {
+      toastError(result, '提交失败，请重试')
+    }
+  } finally {
+    creating.value = false
   }
 }
 

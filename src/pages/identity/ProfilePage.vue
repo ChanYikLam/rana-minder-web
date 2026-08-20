@@ -151,63 +151,72 @@ async function handleSave() {
   }
 
   submitting.value = true
-  const result = await put<Profile>('/auth/profile', parsed.data, { expectedVersion: version.value })
-  submitting.value = false
+  try {
+    const result = await put<Profile>('/auth/profile', parsed.data, { expectedVersion: version.value })
 
-  if (result.kind === 'completed') {
-    profile.value = result.data
-    editing.value = false
-    // 版本号以响应为准，避免「本地自增与服务器登记不一致」再次触发 409（P2-3）
-    version.value = result.data.version ?? version.value + 1
-    toast.success('资料已保存')
-    // 保存后刷新会话：资料门 profileComplete 翻转即时生效（P2-3：页面保存与会话联动）
-    await session.loadSession()
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error('资料已被其他会话修改，请刷新后重试')
-  } else if (result.kind === 'rejected') {
-    if (result.error.fieldErrors) {
-      for (const [field, msgs] of Object.entries(result.error.fieldErrors)) {
-        formErrors.value[field] = msgs[0]
+    if (result.kind === 'completed') {
+      profile.value = result.data
+      editing.value = false
+      // 版本号以响应为准，避免「本地自增与服务器登记不一致」再次触发 409（P2-3）
+      version.value = result.data.version ?? version.value + 1
+      toast.success('资料已保存')
+      // 保存后刷新会话：资料门 profileComplete 翻转即时生效（P2-3：页面保存与会话联动）
+      await session.loadSession()
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error('资料已被其他会话修改，请刷新后重试')
+    } else if (result.kind === 'rejected') {
+      if (result.error.fieldErrors) {
+        for (const [field, msgs] of Object.entries(result.error.fieldErrors)) {
+          formErrors.value[field] = msgs[0]
+        }
+      } else {
+        toast.error(result.error.message)
       }
     } else {
-      toast.error(result.error.message)
+      toast.error('保存失败，请稍后重试')
     }
-  } else {
-    toast.error('保存失败，请稍后重试')
+  } finally {
+    submitting.value = false
   }
 }
 
 async function handleSendCode() {
   if (sendingCode.value || resendCountdown.value > 0) return
   sendingCode.value = true
-  const result = await post<{ sent: boolean }>('/auth/profile/send-email-code')
-  sendingCode.value = false
-  if (result.kind === 'completed') {
-    codeSent.value = true
-    startResendCountdown()
-  } else if (result.kind === 'rejected' && result.error) {
-    // P2-43：发送验证码失败不再静默
-    toast.error((result.error as { message?: string }).message || '验证码发送失败，请稍后重试')
-  } else {
-    toast.error('验证码发送失败，请稍后重试')
+  try {
+    const result = await post<{ sent: boolean }>('/auth/profile/send-email-code')
+    if (result.kind === 'completed') {
+      codeSent.value = true
+      startResendCountdown()
+    } else if (result.kind === 'rejected' && result.error) {
+      // P2-43：发送验证码失败不再静默
+      toast.error((result.error as { message?: string }).message || '验证码发送失败，请稍后重试')
+    } else {
+      toast.error('验证码发送失败，请稍后重试')
+    }
+  } finally {
+    sendingCode.value = false
   }
 }
 
 async function handleVerify() {
   if (verifying.value) return
   verifying.value = true
-  const result = await post<{ emailVerified: boolean }>('/auth/profile/verify-email', { code: verifyCode.value })
-  verifying.value = false
-  if (result.kind === 'completed') {
-    if (profile.value) profile.value.emailVerified = true
-    showVerify.value = false
-    verifyCode.value = ''
-    codeSent.value = false
-    toast.success('邮箱验证成功')
-    // 验证通过后刷新会话：资料门 emailVerified 翻转即时生效（P2-3）
-    await session.loadSession()
-  } else if (result.kind === 'rejected') {
-    toast.error(result.error.fieldErrors?.code?.[0] || result.error.message)
+  try {
+    const result = await post<{ emailVerified: boolean }>('/auth/profile/verify-email', { code: verifyCode.value })
+    if (result.kind === 'completed') {
+      if (profile.value) profile.value.emailVerified = true
+      showVerify.value = false
+      verifyCode.value = ''
+      codeSent.value = false
+      toast.success('邮箱验证成功')
+      // 验证通过后刷新会话：资料门 emailVerified 翻转即时生效（P2-3）
+      await session.loadSession()
+    } else if (result.kind === 'rejected') {
+      toast.error(result.error.fieldErrors?.code?.[0] || result.error.message)
+    }
+  } finally {
+    verifying.value = false
   }
 }
 
@@ -240,54 +249,59 @@ function resetConflictState() {
 
 async function loadConflicts() {
   conflictLoading.value = true
-  const result = await get<{ conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> }>('/auth/profile/sync-conflicts')
-  conflictLoading.value = false
-  if (result.kind === 'completed') {
-    conflictFields.value = result.data.conflicts.map((c) => ({ ...c, chosen: 'remote' as const }))
-    if (conflictFields.value.length === 0) {
-      toast.success('没有待处理的同步冲突')
-      router.push('/me/profile')
-      return
+  try {
+    const result = await get<{ conflicts: Array<{ field: string; label: string; localValue: string; remoteValue: string }> }>('/auth/profile/sync-conflicts')
+    if (result.kind === 'completed') {
+      conflictFields.value = result.data.conflicts.map((c) => ({ ...c, chosen: 'remote' as const }))
+      if (conflictFields.value.length === 0) {
+        toast.success('没有待处理的同步冲突')
+        router.push('/me/profile')
+        return
+      }
+    } else if (result.kind === 'rejected' && result.error) {
+      state.value = 'error'
+      error.value = result.error
+      // 冲突清单加载失败：区分错误文案，便于用户判断重试对象（审计 P3）
+      pageErrorMsg.value = '冲突清单加载失败'
+    } else {
+      state.value = 'error'
+      error.value = { code: 'IFC-ERR-016', message: '冲突加载失败' }
+      pageErrorMsg.value = '冲突清单加载失败'
     }
-  } else if (result.kind === 'rejected' && result.error) {
-    state.value = 'error'
-    error.value = result.error
-    // 冲突清单加载失败：区分错误文案，便于用户判断重试对象（审计 P3）
-    pageErrorMsg.value = '冲突清单加载失败'
-  } else {
-    state.value = 'error'
-    error.value = { code: 'IFC-ERR-016', message: '冲突加载失败' }
-    pageErrorMsg.value = '冲突清单加载失败'
+  } finally {
+    conflictLoading.value = false
   }
 }
 
 async function handleResolveConflicts() {
   if (conflictSubmitting.value) return
   conflictSubmitting.value = true
-  const resolvedLabels: string[] = []
-  for (const f of conflictFields.value) {
-    const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
-    const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
-    if (r.kind === 'rejected' && r.error) {
-      conflictSubmitting.value = false
-      // P2-44：部分失败明确提示已生效字段，避免用户误以为全部失败或全部成功
-      toastError(r, resolvedLabels.length > 0
-        ? `冲突解决中断：${resolvedLabels.join('、')} 已生效，失败项：${(r.error as { message?: string }).message || '请重试'}`
-        : '冲突解决失败')
-      // 逐条写回过程中途失败：已写回字段已生效，重新拉取冲突清单使页面与服务端状态对齐，
-      // 避免已解决字段留在页面上被重复提交
-      await loadConflicts()
-      return
+  try {
+    const resolvedLabels: string[] = []
+    for (const f of conflictFields.value) {
+      const chosenValue = f.chosen === 'local' ? f.localValue : f.remoteValue
+      const r = await identityApi.resolveSyncConflict({ field: f.field, chosenValue })
+      if (r.kind === 'rejected' && r.error) {
+        // P2-44：部分失败明确提示已生效字段，避免用户误以为全部失败或全部成功
+        toastError(r, resolvedLabels.length > 0
+          ? `冲突解决中断：${resolvedLabels.join('、')} 已生效，失败项：${(r.error as { message?: string }).message || '请重试'}`
+          : '冲突解决失败')
+        // 逐条写回过程中途失败：已写回字段已生效，重新拉取冲突清单使页面与服务端状态对齐，
+        // 避免已解决字段留在页面上被重复提交
+        await loadConflicts()
+        return
+      }
+      resolvedLabels.push(f.label)
     }
-    resolvedLabels.push(f.label)
+    if (profile.value) {
+      profile.value = { ...profile.value }
+    }
+    conflictFields.value = []
+    toast.success('冲突已解决')
+    router.push('/me/profile')
+  } finally {
+    conflictSubmitting.value = false
   }
-  conflictSubmitting.value = false
-  if (profile.value) {
-    profile.value = { ...profile.value }
-  }
-  conflictFields.value = []
-  toast.success('冲突已解决')
-  router.push('/me/profile')
 }
 
 onMounted(async () => {
