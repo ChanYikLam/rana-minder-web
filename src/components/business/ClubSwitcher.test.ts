@@ -264,4 +264,72 @@ describe('ClubSwitcher 社团切换', () => {
     expect(mocks.getMyClubs).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
+
+  it('P2-16：换账号时旧账号在途请求完成后不污染新账号菜单（代次校验）', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
+    const session = seedSession()
+    // 首请求挂起（不 resolve），模拟旧账号 getMyClubs 在途
+    let resolveOld!: (v: unknown) => void
+    const oldPending = new Promise((r) => { resolveOld = r })
+    mocks.getMyClubs.mockReturnValueOnce(oldPending)
+
+    const wrapper = mount(ClubSwitcher, {
+      global: { stubs: { LoaderCircle: { template: '<i />' }, ChevronDown: { template: '<i />' }, Building2: { template: '<i />' }, Check: { template: '<i />' } } },
+    })
+    await flushPromises()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
+
+    // 换账号：user.id 变化 → 清空旧列表、代次递增
+    session.user = { ...session.user!, id: 'user-002' }
+    await flushPromises()
+
+    // 旧账号请求此刻才完成，返回旧数据
+    resolveOld({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-999', clubName: '旧社团', role: 'club_leader' }] },
+    })
+    await flushPromises()
+
+    // 代次已变 → 结果被丢弃，新账号菜单不显示旧社团
+    expect(wrapper.findAll('.dd-item').length).toBe(0)
+    expect(wrapper.text()).not.toContain('旧社团')
+    wrapper.unmount()
+  })
+
+  it('P2-16：lastLoadedAt 强制刷新在 loading 中被标记，加载结束后再补一次', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
+    const session = seedSession()
+    // 首请求挂起，使 loading 保持为 true
+    let resolveFirst!: (v: unknown) => void
+    const firstPending = new Promise((r) => { resolveFirst = r })
+    mocks.getMyClubs
+      .mockReturnValueOnce(firstPending)
+      .mockResolvedValue({
+        kind: 'completed',
+        data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }] },
+      })
+
+    const wrapper = mount(ClubSwitcher, {
+      global: { stubs: { LoaderCircle: { template: '<i />' }, ChevronDown: { template: '<i />' }, Building2: { template: '<i />' }, Check: { template: '<i />' } } },
+    })
+    await flushPromises()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
+
+    // loading 中触发 lastLoadedAt 强制刷新：不应被静默丢弃，而应标记待补位
+    session.lastLoadedAt = Date.now()
+    await flushPromises()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
+
+    // 首次请求完成 → finally 中补位强制刷新 → 再次拉取
+    resolveFirst({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }] },
+    })
+    await flushPromises()
+
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
 })
