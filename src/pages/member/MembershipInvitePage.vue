@@ -194,20 +194,23 @@ async function handleSend() {
   }
   sendError.value = ''
   sendSubmitting.value = true
-  const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/invite`, {
-    candidateId: selectedCandidate.value.id,
-    departmentId: targetDept.value || null,
-    // P2-48：邀请有效期 7 天，仅服务端可配置；前端沿用既有契约（与邀请卡截止时间展示一致）
-    expireDays: INVITE_EXPIRE_DAYS,
-  })
-  sendSubmitting.value = false
-  if (r.kind === 'completed') {
-    toast.success('邀请已发送')
-    showSend.value = false
-    await loadData()
-  } else {
-    toastError(r, '发送失败，请重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post(`/org/${clubId}/members/invite`, {
+      candidateId: selectedCandidate.value.id,
+      departmentId: targetDept.value || null,
+      // P2-48：邀请有效期 7 天，仅服务端可配置；前端沿用既有契约（与邀请卡截止时间展示一致）
+      expireDays: INVITE_EXPIRE_DAYS,
+    })
+    if (r.kind === 'completed') {
+      toast.success('邀请已发送')
+      showSend.value = false
+      await loadData()
+    } else {
+      toastError(r, '发送失败，请重试')
+    }
+  } finally {
+    sendSubmitting.value = false
   }
 }
 
@@ -228,17 +231,20 @@ async function handleRespond(inv: Invite, action: 'accept' | 'reject') {
   if (action === 'accept') {
     // 接受邀请走 HighRiskConfirm 流程：成功后才显示 done
     acceptExecuting.value = true
-    acceptSucceeded.value = false
-    acceptError.value = ''
-    const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
-    acceptExecuting.value = false
-    if (r.kind === 'completed') {
-      acceptSucceeded.value = true
-      acceptTarget.value = null
-      toast.success('已整体接受邀请')
-      await loadData()
-    } else {
-      acceptError.value = (r as { error?: { message?: string } }).error?.message || '操作失败，请稍后重试'
+    try {
+      acceptSucceeded.value = false
+      acceptError.value = ''
+      const r = await post(`/me/invitations/membership/${inv.id}/respond`, { action })
+      if (r.kind === 'completed') {
+        acceptSucceeded.value = true
+        acceptTarget.value = null
+        toast.success('已整体接受邀请')
+        await loadData()
+      } else {
+        acceptError.value = (r as { error?: { message?: string } }).error?.message || '操作失败，请稍后重试'
+      }
+    } finally {
+      acceptExecuting.value = false
     }
     return
   }

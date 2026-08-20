@@ -58,30 +58,36 @@ async function loadOptions() {
 async function runAction(invitationId: string, action: string) {
   if (actionLoading.value) return
   actionLoading.value = true
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations/${invitationId}/${action}`, {})
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    await loadInvitations()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations/${invitationId}/${action}`, {})
+    if (result.kind === 'completed') {
+      await loadInvitations()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
 async function handleSend() {
   if (!sendForm.value.applicantId || !sendForm.value.departmentId || actionLoading.value) return
   actionLoading.value = true
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations`, {
-    applicantId: sendForm.value.applicantId,
-    departmentId: sendForm.value.departmentId,
-    expireDays: sendForm.value.expireDays,
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    sendOpen.value = false
-    sendForm.value = { applicantId: '', departmentId: '', expireDays: 7 }
-    await loadInvitations()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '发送失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/invitations`, {
+      applicantId: sendForm.value.applicantId,
+      departmentId: sendForm.value.departmentId,
+      expireDays: sendForm.value.expireDays,
+    })
+    if (result.kind === 'completed') {
+      sendOpen.value = false
+      sendForm.value = { applicantId: '', departmentId: '', expireDays: 7 }
+      await loadInvitations()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '发送失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 

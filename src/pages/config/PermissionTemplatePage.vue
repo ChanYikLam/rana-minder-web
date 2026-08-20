@@ -87,31 +87,37 @@ async function handleSave() {
 
   if (mode.value === 'create') {
     creating.value = true
-    const result = await post<Template>('/admin/config/permission-templates', { name, permissions })
-    creating.value = false
-    if (result.kind === 'completed') {
-      toast.success('模板已创建（草稿）')
-      resetEditor()
-      await loadData()
-      selected.value = result.data
+    try {
+      const result = await post<Template>('/admin/config/permission-templates', { name, permissions })
+      if (result.kind === 'completed') {
+        toast.success('模板已创建（草稿）')
+        resetEditor()
+        await loadData()
+        selected.value = result.data
+        return
+      }
+      toastError(result, '创建模板失败，请重试')
       return
+    } finally {
+      creating.value = false
     }
-    toastError(result, '创建模板失败，请重试')
-    return
   }
 
   if (!selected.value || saving.value) return
   saving.value = true
-  const result = await post<Template>(`/admin/config/permission-templates/${selected.value.id}/save`, { name, permissions })
-  saving.value = false
-  if (result.kind !== 'completed') {
-    toastError(result, '草稿保存失败，请重试')
-    return
+  try {
+    const result = await post<Template>(`/admin/config/permission-templates/${selected.value.id}/save`, { name, permissions })
+    if (result.kind !== 'completed') {
+      toastError(result, '草稿保存失败，请重试')
+      return
+    }
+    await loadData()
+    selected.value = items.value.find((t) => t.id === result.data.id) ?? null
+    resetEditor()
+    toast.success('草稿已保存')
+  } finally {
+    saving.value = false
   }
-  await loadData()
-  selected.value = items.value.find((t) => t.id === result.data.id) ?? null
-  resetEditor()
-  toast.success('草稿已保存')
 }
 
 async function openDiff() {
@@ -119,26 +125,32 @@ async function openDiff() {
   if (!reauthProof.value) { toast.error('请先完成重新认证再预览'); return }
   diffLoading.value = true
   diff.value = null
-  const result = await get<TemplateDiff>(`/admin/config/permission-templates/${selected.value.id}/diff`)
-  diffLoading.value = false
-  if (result.kind === 'completed') {
-    diff.value = result.data
-    publishReason.value = ''
-  } else {
-    toastError(result, '差异预览失败，请重试')
+  try {
+    const result = await get<TemplateDiff>(`/admin/config/permission-templates/${selected.value.id}/diff`)
+    if (result.kind === 'completed') {
+      diff.value = result.data
+      publishReason.value = ''
+    } else {
+      toastError(result, '差异预览失败，请重试')
+    }
+  } finally {
+    diffLoading.value = false
   }
 }
 
 async function reauthenticate() {
   reauthenticating.value = true
-  const result = await identityApi.reauthenticate()
-  reauthenticating.value = false
-  if (result.kind === 'completed') {
-    reauthProof.value = result.data.proof
-    toast.success('身份验证已完成')
-    return
+  try {
+    const result = await identityApi.reauthenticate()
+    if (result.kind === 'completed') {
+      reauthProof.value = result.data.proof
+      toast.success('身份验证已完成')
+      return
+    }
+    toast.error('身份验证失败，请重新登录后再试')
+  } finally {
+    reauthenticating.value = false
   }
-  toast.error('身份验证失败，请重新登录后再试')
 }
 
 async function handlePublish() {
@@ -150,27 +162,30 @@ async function handlePublish() {
     return
   }
   publishing.value = true
-  const result = await post(`/admin/config/permission-templates/${t.id}/publish`, {
-    reauthProof: reauthProof.value,
-    previewVersion: d.previewVersion,
-    reason: publishReason.value.trim(),
-  })
-  publishing.value = false
   reauthConfirmOpen.value = false
-  if (result.kind === 'completed') {
-    toast.success('模板已发布')
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('发布已受理，正在后台处理')
-    await loadData()
-  } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
-    toast.error('身份验证已失效，请重新认证后重试')
-    reauthProof.value = ''
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error('差异预览已过期，请重新预览后发布')
-    diff.value = null
-  } else {
-    toastError(result, '发布失败，请重试')
+  try {
+    const result = await post(`/admin/config/permission-templates/${t.id}/publish`, {
+      reauthProof: reauthProof.value,
+      previewVersion: d.previewVersion,
+      reason: publishReason.value.trim(),
+    })
+    if (result.kind === 'completed') {
+      toast.success('模板已发布')
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('发布已受理，正在后台处理')
+      await loadData()
+    } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
+      toast.error('身份验证已失效，请重新认证后重试')
+      reauthProof.value = ''
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error('差异预览已过期，请重新预览后发布')
+      diff.value = null
+    } else {
+      toastError(result, '发布失败，请重试')
+    }
+  } finally {
+    publishing.value = false
   }
 }
 

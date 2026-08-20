@@ -94,6 +94,13 @@ const formErrorGroups = computed<Record<string, string[]>>(() =>
   Object.fromEntries(Object.entries(formErrors.value).map(([k, v]) => [k, [v]])),
 )
 
+/** 删除数组项后 DynamicForm 回传校正后的服务端错误，需转回单错误串口径写回 */
+function onFieldErrorsUpdated(groups: Record<string, string[]>) {
+  formErrors.value = Object.fromEntries(
+    Object.entries(groups).map(([k, msgs]) => [k, msgs[0] ?? '']),
+  )
+}
+
 async function loadData() {
   state.value = 'loading'
   const jointId = typeof route.params.jointId === 'string' ? route.params.jointId : null
@@ -475,7 +482,12 @@ async function handleWithdraw() {
       <!-- 共享报名表（未提交且未归档时展示，草稿用户仍可编辑） -->
       <Card v-if="showApplyForm" class="mb-4">
         <p class="text-sm font-medium text-text-primary mb-3">共享报名表</p>
-        <DynamicForm :fields="formFields" v-model="formData" :field-errors="formErrorGroups" />
+        <DynamicForm
+          :fields="formFields"
+          v-model="formData"
+          :field-errors="formErrorGroups"
+          @update:field-errors="onFieldErrorsUpdated"
+        />
       </Card>
 
       <!-- 意向社团（未提交且未归档时展示；草稿用户仍可编辑） -->

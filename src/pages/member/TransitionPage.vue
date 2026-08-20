@@ -100,19 +100,22 @@ function removePlanItem(list: 'candidates' | 'appointments', memberId: string) {
 async function savePlan() {
   if (!data.value) return
   saving.value = true
-  const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/transition/plan`, {
-    candidates: data.value.candidates,
-    appointments: data.value.appointments,
-  })
-  saving.value = false
-  if (r.kind === 'completed') {
-    toast.success('换届方案已保存')
-    showEditor.value = false
-    planDirty.value = false
-    await loadData()
-  } else {
-    toastError(r, '保存失败，请重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post(`/org/${clubId}/members/transition/plan`, {
+      candidates: data.value.candidates,
+      appointments: data.value.appointments,
+    })
+    if (r.kind === 'completed') {
+      toast.success('换届方案已保存')
+      showEditor.value = false
+      planDirty.value = false
+      await loadData()
+    } else {
+      toastError(r, '保存失败，请重试')
+    }
+  } finally {
+    saving.value = false
   }
 }
 
@@ -120,18 +123,21 @@ async function savePlan() {
 async function persistPlanSilently(): Promise<boolean> {
   if (!data.value) return false
   saving.value = true
-  const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/transition/plan`, {
-    candidates: data.value.candidates,
-    appointments: data.value.appointments,
-  })
-  saving.value = false
-  if (r.kind === 'completed') {
-    planDirty.value = false
-    return true
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post(`/org/${clubId}/members/transition/plan`, {
+      candidates: data.value.candidates,
+      appointments: data.value.appointments,
+    })
+    if (r.kind === 'completed') {
+      planDirty.value = false
+      return true
+    }
+    toastError(r, '方案尚未保存，请先保存后再执行')
+    return false
+  } finally {
+    saving.value = false
   }
-  toastError(r, '方案尚未保存，请先保存后再执行')
-  return false
 }
 
 // 点击"确认执行换届"：若存在未保存编辑，先落库再打开确认弹窗；
@@ -160,49 +166,55 @@ async function handleExecute(proof?: string) {
     return
   }
   executing.value = true
-  executeSucceeded.value = false
-  executeError.value = ''
-  const clubId = route.params.clubId as string
-  const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition`, {
-    reason: executeReason.value.trim(),
-    reauthProof: proof,
-  })
-  executing.value = false
-  if (r.kind === 'completed') {
-    data.value.results = r.data.results
-    data.value.executedAt = new Date().toISOString()
-    data.value.canExecute = false
-    const failed = r.data.results.filter((x) => !x.success)
-    executeSucceeded.value = true
+  try {
+    executeSucceeded.value = false
     executeError.value = ''
-    toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
-    showExecuteConfirm.value = false
-    executeReason.value = ''
-  } else if (r.kind === 'accepted') {
-    // P1：#8 服务端 202/IFC-ERR-013/014 异步受理换届：统一提示已受理，避免误报"执行失败"
-    toastAcceptedAction('换届执行已受理，正在后台处理')
-    showExecuteConfirm.value = false
-    executeReason.value = ''
-  } else {
-    // P1：#8 执行失败时把错误传给 HighRiskConfirm，避免弹窗永久卡“正在执行...”
-    executeError.value = (r as { error?: { message?: string } }).error?.message || '换届执行失败，请重试'
-    toastError(r, '换届执行失败，请重试')
+    const clubId = route.params.clubId as string
+    const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition`, {
+      reason: executeReason.value.trim(),
+      reauthProof: proof,
+    })
+    if (r.kind === 'completed') {
+      data.value.results = r.data.results
+      data.value.executedAt = new Date().toISOString()
+      data.value.canExecute = false
+      const failed = r.data.results.filter((x) => !x.success)
+      executeSucceeded.value = true
+      executeError.value = ''
+      toast.success(failed.length === 0 ? '换届执行完成' : '换届执行部分成功')
+      showExecuteConfirm.value = false
+      executeReason.value = ''
+    } else if (r.kind === 'accepted') {
+      // P1：#8 服务端 202/IFC-ERR-013/014 异步受理换届：统一提示已受理，避免误报"执行失败"
+      toastAcceptedAction('换届执行已受理，正在后台处理')
+      showExecuteConfirm.value = false
+      executeReason.value = ''
+    } else {
+      // P1：#8 执行失败时把错误传给 HighRiskConfirm，避免弹窗永久卡“正在执行...”
+      executeError.value = (r as { error?: { message?: string } }).error?.message || '换届执行失败，请重试'
+      toastError(r, '换届执行失败，请重试')
+    }
+  } finally {
+    executing.value = false
   }
 }
 
 // 失败项重试
 async function handleRetry() {
   executing.value = true
-  const clubId = route.params.clubId as string
-  const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition/retry`)
-  executing.value = false
-  if (r.kind === 'completed' && data.value) {
-    data.value.results = r.data.results
-    // P2-51：结果可能仍有 success=false，文案如实反映
-    const remaining = r.data.results.filter((x) => !x.success).length
-    toast.success(remaining === 0 ? '失败项已全部重试成功' : `重试完成，仍有 ${remaining} 项失败`)
-  } else {
-    toastError(r, '重试失败，请重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post<{ results: TransitionData['results'] }>(`/org/${clubId}/members/transition/retry`)
+    if (r.kind === 'completed' && data.value) {
+      data.value.results = r.data.results
+      // P2-51：结果可能仍有 success=false，文案如实反映
+      const remaining = r.data.results.filter((x) => !x.success).length
+      toast.success(remaining === 0 ? '失败项已全部重试成功' : `重试完成，仍有 ${remaining} 项失败`)
+    } else {
+      toastError(r, '重试失败，请重试')
+    }
+  } finally {
+    executing.value = false
   }
 }
 

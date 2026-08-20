@@ -45,30 +45,36 @@ const allConfirmed = computed(() => {
 async function handleStartClose() {
   if (!detail.value || closing.value) return
   closing.value = true
-  const result = await post(`${closeBaseUrl.value}/start`, {})
-  closing.value = false
-  if (result.kind === 'completed') {
-    toast.success('已进入结束确认阶段')
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('操作已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '进入结束确认失败')
+  try {
+    const result = await post(`${closeBaseUrl.value}/start`, {})
+    if (result.kind === 'completed') {
+      toast.success('已进入结束确认阶段')
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('操作已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '进入结束确认失败')
+    }
+  } finally {
+    closing.value = false
   }
 }
 
 async function handleClose() {
   if (!detail.value || closing.value) return
   closing.value = true
-  const result = await post(closeBaseUrl.value, {})
-  closing.value = false
-  if (result.kind === 'completed') {
-    toast.success('本社团确认完成')
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('确认已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '确认失败')
+  try {
+    const result = await post(closeBaseUrl.value, {})
+    if (result.kind === 'completed') {
+      toast.success('本社团确认完成')
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('确认已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '确认失败')
+    }
+  } finally {
+    closing.value = false
   }
 }
 

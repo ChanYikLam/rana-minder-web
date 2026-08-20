@@ -113,46 +113,48 @@ function validateForSubmit(): boolean {
 }
 
 async function handleSaveDraft() {
-  saving.value = true
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { saving.value = false; return }
-
-  const version = currentVersion.value?.version || 1
-  // 草稿落库前对 file/image 字段做归一：瞬态 uploading 丢弃、checking 降级 uploaded，
-  // 避免重开草稿后出现永远无法 auto-approve / 无法提交的卡死文件（P1-2，见 formFile.draftSafeFileMeta）
-  const draftData: DynamicFormValue = {}
-  for (const [fieldId, value] of Object.entries(formData.value)) {
-    const field = currentVersion.value?.fields.find((f) => f.id === fieldId)
-    if (field?.type === 'file' || field?.type === 'image') {
-      const safe = draftSafeFileMeta(value)
-      if (safe !== undefined) draftData[fieldId] = safe
-      continue
+  if (!apiScope) return
+  saving.value = true
+  try {
+    const version = currentVersion.value?.version || 1
+    // 草稿落库前对 file/image 字段做归一：瞬态 uploading 丢弃、checking 降级 uploaded，
+    // 避免重开草稿后出现永远无法 auto-approve / 无法提交的卡死文件（P1-2，见 formFile.draftSafeFileMeta）
+    const draftData: DynamicFormValue = {}
+    for (const [fieldId, value] of Object.entries(formData.value)) {
+      const field = currentVersion.value?.fields.find((f) => f.id === fieldId)
+      if (field?.type === 'file' || field?.type === 'image') {
+        const safe = draftSafeFileMeta(value)
+        if (safe !== undefined) draftData[fieldId] = safe
+        continue
+      }
+      draftData[fieldId] = value
     }
-    draftData[fieldId] = value
-  }
 
-  // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键，避免重复提交
-  const dataFingerprint = buildFingerprint(draftData)
-  const idempotencyKey = `${formId}-v${version}-${dataFingerprint}`
+    // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键，避免重复提交
+    const dataFingerprint = buildFingerprint(draftData)
+    const idempotencyKey = `${formId}-v${version}-${dataFingerprint}`
 
-  const result = await post(`${apiScope.prefix}/forms/versions/${formId}/draft`, {
-    formData: draftData,
-    version,
-    idempotencyKey,
-  })
-  saving.value = false
-  if (result.kind === 'completed') {
-    const data = result.data as { status?: string; savedAt?: string; submittedAt?: string }
-    const savedAt = data?.savedAt ?? data?.submittedAt
-    toast.success(savedAt ? `草稿已保存（${new Date(savedAt).toLocaleString()}）` : '草稿已保存')
-  } else if (result.kind === 'concurrency_conflict') {
-    // P3-3：保留版本/幂等冲突的专属提示，避免落入泛化文案
-    toast.error((result.error as { message?: string }).message || '表单已被其他操作修改，请刷新后重试')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
-  } else {
-    toast.error('保存失败，请稍后重试')
+    const result = await post(`${apiScope.prefix}/forms/versions/${formId}/draft`, {
+      formData: draftData,
+      version,
+      idempotencyKey,
+    })
+    if (result.kind === 'completed') {
+      const data = result.data as { status?: string; savedAt?: string; submittedAt?: string }
+      const savedAt = data?.savedAt ?? data?.submittedAt
+      toast.success(savedAt ? `草稿已保存（${new Date(savedAt).toLocaleString()}）` : '草稿已保存')
+    } else if (result.kind === 'concurrency_conflict') {
+      // P3-3：保留版本/幂等冲突的专属提示，避免落入泛化文案
+      toast.error((result.error as { message?: string }).message || '表单已被其他操作修改，请刷新后重试')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '保存失败，请稍后重试')
+    } else {
+      toast.error('保存失败，请稍后重试')
+    }
+  } finally {
+    saving.value = false
   }
 }
 
@@ -162,30 +164,32 @@ async function handleSubmit() {
     toast.error('请完善必填项并确认附件检查完成后再提交')
     return
   }
-  submitting.value = true
   const formId = route.params.formId as string
   const apiScope = resolveApiScope(route)
-  if (!apiScope) { submitting.value = false; return }
+  if (!apiScope) return
+  submitting.value = true
+  try {
+    // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键
+    const dataFingerprint = buildFingerprint(formData.value)
+    const idempotencyKey = `${formId}-v${currentVersion.value?.version || 1}-${dataFingerprint}`
 
-  // 稳定的幂等键：基于 formId + version + formData 内容哈希，相同内容 → 相同键
-  const dataFingerprint = buildFingerprint(formData.value)
-  const idempotencyKey = `${formId}-v${currentVersion.value?.version || 1}-${dataFingerprint}`
-
-  const result = await post(`${apiScope.prefix}/forms/versions/${formId}/submit`, {
-    formData: formData.value,
-    version: currentVersion.value?.version || 1,
-    idempotencyKey,
-  })
-  submitting.value = false
-  if (result.kind === 'completed') {
-    hasMyRecord.value = true
-    toast.success('表单已提交')
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error((result.error as { message?: string }).message || '表单已被其他操作修改，请刷新后重试')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '提交失败')
-  } else {
-    toast.error('提交失败，请稍后重试')
+    const result = await post(`${apiScope.prefix}/forms/versions/${formId}/submit`, {
+      formData: formData.value,
+      version: currentVersion.value?.version || 1,
+      idempotencyKey,
+    })
+    if (result.kind === 'completed') {
+      hasMyRecord.value = true
+      toast.success('表单已提交')
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error((result.error as { message?: string }).message || '表单已被其他操作修改，请刷新后重试')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '提交失败')
+    } else {
+      toast.error('提交失败，请稍后重试')
+    }
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -204,7 +208,12 @@ onMounted(loadForm)
       </div>
 
       <Card class="mb-4">
-        <DynamicForm v-model="formData" :fields="currentVersion.fields" :field-errors="formErrors" />
+        <DynamicForm
+          v-model="formData"
+          :fields="currentVersion.fields"
+          :field-errors="formErrors"
+          @update:field-errors="formErrors = $event"
+        />
       </Card>
 
       <!-- FORM-007: 文件检查状态提示（仅当版本存在附件字段时展示，P2-66） -->

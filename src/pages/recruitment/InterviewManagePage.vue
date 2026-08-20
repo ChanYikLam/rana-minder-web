@@ -158,17 +158,20 @@ async function runAction(action: string, input?: Record<string, unknown>) {
   if (!selected.value || actionLoading.value) return
   if (!validateParams()) return
   actionLoading.value = true
-  const result = await post(
-    `/org/${clubId.value}/recruitment/${actId.value}/interviews/${selected.value.id}/${action}`,
-    { ...(input || {}) }
-  )
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    await loadInterviews()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('操作已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  try {
+    const result = await post(
+      `/org/${clubId.value}/recruitment/${actId.value}/interviews/${selected.value.id}/${action}`,
+      { ...(input || {}) }
+    )
+    if (result.kind === 'completed') {
+      await loadInterviews()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('操作已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -176,19 +179,22 @@ async function handleBook() {
   if (!validateParams()) return
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviews/book`, {
-    applicantId: bookForm.value.applicantId,
-    slotId: bookForm.value.slotId,
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    bookOpen.value = false
-    bookForm.value = { applicantId: '', roundId: '', slotId: '' }
-    await loadInterviews()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('预约已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '预约失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviews/book`, {
+      applicantId: bookForm.value.applicantId,
+      slotId: bookForm.value.slotId,
+    })
+    if (result.kind === 'completed') {
+      bookOpen.value = false
+      bookForm.value = { applicantId: '', roundId: '', slotId: '' }
+      await loadInterviews()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('预约已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '预约失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -211,21 +217,24 @@ async function handleCreateRound() {
   if (actionLoading.value) return
   actionLoading.value = true
   roundError.value = ''
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds`, {
-    name: roundForm.value.name,
-    mode: roundForm.value.mode,
-    selectDeadline: roundForm.value.deadline,
-    slots: [{ startAt: roundForm.value.slotStart, endAt: roundForm.value.slotEnd, capacity: Number(roundForm.value.slotCapacity) || 10 }],
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    roundForm.value = { name: '', mode: 'club_unified', deadline: '', slotStart: '', slotEnd: '', slotCapacity: 10 }
-    roundError.value = ''
-    await loadRounds()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('创建轮次已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '创建轮次失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds`, {
+      name: roundForm.value.name,
+      mode: roundForm.value.mode,
+      selectDeadline: roundForm.value.deadline,
+      slots: [{ startAt: roundForm.value.slotStart, endAt: roundForm.value.slotEnd, capacity: Number(roundForm.value.slotCapacity) || 10 }],
+    })
+    if (result.kind === 'completed') {
+      roundForm.value = { name: '', mode: 'club_unified', deadline: '', slotStart: '', slotEnd: '', slotCapacity: 10 }
+      roundError.value = ''
+      await loadRounds()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('创建轮次已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '创建轮次失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -234,18 +243,21 @@ async function handleUpdateRound(roundId: string) {
   if (!newRoundDeadline.value) return
   if (actionLoading.value) return
   actionLoading.value = true
-  const result = await put(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}`, {
-    selectDeadline: newRoundDeadline.value,
-  })
-  actionLoading.value = false
-  updatingRound.value = null
-  newRoundDeadline.value = ''
-  if (result.kind === 'completed') {
-    await loadRounds()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('更新截止时间已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '更新失败')
+  try {
+    const result = await put(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}`, {
+      selectDeadline: newRoundDeadline.value,
+    })
+    updatingRound.value = null
+    newRoundDeadline.value = ''
+    if (result.kind === 'completed') {
+      await loadRounds()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('更新截止时间已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '更新失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -258,19 +270,22 @@ async function handleCancelRound(roundId: string) {
   if (actionLoading.value) return
   actionLoading.value = true
   cancelRoundError.value = ''
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/cancel`, {
-    reason: cancelRoundReason.value.trim(),
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    cancelRoundId.value = null
-    cancelRoundReason.value = ''
-    cancelRoundError.value = ''
-    await loadRounds()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('取消轮次已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '取消失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/cancel`, {
+      reason: cancelRoundReason.value.trim(),
+    })
+    if (result.kind === 'completed') {
+      cancelRoundId.value = null
+      cancelRoundReason.value = ''
+      cancelRoundError.value = ''
+      await loadRounds()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('取消轮次已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '取消失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -308,22 +323,25 @@ async function handleAssignTask() {
   if (actionLoading.value) return
   actionLoading.value = true
   taskError.value = ''
-  const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers`, {
-    userId: taskForm.value.userId,
-    userName: candidate?.name || '',
-    scope: taskForm.value.scope,
-    roundId: taskForm.value.scope === 'round' ? taskForm.value.roundId : undefined,
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    taskForm.value = { userId: '', scope: 'activity', roundId: '' }
-    taskError.value = ''
-    await loadInterviewers()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('指派临时面试官已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '指派失败')
+  try {
+    const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers`, {
+      userId: taskForm.value.userId,
+      userName: candidate?.name || '',
+      scope: taskForm.value.scope,
+      roundId: taskForm.value.scope === 'round' ? taskForm.value.roundId : undefined,
+    })
+    if (result.kind === 'completed') {
+      taskForm.value = { userId: '', scope: 'activity', roundId: '' }
+      taskError.value = ''
+      await loadInterviewers()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('指派临时面试官已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '指派失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -331,15 +349,18 @@ async function handleRevokeTask(taskId: string) {
   if (!validateParams()) return
   if (actionLoading.value) return
   actionLoading.value = true
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/${taskId}/revoke`, {})
-  actionLoading.value = false
-  revokingTaskId.value = null
-  if (result.kind === 'completed') {
-    await loadInterviewers()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('撤销任务已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '撤销失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/interviewers/${taskId}/revoke`, {})
+    revokingTaskId.value = null
+    if (result.kind === 'completed') {
+      await loadInterviewers()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('撤销任务已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '撤销失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -358,19 +379,22 @@ async function handleSkipRound() {
   if (actionLoading.value) return
   actionLoading.value = true
   roundError.value = ''
-  const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/skip`, {
-    applicantId: skipForm.value.applicantId,
-    reason: skipForm.value.reason.trim(),
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    skipForm.value = { applicantId: '', reason: '', roundId: '' }
-    roundError.value = ''
-    await Promise.all([loadRounds(), loadInterviews()])
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('跳轮已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '跳轮失败')
+  try {
+    const result = await post(`/org/${clubId.value}/recruitment/${actId.value}/rounds/${roundId}/skip`, {
+      applicantId: skipForm.value.applicantId,
+      reason: skipForm.value.reason.trim(),
+    })
+    if (result.kind === 'completed') {
+      skipForm.value = { applicantId: '', reason: '', roundId: '' }
+      roundError.value = ''
+      await Promise.all([loadRounds(), loadInterviews()])
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('跳轮已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '跳轮失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 

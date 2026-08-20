@@ -1,39 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { get } from '@/services/client'
-import { errorToPageState, errorCodeOf } from '@/services/error-map'
-import type { PageState } from '@/types/machine'
+import { useRequest } from '@/composables/useRequest'
 import { ChevronRight, FileText } from '@lucide/vue'
 
 interface FormItem { id: string; title: string; status: string; version: number; scope: string; updatedAt: string }
 
 const router = useRouter()
-const state = ref<PageState>('loading')
-const items = ref<FormItem[]>([])
-
-async function loadData() {
-  state.value = 'loading'
-  const result = await get<{ items: FormItem[] }>('/admin/forms')
-  if (result.kind === 'completed') {
-    items.value = (result as { kind: 'completed'; data: { items: FormItem[] } }).data.items
-    state.value = 'normal'
-  } else { state.value = errorToPageState(errorCodeOf(result)) }
-}
-
-onMounted(loadData)
+const { data, state, execute: loadData } = useRequest<{ items: FormItem[] }>(
+  () => get<{ items: FormItem[] }>('/admin/forms'),
+  { immediate: true }
+)
+const items = computed(() => data.value?.items ?? [])
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="平台表单" @retry="loadData">
+  <PageStateBoundary :state="state" title="平台表单" empty-title="暂无平台表单" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <h1 class="text-2xl font-bold text-text-primary mb-6">平台表单管理</h1>
 
-      <EmptyState v-if="items.length === 0" type="no_data" title="暂无平台表单" />
-
-      <div v-else class="space-y-2">
+      <div class="space-y-2">
         <Card
           v-for="form in items"
           :key="form.id"

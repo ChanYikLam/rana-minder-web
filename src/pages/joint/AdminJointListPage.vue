@@ -41,16 +41,19 @@ async function handleForceClose(proof?: string) {
     return
   }
   busy.value = true
-  closeError.value = ''
-  const result = await post(`/admin/joint/${closeTarget.value.id}/force-close`, { reason: closeReason.value.trim(), reauthProof: proof })
-  busy.value = false
-  if (result.kind === 'completed') {
-    closeOpen.value = false
-    closeTarget.value = null
-    closeReason.value = ''
-    await loadData()
-  } else if (result.kind === 'rejected' && result.error) {
-    closeError.value = (result.error as { message?: string }).message || '操作失败'
+  try {
+    closeError.value = ''
+    const result = await post(`/admin/joint/${closeTarget.value.id}/force-close`, { reason: closeReason.value.trim(), reauthProof: proof })
+    if (result.kind === 'completed') {
+      closeOpen.value = false
+      closeTarget.value = null
+      closeReason.value = ''
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      closeError.value = (result.error as { message?: string }).message || '操作失败'
+    }
+  } finally {
+    busy.value = false
   }
 }
 

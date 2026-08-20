@@ -75,18 +75,21 @@ const steps = [
 async function handlePublish() {
   submitting.value = true
   const clubId = route.params.clubId as string
-  // P2-22：datetime-local 本地值原样发送会破坏全仓 ISO 契约（时区偏移丢失），提交前转 ISO
-  const payload = { ...form, deadline: toIso(form.deadline) }
-  const result = await post(`/org/${clubId}/recruitment`, payload)
-  submitting.value = false
-  if (result.kind === 'completed') {
-    toast.success('招新活动已创建并发布')
-    router.push(`/org/${clubId}/recruitment/${(result.data as { id: string }).id}`)
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('发布已受理，正在后台处理')
-  } else {
-    // P2-23：发布失败展示服务端 error.message
-    toastError(result, '发布失败，请稍后重试')
+  try {
+    // P2-22：datetime-local 本地值原样发送会破坏全仓 ISO 契约（时区偏移丢失），提交前转 ISO
+    const payload = { ...form, deadline: toIso(form.deadline) }
+    const result = await post(`/org/${clubId}/recruitment`, payload)
+    if (result.kind === 'completed') {
+      toast.success('招新活动已创建并发布')
+      router.push(`/org/${clubId}/recruitment/${(result.data as { id: string }).id}`)
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('发布已受理，正在后台处理')
+    } else {
+      // P2-23：发布失败展示服务端 error.message
+      toastError(result, '发布失败，请稍后重试')
+    }
+  } finally {
+    submitting.value = false
   }
 }
 </script>
