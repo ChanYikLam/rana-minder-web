@@ -59,4 +59,22 @@ describe('ServiceUnavailablePage 服务不可用页', () => {
     expect(reload).toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('P2-16：卸载后清理延时重载，不触发页面刷新', async () => {
+    vi.useFakeTimers()
+    const reload = vi.fn()
+    vi.stubGlobal('location', { reload })
+    const wrapper = mount(ServiceUnavailablePage)
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('重新检测'))!
+    await btn.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('正在检测服务状态...')
+
+    // 用户点击后立即离开页面：延时重载应在卸载时被清理
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(reload).not.toHaveBeenCalled()
+  })
 })

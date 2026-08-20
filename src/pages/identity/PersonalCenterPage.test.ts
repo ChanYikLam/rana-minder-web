@@ -2,9 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { pageStubs } from '@/test-utils/pageStubs'
 
-const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
+const { mockGet, mockPost, routeMeta } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  routeMeta: { tab: 'todo' },
+}))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: {}, meta: { tab: 'todo' } }),
+  useRoute: () => ({ params: {}, meta: routeMeta }),
   useRouter: () => ({ push: vi.fn() }),
   // navigateByLink → safeLink → router/index 依赖的符号
   createRouter: vi.fn(() => ({ push: vi.fn(), beforeEach: vi.fn() })),
@@ -19,6 +23,11 @@ vi.mock('vue-sonner', () => ({
 }))
 
 import PersonalCenterPage from './PersonalCenterPage.vue'
+
+const ongoingItem = {
+  id: 'app-1', type: 'application', title: '报名计算机协会', description: '',
+  submittedAt: '2026-08-07T04:00:00Z', link: '/x', activityId: 'act-001', status: 'submitted',
+}
 
 describe('PersonalCenterPage 个人中心', () => {
   beforeEach(() => {
@@ -58,5 +67,84 @@ describe('PersonalCenterPage 个人中心', () => {
     await flushPromises()
     // 当前 tab（todo）数据正常，页面仍渲染
     expect(wrapper.text()).toContain('待处理评审')
+  })
+})
+
+describe('PersonalCenterPage 退出招新确认态', () => {
+  beforeEach(() => {
+    routeMeta.tab = 'ongoing'
+    mockGet.mockReset()
+    mockPost.mockReset()
+    vi.clearAllMocks()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  async function mountWithOngoing() {
+    mockGet.mockResolvedValue({ kind: 'completed', data: { items: [ongoingItem] } })
+    const wrapper = mount(PersonalCenterPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('P2-16：首次点击进入确认态，5 秒后自动复位且不触发退出', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountWithOngoing()
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('退出招新'))!
+    await btn.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('再点一次确认退出')
+    expect(mockPost).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('退出招新')
+    expect(wrapper.text()).not.toContain('再点一次确认退出')
+    expect(mockPost).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('P2-16：确认态内再次点击才执行退出请求', async () => {
+    mockPost.mockResolvedValue({ kind: 'completed', data: null })
+    const wrapper = await mountWithOngoing()
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('退出招新'))!
+    await btn.trigger('click')
+    await flushPromises()
+    expect(mockPost).not.toHaveBeenCalled()
+
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('再点一次确认退出'))!
+    await confirmBtn.trigger('click')
+    await flushPromises()
+    expect(mockPost).toHaveBeenCalledWith('/activity/recruitment/act-001/withdraw', { confirm: true })
+    wrapper.unmount()
+  })
+
+  it('P2-16：切 tab 清理确认态，旧点击不再被误当“确认”', async () => {
+    mockPost.mockResolvedValue({ kind: 'completed', data: null })
+    const wrapper = await mountWithOngoing()
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('退出招新'))!
+    await btn.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('再点一次确认退出')
+
+    // 切换到其他 tab（switchTab 内清理确认态）
+    const historyTab = wrapper.findAll('button').find((b) => b.text().includes('历史记录'))!
+    await historyTab.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('退出招新')
+    expect(wrapper.text()).not.toContain('再点一次确认退出')
+
+    // 切回进行中 tab：再次点击应重新进入确认态而非直接执行
+    const again = wrapper.findAll('button').find((b) => b.text().includes('退出招新'))!
+    await again.trigger('click')
+    await flushPromises()
+    expect(mockPost).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('再点一次确认退出')
+    wrapper.unmount()
   })
 })
