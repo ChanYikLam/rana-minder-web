@@ -1,89 +1,25 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Building2, Check, ChevronDown, LoaderCircle } from '@lucide/vue'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import { identityApi } from '@/services'
+import { useMyClubs, type MyClub } from '@/composables/useMyClubs'
 import { useWorkspaceContextStore } from '@/state/workspaceContextStore'
 import { useSessionViewStore, mergeClubPermissions } from '@/state/sessionViewStore'
 import { useStateView } from '@/composables/useStateView'
-import type { WorkspaceContext } from '@/types/domain'
-
-interface MyClub {
-  clubId: string
-  clubName: string
-  role: WorkspaceContext['role']
-}
 
 const router = useRouter()
 const workspace = useWorkspaceContextStore()
 const session = useSessionViewStore()
 const { roleLabel } = useStateView()
 
-const clubs = ref<MyClub[]>([])
-const loading = ref(false)
-const loadError = ref(false)
+// 数据获取下沉 useMyClubs composable，组件只消费 clubs/loading/loadError 并驱动交互
+const { clubs, loading, loadError, load: loadClubs } = useMyClubs()
+
 const switching = ref(false)
-// P2-16：列表缓存与会话绑定——记录最近一次拉取对应的用户，换账号/登出后作废
-let clubsSessionKey: string | null = null
-// P2-16：代次计数，换账号/登出时递增；请求返回时若代次已变则丢弃结果，
-// 避免旧账号在途的 getMyClubs 完成后写回并污染新账号菜单
-let clubsGeneration = 0
-// P2-16：强制刷新待补位——lastLoadedAt 触发时若正加载中，加载结束后再补一次，避免被静默丢弃
-let pendingForce = false
-
-async function loadClubs(force = false) {
-  if (loading.value) {
-    // P2-16：强制刷新在 loading 中时不丢弃，标记待补位，加载结束后再补一次
-    if (force) pendingForce = true
-    return
-  }
-  const sessionKey = session.user?.id ?? null
-  // 缓存命中仅限同用户；force（会话重载/角色变化后）强制刷新
-  if (!force && clubs.value.length > 0 && clubsSessionKey === sessionKey) return
-  loading.value = true
-  loadError.value = false
-  // 记录本次请求对应的代次与用户，写入前校验，防止在途请求写回旧数据
-  const gen = clubsGeneration
-  const reqSessionKey = sessionKey
-  try {
-    const result = await identityApi.getMyClubs()
-    // P2-16：请求期间发生换账号/登出（代次或用户已变）则丢弃本次结果，避免旧列表污染新账号
-    if (gen !== clubsGeneration || reqSessionKey !== (session.user?.id ?? null)) return
-    if (result.kind === 'completed') {
-      clubs.value = result.data.clubs
-      clubsSessionKey = reqSessionKey
-    } else {
-      // P2-14：拉取失败不再静默——否则菜单误导"暂无加入的社团"
-      loadError.value = true
-    }
-  } finally {
-    loading.value = false
-    // P2-16：补位——loading 期间被标记的强制刷新，结束后再执行一次
-    if (pendingForce) {
-      pendingForce = false
-      void loadClubs(true)
-    }
-  }
-}
-
-// P2-16：登出/换账号时旧列表立即作废（不再沿用上一账号的社团菜单）
-watch(() => session.user?.id, (id) => {
-  if (clubsSessionKey !== id) {
-    clubs.value = []
-    clubsSessionKey = null
-    // P2-16：递增代次，作废在途请求的写回
-    clubsGeneration++
-  }
-})
-
-// P2-16：会话重载（登录/刷新/加入新社团/角色变更）后强制刷新，clubs.length>0 不再阻止拉取
-watch(() => session.lastLoadedAt, () => {
-  if (session.lastLoadedAt != null) void loadClubs(true)
-})
 
 // P2-6：落点跟随权限（与 loginTarget.ts / 根守卫同一口径），无 club:dashboard:view 时不再硬跳 dashboard
 // 直落无权限页，而是回退个人中心/平台管理
@@ -118,7 +54,7 @@ async function switchClub(club: MyClub) {
   }
 }
 
-onMounted(loadClubs)
+onMounted(() => loadClubs())
 </script>
 
 <template>

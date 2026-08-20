@@ -10,7 +10,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import Button from '../common/Button.vue'
-import { post } from '@/services/client'
+import { useReauth, type ReauthResult } from '@/composables/useReauth'
 
 interface TargetItem {
   id: string
@@ -31,6 +31,8 @@ interface Props {
   executing?: boolean
   succeeded?: boolean
   errorMessage?: string
+  /** 二次鉴权实现注入：父级传入后组件仅调用并消费结果，不再感知业务 IO；缺省走 useReauth */
+  onReauth?: (password: string) => Promise<ReauthResult>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -50,6 +52,10 @@ const emit = defineEmits<{
   cancel: []
   retry: []
 }>()
+
+const { reauth: defaultReauth } = useReauth()
+// 注入：父级 onReauth 变化时跟随（computed），缺省走 useReauth
+const performReauth = computed(() => props.onReauth ?? defaultReauth)
 
 const step = ref<'preview' | 'confirm' | 'executing' | 'done'>('preview')
 
@@ -145,16 +151,12 @@ async function handleConfirm() {
   reauthBusy.value = true
   reauthError.value = ''
   try {
-    const result = await post('/auth/reauth', { password: reauthPassword.value })
+    const result = await performReauth.value(reauthPassword.value)
     if (result.kind === 'completed') {
       step.value = 'executing'
-      const proof = (result as { kind: 'completed'; data?: { proof?: string } }).data?.proof
-      emit('confirm', proof)
-    } else if (result.kind === 'rejected' && result.error) {
-      const fieldMsg = (result.error as { fieldErrors?: Record<string, string[]> }).fieldErrors?.password?.[0]
-      reauthError.value = fieldMsg || (result.error as { message?: string }).message || '密码错误，请重试'
+      emit('confirm', result.proof)
     } else {
-      reauthError.value = '验证失败，请稍后重试'
+      reauthError.value = result.message
     }
   } finally {
     reauthBusy.value = false

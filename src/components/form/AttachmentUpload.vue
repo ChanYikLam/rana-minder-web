@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onUnmounted } from 'vue'
 import { CheckCircle2, LoaderCircle, ShieldAlert } from '@lucide/vue'
-import { post } from '@/services/client'
 import { toast } from 'vue-sonner'
+import { useFileUpload, type UploadFileFn } from '@/composables/useFileUpload'
 import type { FileMeta, FileStatus } from '@/types/domain/form'
 
 const CHECK_DELAY_MS = 1200
@@ -13,6 +13,8 @@ const props = withDefaults(defineProps<{
   hint?: string
   /** mock 安全检查：附件经真实上传接口取得 fileId 后，模拟服务端扫描完成自动转为 approved（默认开启）；关闭时仅置为已上传待检查 */
   autoApprove?: boolean
+  /** 上传实现注入：父级传入后组件仅调用并消费结果，不再感知业务 IO；缺省走 useFileUpload */
+  upload?: UploadFileFn
 }>(), { autoApprove: true })
 const emit = defineEmits<{
   'update:modelValue': [files: FileMeta[]]
@@ -32,6 +34,9 @@ const allowedTypes = computed(() => {
     .filter(Boolean)
     .flatMap((t) => (t === 'image/*' ? IMAGE_TYPES : [t]))
 })
+
+const { upload: defaultUpload } = useFileUpload()
+const uploadFile = computed(() => props.upload ?? defaultUpload)
 
 const files = computed(() => props.modelValue ?? [])
 
@@ -64,13 +69,9 @@ function scheduleAutoApprove(nextFiles: FileMeta[]) {
   timers.add(timer)
 }
 
-/** 经真实上传接口换取 fileId（file- 前缀，可被 /api/files/:fileId 正常访问）；条目若已被移除则静默放弃。
- * 路径不带 /api 前缀（client.buildUrl 会拼 BASE_URL）且 payload 不预包 input（client 会统一包装） */
+/** 经真实上传接口换取 fileId（file- 前缀，可被 /api/files/:fileId 正常访问）；条目若已被移除则静默放弃。 */
 async function resolveUpload(tempId: string, file: File) {
-  const result = await post<{ fileId: string; uploadedAt?: string }>('/files/upload', {
-    purpose: 'form-attachment',
-    name: file.name,
-  })
+  const result = await uploadFile.value(file)
   const current = files.value
   const idx = current.findIndex((f) => f.id === tempId)
   if (idx < 0) return
