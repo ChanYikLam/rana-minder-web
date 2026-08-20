@@ -3,8 +3,8 @@
  * 需要渲染标题/文案的 stub 通过 props 透传（如 EmptyState 的 title）。 */
 export const pageStubs = {
   PageStateBoundary: {
-    props: ['state'],
-    template: '<div><slot /><button v-if="state === \'error\'" class="psb-retry" @click="$emit(\'retry\')">重试</button></div>',
+    props: ['state', 'emptyTitle'],
+    template: '<div><template v-if="state === \'empty\'">{{ emptyTitle || \'暂无数据\' }}</template><template v-else><slot /></template><button v-if="state === \'error\'" class="psb-retry" @click="$emit(\'retry\')">重试</button></div>',
   },
   Card: { template: '<div class="card"><slot /></div>' },
   EmptyState: { template: '<div><slot />{{ title }}</div>', props: ['type', 'title'] },

@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import { Banner, ErrorState, ProcessingTag } from '@/components/feedback'
 import { get, post } from '@/services/client'
-import { errorToPageState, ERROR_MESSAGES, type ErrorCode } from '@/services/error-map'
-import type { PageState } from '@/types/machine'
+import { useRequest } from '@/composables/useRequest'
 import { toast } from 'vue-sonner'
 import { Download, FileText, ArrowLeft } from '@lucide/vue'
 import { openAuthorizedDownload } from '@/services/download'
@@ -17,29 +16,19 @@ interface FileMeta {
 }
 
 const route = useRoute()
-const state = ref<PageState>('loading')
-const pageError = ref<{ code: string; message: string; supportId?: string } | null>(null)
-const file = ref<FileMeta | null>(null)
 const downloading = ref(false)
 const downloadError = ref('')
 
-async function loadFile() {
-  state.value = 'loading'
-  const id = route.params.fileId as string
-  const result = await get<FileMeta>(`/files/${id}`)
-  if (result.kind === 'completed') {
-    file.value = result.data
-    state.value = 'normal'
-  } else if (result.kind === 'accepted') {
-    // P1-1：202/IFC-ERR-014 异步受理不再永久卡 loading，降级为可重试的 error 态
-    state.value = 'error'
-    pageError.value = { code: 'IFC-ERR-014', message: '文件正在处理中，请稍后重试' }
-  } else {
-    const code = result.error.code as ErrorCode
-    pageError.value = { code, message: ERROR_MESSAGES[code] ?? result.error.message, supportId: result.error.supportId }
-    state.value = errorToPageState(code)
+const { data: file, state, error, execute: loadFile, stopPolling } = useRequest<FileMeta>(
+  () => get<FileMeta>(`/files/${route.params.fileId}`),
+  {
+    // P2-14：accepted（202/IFC-ERR-014 异步受理）自动轮询至检查完成，不再降级为手动重试
+    poll: () => get<FileMeta>(`/files/${route.params.fileId}`),
+    immediate: true,
   }
-}
+)
+
+onBeforeUnmount(stopPolling)
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -70,12 +59,10 @@ async function handleDownload() {
     downloadError.value = '下载失败，请稍后重试'
   }
 }
-
-onMounted(loadFile)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="文件预览" :error="pageError" @retry="loadFile">
+  <PageStateBoundary :state="state" title="文件预览" :error="error" @retry="loadFile">
     <div v-if="file" class="max-w-lg mx-auto">
       <button class="flex items-center gap-1 text-sm text-text-secondary hover:text-primary mb-4" @click="$router.back()">
         <ArrowLeft :size="16" /> 返回

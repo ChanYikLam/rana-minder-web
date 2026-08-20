@@ -10,7 +10,7 @@
 
 | 组件 | 职责 |
 |---|---|
-| `useRequest.ts` | 请求封装：数据、`PageState` 五状态、错误与 `execute/refresh`（防重入） |
+| `useRequest.ts` | 请求封装：数据、`PageState` 五状态、错误与 `execute/refresh`（并发合并队列 + `accepted`/`external_uncertain` 可选轮询） |
 | `useStateView.ts` | 页面状态视图（loading/empty/error/forbidden）派生 |
 | `useWriteGuard.ts` | 写入守卫（提交中/禁用条件） |
 | `useLastLeaderGuard.ts` | 最后负责人连续性校验 |
@@ -20,7 +20,6 @@
 | `useTheme.ts` | 明暗主题切换 |
 | `useUserMenu.ts` | 用户菜单与平台管理员入口判定（`PLATFORM_PERMISSIONS`） |
 | `useSessionView.ts` | 会话视图组合入口 |
-| `useForm.ts` | VeeValidate 表单封装 |
 
 ## 关键组件（lib）
 
@@ -40,9 +39,10 @@
 
 ## 核心逻辑摘要
 
-- `useRequest` 与 `useStateView` 统一页面五状态渲染，避免各页重复实现错误/加载分支。
+- `useRequest` 与 `useStateView` 统一页面五状态渲染，避免各页重复实现错误/加载分支；`useRequest` 对并发调用采用合并队列（不静默丢弃），`accepted`/`external_uncertain` 可通过 `poll` 选项轮询任务状态至终态，未配置轮询时呈现为可重试错误态（绝不永久 loading）。
 - `useLastLeaderGuard` / `useWriteGuard` 承载负责人连续性与写入保护等跨页业务规则。
 - lib 层为纯函数，无 Vue 依赖，可直接单测（date/jointApply/recruitment-status/formFile）。
+- 表单统一使用项目已确认的 VeeValidate + @vee-validate/zod 方案，不再维护自研 useForm。
 
 ## 典型调用链
 

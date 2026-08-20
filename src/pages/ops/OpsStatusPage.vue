@@ -1,30 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
 import { PageStateBoundary, Card } from '@/components/common'
 import { get } from '@/services/client'
-import { errorToPageState, errorCodeOf } from '@/services/error-map'
-import type { PageState } from '@/types/machine'
 import { CheckCircle2, AlertTriangle, Server, Database, Cloud, Mail, Clock } from '@lucide/vue'
 
-const state = ref<PageState>('loading')
-const data = ref<{
+import { useRequest } from '@/composables/useRequest'
+
+interface OpsStatusData {
   appVersion: string; uptime: string
   dependencies: { name: string; status: string; latency: number }[]
   taskQueue: { pending: number; processing: number; failed: number }
   syncHealth: { abnormalClubs: number; pendingCorrections: number; recentEvents: { id: string; kind: string; clubId: string; clubName: string; at: string; note: string }[] }
   lastCheckAt: string
-} | null>(null)
+}
 
 const depIcons: Record<string, typeof Server> = { PostgreSQL: Database, Casdoor: Server, '对象存储': Cloud, '邮件服务': Mail }
 
-async function loadData() {
-  state.value = 'loading'
-  const result = await get<typeof data.value>('/admin/ops-status')
-  if (result.kind === 'completed') {
-    data.value = result.data
-    state.value = 'normal'
-  } else { state.value = errorToPageState(errorCodeOf(result)) }
-}
+const { data, state, execute: loadData } = useRequest<OpsStatusData>(
+  () => get<OpsStatusData>('/admin/ops-status'),
+  { immediate: true }
+)
 
 function formatCheck(iso: string): string {
   const d = new Date(iso)
@@ -32,8 +26,6 @@ function formatCheck(iso: string): string {
 }
 
 const eventKindLabels: Record<string, string> = { group_lost: 'Group 失权', suspend: '停用', recover: '恢复', disconnect: '解除接入', rebind: '重新绑定', reaccess: '重新接入', repair: '修复', import: '成员导入' }
-
-onMounted(loadData)
 </script>
 
 <template>

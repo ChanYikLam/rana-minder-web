@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { PageStateBoundary, Card, EmptyState } from '@/components/common'
+import { computed, ref } from 'vue'
+import { PageStateBoundary, Card } from '@/components/common'
 import StateTag from '@/components/business/StateTag.vue'
 import HighRiskConfirm from '@/components/common/HighRiskConfirm.vue'
 import { get, post } from '@/services/client'
-import { errorToPageState, errorCodeOf } from '@/services/error-map'
+import { useRequest } from '@/composables/useRequest'
 import { toastAcceptedAction } from '@/utils/acceptedResult'
-import type { PageState } from '@/types/machine'
 import { Flag, ShieldAlert } from '@lucide/vue'
 
 interface RecItem {
@@ -14,23 +13,17 @@ interface RecItem {
   applicantCount: number; canForceComplete: boolean
 }
 
-const state = ref<PageState>('loading')
-const items = ref<RecItem[]>([])
+const { data, state, execute: loadData } = useRequest<{ items: RecItem[] }>(
+  () => get<{ items: RecItem[] }>('/admin/recruitment'),
+  { immediate: true }
+)
+const items = computed(() => data.value?.items ?? [])
 const busy = ref(false)
 
 const target = ref<RecItem | null>(null)
 const open = ref(false)
 const reason = ref('')
 const reasonError = ref('')
-
-async function loadData() {
-  state.value = 'loading'
-  const result = await get<{ items: RecItem[] }>('/admin/recruitment')
-  if (result.kind === 'completed') {
-    items.value = (result as { kind: 'completed'; data: { items: RecItem[] } }).data.items
-    state.value = 'normal'
-  } else { state.value = errorToPageState(errorCodeOf(result)) }
-}
 
 async function handleForceComplete(proof?: string) {
   if (!target.value || busy.value) return
@@ -59,19 +52,15 @@ async function handleForceComplete(proof?: string) {
     reasonError.value = '操作失败，请稍后重试'
   }
 }
-
-onMounted(loadData)
 </script>
 
 <template>
-  <PageStateBoundary :state="state" title="招新活动管理" @retry="loadData">
+  <PageStateBoundary :state="state" title="招新活动管理" empty-title="暂无招新活动" @retry="loadData">
     <div class="max-w-2xl mx-auto">
       <h1 class="text-2xl font-bold text-text-primary mb-2">招新活动管理</h1>
       <p class="text-sm text-text-secondary mb-6">平台视角查看所有招新活动，可强制结束异常活动</p>
 
-      <EmptyState v-if="items.length === 0" type="no_data" title="暂无招新活动" />
-
-      <div v-else class="space-y-3">
+      <div class="space-y-3">
         <Card v-for="rec in items" :key="rec.id">
           <div class="flex items-start justify-between">
             <div class="flex-1">
