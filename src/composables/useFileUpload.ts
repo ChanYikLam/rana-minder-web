@@ -15,3 +15,4 @@ export function useFileUpload(): { upload: UploadFileFn } {
     }),
   }
 }
+

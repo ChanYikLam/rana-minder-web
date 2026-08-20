@@ -10,7 +10,7 @@ export function useReauth() {
   async function reauth(password: string): Promise<ReauthResult> {
     const result = await post<{ proof?: string }>('/auth/reauth', { password })
     if (result.kind === 'completed') {
-      return { kind: 'completed', proof: result.data?.proof }
+      return { kind: 'completed', proof: result.data.proof }
     }
     if (result.kind === 'rejected' && result.error) {
       const fieldMsg = (result.error as { fieldErrors?: Record<string, string[]> }).fieldErrors?.password?.[0]
@@ -21,3 +21,4 @@ export function useReauth() {
 
   return { reauth }
 }
+
