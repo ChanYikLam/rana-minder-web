@@ -137,6 +137,62 @@ describe('ReviewPage 评审页', () => {
     expect(wrapper.text()).toContain('张三')
   })
 
+  it('快速连点申请人：旧请求的慢响应不覆盖新选中，loading 不被旧 finally 提前复位', async () => {
+    // 两个申请人：A（u-1）响应慢、B（u-2）响应慢，均手动控制返回时机
+    const reviewB = {
+      ...review, id: 'app-2', applicantId: 'u-2', applicantName: '李四', departmentName: '设计部',
+    }
+    let resolveA!: (v: unknown) => void
+    let resolveB!: (v: unknown) => void
+    const slowA = new Promise<unknown>((res) => { resolveA = res })
+    const slowB = new Promise<unknown>((res) => { resolveB = res })
+
+    mockGet.mockImplementation((url: string) => {
+      if (url.endsWith('/recruitment/act-1')) {
+        return Promise.resolve({ kind: 'completed', data: { formId: 'form-001' } })
+      }
+      if (url.endsWith('/forms/form-001')) {
+        return Promise.resolve({
+          kind: 'completed',
+          data: {
+            versions: [{
+              fields: [{ id: 'f1', type: 'text', label: '自我介绍', required: true, permission: 'read_write', options: null, description: null }],
+            }],
+          },
+        })
+      }
+      if (url.endsWith('/reviews')) {
+        return Promise.resolve({ kind: 'completed', data: { items: [review, reviewB] } })
+      }
+      if (url.includes('/applications/u-1')) return slowA
+      if (url.includes('/applications/u-2')) return slowB
+      return Promise.resolve({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'unknown' } })
+    })
+
+    const wrapper = mount(ReviewPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody tr[role="row"]')
+    // 先点 A（响应慢）→ 立即点 B（响应慢）
+    await rows[0].trigger('click')
+    expect(wrapper.text()).toContain('加载报名信息中...')
+    await rows[1].trigger('click')
+    expect(wrapper.text()).toContain('李四')
+
+    // 旧请求 A 先返回：不得写入 application，也不得提前复位 loading
+    resolveA({ kind: 'completed', data: { answers: { f1: 'A 的私密答案' } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('加载报名信息中...')
+    expect(wrapper.text()).not.toContain('A 的私密答案')
+
+    // 新请求 B 返回：正常渲染 B 的报名信息
+    resolveB({ kind: 'completed', data: { answers: { f1: 'B 的答案' }, submittedAt: '2026-08-02T10:00:00Z' } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('加载报名信息中...')
+    expect(wrapper.text()).toContain('B 的答案')
+    expect(wrapper.text()).not.toContain('A 的私密答案')
+  })
+
   it('提交评价：按 applicantId 调 conclude（不再用行 id app-xxx），失败仅 toast 展示，成功后刷新列表', async () => {
     setupGetRouter()
     mockPost.mockResolvedValue({ kind: 'rejected', error: { code: 'IFC-ERR-015', message: '申请人不存在' } })

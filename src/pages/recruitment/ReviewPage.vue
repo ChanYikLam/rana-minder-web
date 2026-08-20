@@ -114,21 +114,28 @@ async function loadFormSchema() {
   }
 }
 
+// P2：详情加载代次号防护——快速连点申请人时，旧请求的慢响应不得覆盖新选中，
+// 且旧请求的 finally 不得提前复位 applicationLoading（新请求仍在加载中）
+// 用 ref 收敛到组件实例作用域，避免模块级变量在多实例场景下共享串号
+const detailSeq = ref(0)
+
 /** 选中申请人：加载申请详情（表单答案 + 附件 fileId） */
 async function loadApplicationDetail(item: ReviewItem) {
   const scope = routeScope()
   if (!scope) return
+  const seq = ++detailSeq.value
   applicationLoading.value = true
   application.value = null
   try {
     const result = await get<ApplicationDetail>(`/org/${scope.clubId}/recruitment/${scope.activityId}/applications/${item.applicantId}`)
+    if (seq !== detailSeq.value) return
     if (result.kind === 'completed') {
       application.value = result.data
     }
   } catch {
     // 申请详情加载失败不影响评价流程
   } finally {
-    applicationLoading.value = false
+    if (seq === detailSeq.value) applicationLoading.value = false
   }
 }
 
