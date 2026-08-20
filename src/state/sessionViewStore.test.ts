@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useSessionViewStore, mergeClubPermissions } from './sessionViewStore'
+import { useNotificationViewStore } from './notificationViewStore'
 import type { User } from '@/types/domain'
 import { getSession, logout as logoutAuth } from '@/services/auth'
 
@@ -309,6 +310,21 @@ describe('sessionViewStore 会话清理与登出', () => {
     expect(session.workspace).toBeNull()
     expect(session.lastLoadedAt).toBeNull()
     expect(session.isAuthenticated).toBe(false)
+  })
+
+  it('P2-16：clearSession 联动清空通知视图（未读数/列表/loading）', () => {
+    const session = seedLoggedInUser()
+    const notifications = useNotificationViewStore()
+    notifications.unreadCount = 5
+    notifications.items = [{ id: 'n-1', type: 'info', title: 't', body: 'b', read: false, createdAt: '2026-08-07T04:00:00Z', link: null, clubName: null }]
+    notifications.loading = true
+
+    session.clearSession()
+
+    expect(notifications.unreadCount).toBe(0)
+    expect(notifications.items).toEqual([])
+    expect(notifications.loading).toBe(false)
+    expect(notifications.hasUnread).toBe(false)
   })
 
   it('logout 成功时调用认证登出并清空会话', async () => {

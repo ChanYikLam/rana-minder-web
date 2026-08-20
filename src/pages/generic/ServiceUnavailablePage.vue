@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { Wrench, Compass, RefreshCw } from '@lucide/vue'
 import { useSessionViewStore } from '@/state/sessionViewStore'
 
 const session = useSessionViewStore()
 const retrying = ref(false)
+// P2-16：延时重载句柄——页面卸载时取消，避免用户离开后仍被强制刷新
+let retryTimer: ReturnType<typeof setTimeout> | null = null
 
 const remainingMinutes = computed(() => {
   const ms = session.degradedWindowRemainingMs
@@ -12,17 +14,24 @@ const remainingMinutes = computed(() => {
   return Math.ceil(ms / 1000 / 60)
 })
 
-async function handleRetry() {
+function handleRetry() {
   if (retrying.value) return
   retrying.value = true
-  try {
-    // mock: 模拟重新探测依赖状态
-    await new Promise((r) => setTimeout(r, 1200))
-    window.location.reload()
-  } finally {
-    retrying.value = false
-  }
+  // mock: 模拟重新探测依赖状态
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    try {
+      window.location.reload()
+    } finally {
+      retrying.value = false
+    }
+  }, 1200)
 }
+
+onUnmounted(() => {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+})
 </script>
 
 <template>

@@ -62,6 +62,13 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     return errorCodeOf(result)
   }
 
+  /** P2-16：登出/换账号时清空未读数与列表（session.clearSession 联动调用），避免旧账号数据残留到新会话 */
+  function reset() {
+    unreadCount.value = 0
+    items.value = []
+    loading.value = false
+  }
+
   return {
     unreadCount,
     items,
@@ -71,5 +78,6 @@ export const useNotificationViewStore = defineStore('notificationView', () => {
     loadNotifications,
     markRead,
     markAllRead,
+    reset,
   }
 })
