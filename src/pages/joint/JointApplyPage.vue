@@ -212,6 +212,8 @@ function onPickDepartments(ids: string[]) {
 
 async function handleSubmit() {
   if (!showApplyForm.value) return
+  // 草稿保存请求在途时禁止提交，避免两个写请求（均携带 expectedVersion）并发触发
+  if (savingDraft.value) return
   // P2-33：提交前校验通道状态与截止时间，暂停/未开放/已关闭/过期通道不可提交
   if (detail.value?.channelStatus && detail.value.channelStatus !== 'open') {
     toast.error(`${channelStatusMeta(detail.value.channelStatus).label}，暂不可提交`)
@@ -540,7 +542,7 @@ async function handleWithdraw() {
       <button
         v-if="showApplyForm"
         class="w-full h-11 rounded-md bg-primary text-text-on-primary font-medium hover:bg-primary-hover disabled:opacity-60 flex items-center justify-center gap-2"
-        :disabled="!consented || submitting"
+        :disabled="!consented || submitting || savingDraft"
         @click="handleSubmit"
       >
         <Send :size="16" /> {{ submitting ? '提交中...' : '提交联合报名' }}

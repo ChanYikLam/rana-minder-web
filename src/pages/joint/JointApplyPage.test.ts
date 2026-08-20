@@ -266,6 +266,47 @@ describe('JointApplyPage 交互流程', () => {
     expect(wrapper.findAll('button').find((b) => b.text().includes('暂存草稿'))).toBeTruthy()
   })
 
+  it('草稿保存在途时：提交按钮禁用且不可触发提交（savingDraft 防并发写）', async () => {
+    setupGetMocks({
+      status: 'draft',
+      answers: { f1: '内容' },
+      volunteerClubIds: ['club-001'],
+      preferences: [],
+      allowJointAdjustment: true,
+      consented: true,
+    })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    // 勾选同意，使提交按钮处于可点击态（仅受 savingDraft 影响）
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    await nextTick()
+
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    // 触发保存草稿，使其在途
+    await wrapper.findAll('button').find((b) => b.text().includes('暂存草稿'))!.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('保存中...')
+
+    // 草稿在途时，提交按钮应被禁用
+    const submitBtn = wrapper.findAll('button').find((b) => b.text().includes('提交联合报名'))!
+    expect((submitBtn.element as HTMLButtonElement).disabled).toBe(true)
+
+    // 即便点击（未勾选前的残留）也不应触发提交请求
+    await submitBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1) // 仅草稿那次
+    expect(mockPost).not.toHaveBeenCalledWith('/activity/joint/jnt-001/apply', expect.anything())
+
+    resolvePost({ kind: 'completed', data: { savedAt: '2026-08-07T12:00:00Z' } })
+    await flushPromises()
+    await nextTick()
+    // 草稿保存完成后提交按钮恢复可用
+    expect((wrapper.findAll('button').find((b) => b.text().includes('提交联合报名'))!.element as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('通道关闭态展示关闭提示（danger 色调类）', async () => {
     setupGetMocks(null, { channelStatus: 'closed' })
     const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
