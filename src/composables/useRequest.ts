@@ -28,6 +28,8 @@ interface UseRequestReturn<T> {
 
 const DEFAULT_POLL_INTERVAL_MS = 2000
 const DEFAULT_MAX_POLL_ATTEMPTS = 30
+/** 轮询超时的独立文案：区别于无 poll 时 accepted 的“处理中”降级错误，明确为失败态 */
+const POLL_TIMEOUT_MESSAGE = '任务处理超时，请稍后重试'
 
 export function useRequest<T>(
   fn: () => Promise<ApiResult<T>>,
@@ -41,15 +43,20 @@ export function useRequest<T>(
   let pending = false
   let waiters: (() => void)[] = []
   let pollHandle: ReturnType<typeof setInterval> | null = null
-  let pollingInFlight = false
+  /**
+   * 代际 token：每次 startPolling 自增并记录到本轮回调；stopPolling 也自增，
+   * 使仍在途的旧 poll 回调在 await 返回后被判定为过期并丢弃，避免与新轮询并发更新状态。
+   */
+  let pollGeneration = 0
   let pollAttempts = 0
 
   function stopPolling() {
+    // 自增代际使在途的异步 poll 回调失效
+    pollGeneration += 1
     if (pollHandle) {
       clearInterval(pollHandle)
       pollHandle = null
     }
-    pollingInFlight = false
     pollAttempts = 0
   }
 
@@ -93,18 +100,25 @@ export function useRequest<T>(
 
   function startPolling() {
     stopPolling()
+    // 本轮代际 token：stopPolling 已自增，再自增一次作为本轮 token
+    pollGeneration += 1
+    const gen = pollGeneration
     pollHandle = setInterval(async () => {
-      if (pollingInFlight || !options.poll) return
-      pollingInFlight = true
+      if (!options.poll) return
       pollAttempts += 1
       try {
         if (pollAttempts > (options.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS)) {
+          // 超时：仅在代际仍有效时更新为超时错误
+          if (gen === pollGeneration) {
+            state.value = 'error'
+            error.value = { code: 'IFC-ERR-014', message: POLL_TIMEOUT_MESSAGE }
+          }
           stopPolling()
-          state.value = 'error'
-          error.value = { code: 'IFC-ERR-014', message: ERROR_MESSAGES['IFC-ERR-014'] }
           return
         }
         const result = await options.poll()
+        // 代际失效说明轮询已被中断（refresh/卸载/新轮询），丢弃过期结果
+        if (gen !== pollGeneration) return
         if (result.kind === 'completed') {
           stopPolling()
           applyResult(result)
@@ -116,14 +130,14 @@ export function useRequest<T>(
         stopPolling()
         applyResult(result)
       } catch (e) {
-        stopPolling()
-        state.value = 'error'
-        error.value = {
-          code: 'IFC-ERR-016',
-          message: e instanceof Error ? e.message : ERROR_MESSAGES['IFC-ERR-016'],
+        if (gen === pollGeneration) {
+          state.value = 'error'
+          error.value = {
+            code: 'IFC-ERR-016',
+            message: e instanceof Error ? e.message : ERROR_MESSAGES['IFC-ERR-016'],
+          }
         }
-      } finally {
-        pollingInFlight = false
+        stopPolling()
       }
     }, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS)
   }
@@ -146,8 +160,9 @@ export function useRequest<T>(
   }
 
   /**
-   * 并发合并队列：执行期间再次调用不静默丢弃，合并为一次补跑，
-   * 所有等待调用在该次补跑完成后一并 resolve。
+   * 并发合并队列：执行期间再次调用不静默丢弃，合并为一次补跑。
+   * 等待者（waiters）的 resolve 挂在整个补跑链的终点，确保所有调用方
+   * 拿到的是最终稳定的状态，不因补跑期间又有新的 execute() 入队而提前 resolve。
    */
   function execute(): Promise<void> {
     if (running) {
@@ -161,7 +176,8 @@ export function useRequest<T>(
         pending = false
         const w = waiters
         waiters = []
-        void execute().finally(() => w.forEach((resolve) => resolve()))
+        // 将补跑链的完成串联到 waiters 的 resolve 上，等待整条补跑链结束
+        return execute().finally(() => w.forEach((resolve) => resolve()))
       }
     })
     return p
