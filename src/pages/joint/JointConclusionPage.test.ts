@@ -117,7 +117,7 @@ describe('JointConclusionPage 联合结论与邀请', () => {
     wrapper.unmount()
   })
 
-  it('撤回邀请：快速连点只发一次请求（invitationBusy 防重复）', async () => {
+  it('撤回邀请：快速连点只发一次请求（invitationBusyId 防重复）', async () => {
     const concluded = { id: 'c-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', clubName: '计算机协会', status: 'concluded', conclusion: 'admit', reviewFlag: false, rating: 4, comment: '', concludedAt: '2026-01-01T00:00:00', myClub: true }
     const invitation = { id: 'inv-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', status: 'pending_acceptance', sentAt: '2026-01-01T00:00:00', expiredAt: '2026-02-01T00:00:00' }
     mockGet.mockImplementation((url: string) => {

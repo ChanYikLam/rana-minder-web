@@ -146,16 +146,16 @@ async function handleReview(c: Conclusion, action: 'keep' | 'modify', newConclus
   }
 }
 
-const invitationBusy = ref(false)
+const invitationBusyId = ref<string | null>(null)
 
 async function handleInvitationAction(invitationId: string, action: string) {
-  if (invitationBusy.value) return
-  invitationBusy.value = true
+  if (invitationBusyId.value !== null) return
+  invitationBusyId.value = invitationId
   let result: Awaited<ReturnType<typeof post>>
   try {
     result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations/${invitationId}/${action}`, {})
   } finally {
-    invitationBusy.value = false
+    invitationBusyId.value = null
   }
   if (result.kind === 'completed') {
     toast.success(action === 'withdraw' ? '邀请已撤回' : '邀请已同步生效')
@@ -344,7 +344,7 @@ onMounted(async () => {
                   <button
                     v-if="inv.status === 'pending_acceptance'"
                     class="flex items-center gap-1 px-2 h-7 rounded-md bg-muted text-text-primary text-xs font-medium hover:bg-border disabled:opacity-60"
-                    :disabled="invitationBusy"
+                    :disabled="invitationBusyId === inv.id"
                     @click="handleInvitationAction(inv.id, 'withdraw')"
                   >
                     <XCircle :size="12" /> 撤回
@@ -352,7 +352,7 @@ onMounted(async () => {
                   <button
                     v-if="inv.status === 'accepted'"
                     class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
-                    :disabled="invitationBusy"
+                    :disabled="invitationBusyId === inv.id"
                     @click="handleInvitationAction(inv.id, 'sync')"
                   >
                     <CheckCircle2 :size="12" /> 同步生效

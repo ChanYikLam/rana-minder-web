@@ -275,7 +275,7 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     wrapper.unmount()
   })
 
-  it('停用：快速连点只发一次请求（actionPending 防重复）', async () => {
+  it('停用：快速连点只发一次请求（deprecating 防重复）', async () => {
     const wrapper = await mountPage('published')
     let resolvePost!: (v: unknown) => void
     mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
@@ -297,7 +297,7 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     wrapper.unmount()
   })
 
-  it('复用：快速连点只发一次请求（actionPending 防重复）', async () => {
+  it('复用：快速连点只发一次请求（reusing 防重复）', async () => {
     const wrapper = await mountPage('deprecated')
     let resolvePost!: (v: unknown) => void
     mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
@@ -319,7 +319,7 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     wrapper.unmount()
   })
 
-  it('克隆：快速连点只发一次请求（actionPending 防重复）', async () => {
+  it('克隆：快速连点只发一次请求（cloning 防重复）', async () => {
     const wrapper = await mountPage('deprecated')
     let resolvePost!: (v: unknown) => void
     mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
