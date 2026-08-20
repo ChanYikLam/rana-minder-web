@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { get, getValidated, getPaginated, post, put, patch, del } from './client'
+import { ERROR_MESSAGES, errorCodeOf } from './error-map'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -100,6 +101,64 @@ describe('API client', () => {
       kind: 'rejected',
       error: { code: 'IFC-ERR-016', message: '网络连接异常，请检查网络后重试' },
     })
+  })
+
+  it('maps a hanging connection to dependency_unavailable (IFC-ERR-012) after timeout', async () => {
+    stubWindow()
+    const fetchMock = vi.fn().mockImplementation((_url: unknown, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('timed out', 'TimeoutError')))
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await get('/hang', undefined, undefined, 20)
+
+    expect(result).toEqual({
+      kind: 'dependency_unavailable',
+      error: { code: 'IFC-ERR-012', message: ERROR_MESSAGES['IFC-ERR-012'] },
+    })
+    expect(errorCodeOf(result)).toBe('IFC-ERR-012')
+    // 超时错误进入自动重试：默认最多 3 次尝试
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('auto-retries dependency_unavailable (503) and completes when a retry succeeds', async () => {
+    stubWindow()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'IFC-ERR-012', message: '依赖服务不可用' }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { ok: true } }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await get('/flaky')
+
+    expect(result).toEqual({ kind: 'completed', data: { ok: true } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not auto-retry non-retryable errors (IFC-ERR-005)', async () => {
+    stubWindow()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'IFC-ERR-005', message: '校验失败' }), { status: 422 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await get('/invalid')
+
+    expect(result.kind).toBe('rejected')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops auto-retry when the caller aborts during backoff', async () => {
+    stubWindow()
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'IFC-ERR-012', message: '依赖服务不可用' }), { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = get('/flaky', undefined, controller.signal)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('treats 204 No Content as completed with undefined data', async () => {
