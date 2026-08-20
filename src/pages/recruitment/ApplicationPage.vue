@@ -252,23 +252,26 @@ async function handleSaveDraft() {
     }
     draftAnswers[fieldId] = value
   }
-  const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
-    answers: draftAnswers,
-  }, { expectedVersion: myApplication.value?.version })
-  savingDraft.value = false
-  if (result.kind === 'completed') {
-    const savedAt = (result.data as { savedAt?: string }).savedAt
-    toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
-    // 更新本地版本号：下次保存基于新版本（P2-8 乐观锁）
-    const data = result.data as { version?: number }
-    if (data?.version && myApplication.value) myApplication.value.version = data.version
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('草稿已受理保存，正在后台处理')
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error('草稿已在其他窗口被修改，已刷新恢复最新内容，请重新编辑')
-    await loadMyApplication()
-  } else {
-    toast.error((result as { error?: { message?: string } }).error?.message || '草稿保存失败，请稍后重试')
+  try {
+    const result = await post(`/activity/recruitment/${route.params.activityId}/draft`, {
+      answers: draftAnswers,
+    }, { expectedVersion: myApplication.value?.version })
+    if (result.kind === 'completed') {
+      const savedAt = (result.data as { savedAt?: string }).savedAt
+      toast.success(savedAt ? `草稿已保存，保存时间 ${new Date(savedAt).toLocaleString()}` : '草稿已保存')
+      // 更新本地版本号：下次保存基于新版本（P2-8 乐观锁）
+      const data = result.data as { version?: number }
+      if (data?.version && myApplication.value) myApplication.value.version = data.version
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('草稿已受理保存，正在后台处理')
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error('草稿已在其他窗口被修改，已刷新恢复最新内容，请重新编辑')
+      await loadMyApplication()
+    } else {
+      toast.error((result as { error?: { message?: string } }).error?.message || '草稿保存失败，请稍后重试')
+    }
+  } finally {
+    savingDraft.value = false
   }
 }
 
@@ -301,21 +304,24 @@ async function handleSubmit() {
   if (Object.keys(formErrors.value).length > 0) return
 
   submitting.value = true
-  const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
-    answers: { ...formData.value },
-    preferences: preferences.value,
-    allowAdjustment: allowAdjustment.value,
-  })
-  submitting.value = false
+  try {
+    const result = await post('/activity/recruitment/' + route.params.activityId + '/apply', {
+      answers: { ...formData.value },
+      preferences: preferences.value,
+      allowAdjustment: allowAdjustment.value,
+    })
 
-  if (result.kind === 'completed') {
-    router.push('/me/ongoing')
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('申请已受理，正在后台处理，请稍后刷新查看结果')
-  } else if (result.kind === 'rejected') {
-    toast.error(result.error.message)
-  } else {
-    toast.error('提交失败，请稍后重试')
+    if (result.kind === 'completed') {
+      router.push('/me/ongoing')
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('申请已受理，正在后台处理，请稍后刷新查看结果')
+    } else if (result.kind === 'rejected') {
+      toast.error(result.error.message)
+    } else {
+      toast.error('提交失败，请稍后重试')
+    }
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -374,8 +380,8 @@ onUnmounted(() => {
                 <p v-if="hasAnswerFiles(field.id)" class="text-xs text-text-secondary">{{ field.label }}</p>
                 <div v-if="hasAnswerFiles(field.id)" class="mt-1 space-y-1">
                   <router-link
-                    v-for="(f, idx) in answerFiles(field.id)"
-                    :key="`${field.id}-${idx}`"
+                    v-for="(f) in answerFiles(field.id)"
+                    :key="f.id"
                     :to="`/files/${f.id}`"
                     class="inline-flex items-center gap-1 text-sm text-primary hover:underline"
                   >
@@ -475,7 +481,12 @@ onUnmounted(() => {
       <!-- 动态表单（已提交/已归档/终态后隐藏，展示只读卡片） -->
       <Card v-if="showApplyForm" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-4">报名表单</h2>
-        <DynamicForm :fields="formFields" v-model="formData" :field-errors="formErrors" />
+        <DynamicForm
+          :fields="formFields"
+          v-model="formData"
+          :field-errors="formErrors"
+          @update:field-errors="formErrors = $event"
+        />
       </Card>
 
       <!-- 错误提示：操作结果反馈统一走 toast（字段级校验由 formErrors 承载） -->

@@ -179,15 +179,18 @@ const importingBusy = ref(false)
 async function handleImport() {
   if (!wizardClub.value || !groupDetail.value) return
   importingBusy.value = true
-  const res = await post<{ importedCount: number }>(`/admin/clubs/${wizardClub.value.clubId}/import`, {
-    memberIds: groupDetail.value.members.map((m) => m.id),
-  })
-  importingBusy.value = false
-  if (res.kind === 'completed') {
-    toast.success('成员导入历史已记录')
-    await loadData()
-  } else {
-    toast.error('成员导入失败，请重试')
+  try {
+    const res = await post<{ importedCount: number }>(`/admin/clubs/${wizardClub.value.clubId}/import`, {
+      memberIds: groupDetail.value.members.map((m) => m.id),
+    })
+    if (res.kind === 'completed') {
+      toast.success('成员导入历史已记录')
+      await loadData()
+    } else {
+      toast.error('成员导入失败，请重试')
+    }
+  } finally {
+    importingBusy.value = false
   }
 }
 
@@ -207,14 +210,17 @@ async function handleComplete() {
     return
   }
   completingBusy.value = true
-  const res = await post(`/admin/clubs/wizard/complete`, { clubId: wizardClub.value.clubId })
-  completingBusy.value = false
-  if (res.kind === 'completed') {
-    toast.success('接入完成，社团已启用')
-    await loadData()
-    activeTab.value = 'manage'
-  } else {
-    toastError(res, '接入失败，请重试')
+  try {
+    const res = await post(`/admin/clubs/wizard/complete`, { clubId: wizardClub.value.clubId })
+    if (res.kind === 'completed') {
+      toast.success('接入完成，社团已启用')
+      await loadData()
+      activeTab.value = 'manage'
+    } else {
+      toastError(res, '接入失败，请重试')
+    }
+  } finally {
+    completingBusy.value = false
   }
 }
 
@@ -265,24 +271,27 @@ async function riskExec(proof?: string) {
   const t = risk.value
   if (!t) return
   riskExecuting.value = true
-  let result: Awaited<ReturnType<typeof post>>
-  if (t.op === 'normal_suspend') {
-    result = await post(`/admin/clubs/${t.club.clubId}/normal-suspend`, { reason: reasonDraft.value || '常规业务调整' })
-  } else if (t.op === 'force_suspend') {
-    result = await post(`/admin/clubs/${t.club.clubId}/force-suspend`, { reason: reasonDraft.value, reauthProof: proof })
-  } else if (t.op === 'recover') {
-    result = await post(`/admin/clubs/${t.club.clubId}/recover`)
-  } else {
-    result = await post(`/admin/clubs/${t.club.clubId}/disconnect`, { reason: reasonDraft.value, reauthProof: proof })
-  }
-  riskExecuting.value = false
-  if (result.kind === 'completed') {
-    toast.success('操作已执行')
-    risk.value = null
-    await loadData()
-  } else {
-    toastError(result, '操作失败，请重试')
-    risk.value = null
+  try {
+    let result: Awaited<ReturnType<typeof post>>
+    if (t.op === 'normal_suspend') {
+      result = await post(`/admin/clubs/${t.club.clubId}/normal-suspend`, { reason: reasonDraft.value || '常规业务调整' })
+    } else if (t.op === 'force_suspend') {
+      result = await post(`/admin/clubs/${t.club.clubId}/force-suspend`, { reason: reasonDraft.value, reauthProof: proof })
+    } else if (t.op === 'recover') {
+      result = await post(`/admin/clubs/${t.club.clubId}/recover`)
+    } else {
+      result = await post(`/admin/clubs/${t.club.clubId}/disconnect`, { reason: reasonDraft.value, reauthProof: proof })
+    }
+    if (result.kind === 'completed') {
+      toast.success('操作已执行')
+      risk.value = null
+      await loadData()
+    } else {
+      toastError(result, '操作失败，请重试')
+      risk.value = null
+    }
+  } finally {
+    riskExecuting.value = false
   }
 }
 
@@ -319,14 +328,17 @@ async function handleRebindConfirm() {
   const t = rebind.value
   if (!t) return
   rebindExecuting.value = true
-  const res = await post(`/admin/clubs/${t.club.clubId}/${t.endpoint}`, { groupId: t.candidate.id })
-  rebindExecuting.value = false
-  rebind.value = null
-  if (res.kind === 'completed') {
-    toast.success(t.endpoint === 'reaccess' ? '重新接入完成' : '重新绑定完成')
-    await loadData()
-  } else {
-    toastError(res, '操作失败，请重试')
+  try {
+    const res = await post(`/admin/clubs/${t.club.clubId}/${t.endpoint}`, { groupId: t.candidate.id })
+    rebind.value = null
+    if (res.kind === 'completed') {
+      toast.success(t.endpoint === 'reaccess' ? '重新接入完成' : '重新绑定完成')
+      await loadData()
+    } else {
+      toastError(res, '操作失败，请重试')
+    }
+  } finally {
+    rebindExecuting.value = false
   }
 }
 

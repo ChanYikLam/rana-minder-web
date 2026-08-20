@@ -135,22 +135,25 @@ function onExecuteClick() {
 async function handleExecute() {
   if (!selectedMember.value || !canExecute.value) return
   submitting.value = true
-  const clubId = route.params.clubId as string
-  const r = await post(`/org/${clubId}/members/appointments`, {
-    action: action.value,
-    memberId: selectedMember.value.id,
-    departmentId: action.value === 'dismiss' ? null : targetDept.value,
-    title: action.value === 'dismiss' ? null : targetTitle.value,
-    scheduledAt: isScheduled.value ? new Date(scheduledAt.value).toISOString() : null,
-    candidateStudentId: selectedMember.value.isMember ? null : selectedMember.value.studentId,
-  })
-  submitting.value = false
-  if (r.kind === 'completed') {
-    toast.success(isScheduled.value ? '预约命令已创建' : (action.value === 'appoint' ? '任命已生效' : action.value === 'transfer' ? '调岗已生效' : '免职已生效'))
-    selectedMember.value = null
-    await loadData()
-  } else {
-    toastError(r, '操作失败，请重试')
+  try {
+    const clubId = route.params.clubId as string
+    const r = await post(`/org/${clubId}/members/appointments`, {
+      action: action.value,
+      memberId: selectedMember.value.id,
+      departmentId: action.value === 'dismiss' ? null : targetDept.value,
+      title: action.value === 'dismiss' ? null : targetTitle.value,
+      scheduledAt: isScheduled.value ? new Date(scheduledAt.value).toISOString() : null,
+      candidateStudentId: selectedMember.value.isMember ? null : selectedMember.value.studentId,
+    })
+    if (r.kind === 'completed') {
+      toast.success(isScheduled.value ? '预约命令已创建' : (action.value === 'appoint' ? '任命已生效' : action.value === 'transfer' ? '调岗已生效' : '免职已生效'))
+      selectedMember.value = null
+      await loadData()
+    } else {
+      toastError(r, '操作失败，请重试')
+    }
+  } finally {
+    submitting.value = false
   }
 }
 

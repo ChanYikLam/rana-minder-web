@@ -408,4 +408,33 @@ describe('DynamicForm array 字段', () => {
     await flushPromises()
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
+
+  it('P2-13：删除数组中间项时同步校正服务端子字段错误 key（index 契约前移）', async () => {
+    // 服务端错误 key 为 fieldId.index.childId 下标口径
+    const fieldErrors = {
+      'arr.0.c1': ['第 0 项错误'],
+      'arr.1.c1': ['第 1 项错误'],
+      'arr.2.c1': ['第 2 项错误'],
+    }
+    const wrapper = mount(DynamicForm, {
+      props: {
+        fields: [arrayField, childField],
+        modelValue: { arr: [{ _uid: 'r0', c1: '' }, { _uid: 'r1', c1: '' }, { _uid: 'r2', c1: '' }] },
+        fieldErrors,
+      },
+      global: { stubs: commonStubs },
+    })
+
+    // 删除 index=1 的中间项
+    const deleteButtons = wrapper.findAll('button').filter((b) => b.text().includes('删除'))
+    await deleteButtons[1]!.trigger('click')
+
+    const emitted = wrapper.emitted('update:fieldErrors')?.[0]![0] as Record<string, string[]>
+    expect(emitted).toEqual({
+      'arr.0.c1': ['第 0 项错误'],
+      'arr.1.c1': ['第 2 项错误'], // 原 index=2 前移到 1
+    })
+    expect(emitted['arr.1.c1']).toBeDefined()
+    expect(emitted['arr.2.c1']).toBeUndefined() // 被删项错误已清除
+  })
 })
