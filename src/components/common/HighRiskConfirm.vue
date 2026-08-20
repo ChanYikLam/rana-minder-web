@@ -53,7 +53,9 @@ const emit = defineEmits<{
   retry: []
 }>()
 
-const performReauth = props.onReauth ?? useReauth().reauth
+const { reauth: defaultReauth } = useReauth()
+// 注入：父级 onReauth 变化时跟随（computed），缺省走 useReauth
+const performReauth = computed(() => props.onReauth ?? defaultReauth)
 
 const step = ref<'preview' | 'confirm' | 'executing' | 'done'>('preview')
 
@@ -149,7 +151,7 @@ async function handleConfirm() {
   reauthBusy.value = true
   reauthError.value = ''
   try {
-    const result = await performReauth(reauthPassword.value)
+    const result = await performReauth.value(reauthPassword.value)
     if (result.kind === 'completed') {
       step.value = 'executing'
       emit('confirm', result.proof)
