@@ -42,7 +42,7 @@ export function useRequest<T>(
   let running = false
   let pending = false
   let waiters: (() => void)[] = []
-  let pollHandle: ReturnType<typeof setInterval> | null = null
+  let pollHandle: ReturnType<typeof setTimeout> | null = null
   /**
    * 代际 token：每次 startPolling 自增并记录到本轮回调；stopPolling 也自增，
    * 使仍在途的旧 poll 回调在 await 返回后被判定为过期并丢弃，避免与新轮询并发更新状态。
@@ -54,7 +54,7 @@ export function useRequest<T>(
     // 自增代际使在途的异步 poll 回调失效
     pollGeneration += 1
     if (pollHandle) {
-      clearInterval(pollHandle)
+      clearTimeout(pollHandle)
       pollHandle = null
     }
     pollAttempts = 0
@@ -103,7 +103,15 @@ export function useRequest<T>(
     // 本轮代际 token：stopPolling 已自增，再自增一次作为本轮 token
     pollGeneration += 1
     const gen = pollGeneration
-    pollHandle = setInterval(async () => {
+    const interval = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+
+    /**
+     * 使用递归 setTimeout 而非 setInterval：每次 poll 完成后（含间隔）再调度下一次，
+     * 避免 poll 请求耗时超过间隔时新旧请求并发重叠。每轮回调结束先判断代际是否仍有效，
+     * 过期（refresh/卸载/新轮询中断）则不再调度下一轮。
+     */
+    const tick = async () => {
+      if (gen !== pollGeneration) return
       if (!options.poll) return
       pollAttempts += 1
       try {
@@ -125,6 +133,8 @@ export function useRequest<T>(
           return
         }
         if (result.kind === 'accepted' || result.kind === 'external_uncertain') {
+          // 仍在处理中：间隔后再调度下一轮（若代际仍有效）
+          pollHandle = setTimeout(() => void tick(), interval)
           return
         }
         stopPolling()
@@ -139,7 +149,9 @@ export function useRequest<T>(
         }
         stopPolling()
       }
-    }, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS)
+    }
+
+    pollHandle = setTimeout(() => void tick(), interval)
   }
 
   async function runOnce(): Promise<void> {

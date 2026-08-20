@@ -360,4 +360,41 @@ describe('useRequest 页面状态机', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(poll).toHaveBeenCalledTimes(1)
   })
+
+  it('递归 setTimeout：poll 耗时超过间隔时不并发重叠', async () => {
+    vi.useFakeTimers()
+    let resolvePoll: (r: ApiResult<{ id: string }>) => void = () => {}
+    // poll 每次约需 1500ms 才返回，而间隔只有 500ms：若用 setInterval 会在 1000/1500ms 处再次触发造成重叠
+    const poll = vi.fn(() => new Promise<ApiResult<{ id: string }>>((resolve) => { resolvePoll = resolve }))
+    const { execute, state, stopPolling } = useRequest<{ id: string }>(async () => ({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } }), {
+      poll,
+      pollIntervalMs: 500,
+    })
+
+    await execute()
+    expect(state.value).toBe('loading')
+
+    // 推进到第一个 tick，第一次 poll 进入在途
+    await vi.advanceTimersByTimeAsync(500)
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    // 第一次 poll 尚未返回，继续推进多个间隔：递归 setTimeout 不会调度新的并发调用
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    // 第一次 poll 返回 accepted（仍在处理中），随后才调度下一次（间隔 500ms 后）
+    resolvePoll({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } })
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(poll).toHaveBeenCalledTimes(2)
+
+    // 第二轮返回 completed，轮询终止
+    resolvePoll({ kind: 'completed', data: { id: 'done' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.value).toBe('normal')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(poll).toHaveBeenCalledTimes(2)
+    stopPolling()
+  })
 })
