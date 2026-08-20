@@ -204,7 +204,12 @@ onMounted(loadForm)
       </div>
 
       <Card class="mb-4">
-        <DynamicForm v-model="formData" :fields="currentVersion.fields" :field-errors="formErrors" />
+        <DynamicForm
+          v-model="formData"
+          :fields="currentVersion.fields"
+          :field-errors="formErrors"
+          @update:field-errors="formErrors = $event"
+        />
       </Card>
 
       <!-- FORM-007: 文件检查状态提示（仅当版本存在附件字段时展示，P2-66） -->
