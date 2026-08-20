@@ -236,6 +236,36 @@ describe('JointApplyPage 交互流程', () => {
     }, { expectedVersion: undefined })
   })
 
+  it('保存草稿：快速连点只发一次请求（savingDraft 防重复）', async () => {
+    setupGetMocks({
+      status: 'draft',
+      answers: { f1: '内容' },
+      volunteerClubIds: ['club-001'],
+      preferences: [],
+      allowJointAdjustment: true,
+      consented: true,
+    })
+    const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })
+    await flushPromises()
+    await nextTick()
+
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('暂存草稿'))!
+    await saveBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('保存中...')
+    const busyBtn = wrapper.findAll('button').find((b) => b.text().includes('保存中...'))!
+    await busyBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((busyBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: { savedAt: '2026-08-07T12:00:00Z' } })
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.findAll('button').find((b) => b.text().includes('暂存草稿'))).toBeTruthy()
+  })
+
   it('通道关闭态展示关闭提示（danger 色调类）', async () => {
     setupGetMocks(null, { channelStatus: 'closed' })
     const wrapper = mount(JointApplyPage, { global: { stubs: commonStubs } })

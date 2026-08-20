@@ -274,4 +274,69 @@ describe('FormDesignerPage P2-1：发布按钮状态收敛（SM-FORM-001）', ()
     expect(wrapper.findAll('button').find((b) => b.text().includes('发布'))).toBeTruthy()
     wrapper.unmount()
   })
+
+  it('停用：快速连点只发一次请求（actionPending 防重复）', async () => {
+    const wrapper = await mountPage('published')
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDesigner('deprecated', 1) }) // 停用成功后重载
+
+    const deprecateBtn = wrapper.findAll('button').find((b) => b.text().includes('停用'))!
+    await deprecateBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('处理中...')
+    const busyBtn = wrapper.findAll('button').find((b) => b.text().includes('处理中...'))!
+    await busyBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((busyBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: {} })
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.text()).toContain('已停用')
+    wrapper.unmount()
+  })
+
+  it('复用：快速连点只发一次请求（actionPending 防重复）', async () => {
+    const wrapper = await mountPage('deprecated')
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: mockDesigner('draft', 1) }) // 复用成功后重载
+
+    const reuseBtn = wrapper.findAll('button').find((b) => b.text().includes('复用'))!
+    await reuseBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('处理中...')
+    const busyBtn = wrapper.findAll('button').find((b) => b.text().includes('处理中...'))!
+    await busyBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((busyBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: {} })
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.text()).toContain('草稿')
+    wrapper.unmount()
+  })
+
+  it('克隆：快速连点只发一次请求（actionPending 防重复）', async () => {
+    const wrapper = await mountPage('deprecated')
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+
+    const cloneBtn = wrapper.findAll('button').find((b) => b.text().includes('克隆'))!
+    await cloneBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('处理中...')
+    const busyBtn = wrapper.findAll('button').find((b) => b.text().includes('处理中...'))!
+    await busyBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((busyBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: { id: 'form-002' } })
+    await flushPromises()
+    await nextTick()
+    expect(mockPush).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
 })

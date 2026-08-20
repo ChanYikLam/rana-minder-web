@@ -70,6 +70,7 @@ const allowJointAdjustment = ref(false)
 const volunteerClubIds = ref<string[]>([])
 const preferences = ref<{ departmentId: string; departmentName: string }[]>([])
 const submitting = ref(false)
+const savingDraft = ref(false)
 const withdrawing = ref(false)
 const confirmWithdraw = ref(false)
 let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
@@ -251,45 +252,50 @@ async function handleSubmit() {
 }
 
 async function handleSaveDraft() {
-  if (submitting.value || !showApplyForm.value) return
-  // 瞬态附件（uploading 占位/checking 检查中）不得原样落库：uploading 丢弃、checking 降级 uploaded，
-  // 否则重开草稿后会得到永远无法 auto-approve、无法移除、无法提交的卡死文件（见 draftSafeFileMeta）
-  const draftAnswers: Record<string, unknown> = {}
-  for (const [fieldId, value] of Object.entries(formData.value)) {
-    const field = formFields.value.find((f) => f.id === fieldId)
-    if (field?.type === 'file' || field?.type === 'image') {
-      const safe = draftSafeFileMeta(value)
-      if (safe !== undefined) draftAnswers[fieldId] = safe
-      continue
+  if (savingDraft.value || submitting.value || !showApplyForm.value) return
+  savingDraft.value = true
+  try {
+    // 瞬态附件（uploading 占位/checking 检查中）不得原样落库：uploading 丢弃、checking 降级 uploaded，
+    // 否则重开草稿后会得到永远无法 auto-approve、无法移除、无法提交的卡死文件（见 draftSafeFileMeta）
+    const draftAnswers: Record<string, unknown> = {}
+    for (const [fieldId, value] of Object.entries(formData.value)) {
+      const field = formFields.value.find((f) => f.id === fieldId)
+      if (field?.type === 'file' || field?.type === 'image') {
+        const safe = draftSafeFileMeta(value)
+        if (safe !== undefined) draftAnswers[fieldId] = safe
+        continue
+      }
+      draftAnswers[fieldId] = value
     }
-    draftAnswers[fieldId] = value
-  }
-  const result = await post(`/activity/joint/${route.params.jointId}/draft`, {
-    answers: draftAnswers,
-    volunteerClubIds: volunteerClubIds.value ?? [],
-    preferences: preferences.value,
-    allowJointAdjustment: allowJointAdjustment.value,
-    consented: consented.value,
-  }, { expectedVersion: myApplication.value?.version })
-  if (result.kind === 'completed') {
-    const data = result.data as { version?: number }
-    myApplication.value = {
-      status: 'draft',
-      answers: { ...formData.value },
-      volunteerClubIds: volunteerClubIds.value,
+    const result = await post(`/activity/joint/${route.params.jointId}/draft`, {
+      answers: draftAnswers,
+      volunteerClubIds: volunteerClubIds.value ?? [],
       preferences: preferences.value,
       allowJointAdjustment: allowJointAdjustment.value,
       consented: consented.value,
-      version: data?.version,
+    }, { expectedVersion: myApplication.value?.version })
+    if (result.kind === 'completed') {
+      const data = result.data as { version?: number }
+      myApplication.value = {
+        status: 'draft',
+        answers: { ...formData.value },
+        volunteerClubIds: volunteerClubIds.value,
+        preferences: preferences.value,
+        allowJointAdjustment: allowJointAdjustment.value,
+        consented: consented.value,
+        version: data?.version,
+      }
+      toast.success('报名草稿已保存，可随时回来继续填写')
+    } else if (result.kind === 'concurrency_conflict') {
+      toast.error('草稿已在其他窗口被修改，已刷新恢复最新内容，请重新编辑')
+      await loadMyApplication()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '草稿保存失败')
+    } else {
+      toast.error('草稿保存失败，请稍后重试')
     }
-    toast.success('报名草稿已保存，可随时回来继续填写')
-  } else if (result.kind === 'concurrency_conflict') {
-    toast.error('草稿已在其他窗口被修改，已刷新恢复最新内容，请重新编辑')
-    await loadMyApplication()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '草稿保存失败')
-  } else {
-    toast.error('草稿保存失败，请稍后重试')
+  } finally {
+    savingDraft.value = false
   }
 }
 
@@ -530,11 +536,11 @@ async function handleWithdraw() {
 
       <button
         v-if="showApplyForm"
-        class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2"
-        :disabled="submitting"
+        class="w-full mt-3 h-10 rounded-md border border-border text-sm text-text-secondary hover:bg-subtle flex items-center justify-center gap-2 disabled:opacity-60"
+        :disabled="submitting || savingDraft"
         @click="handleSaveDraft"
       >
-        <Save :size="14" /> 暂存草稿
+        <Save :size="14" /> {{ savingDraft ? '保存中...' : '暂存草稿' }}
       </button>
     </div>
   </PageStateBoundary>

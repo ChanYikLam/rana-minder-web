@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { pageStubs } from '@/test-utils/pageStubs'
 
 const { mockGet, mockPost } = vi.hoisted(() => ({ mockGet: vi.fn(), mockPost: vi.fn() }))
@@ -89,6 +90,109 @@ describe('JointConclusionPage 联合结论与邀请', () => {
     expect(wrapper.findAll('p.text-base.font-medium')).toHaveLength(2)
     // 邀请仅出现在 u-1（计算机协会）组下，u-2 组无邀请 —— 按姓名匹配的旧实现会两处都出现
     expect(wrapper.text().split('已发送的邀请')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('设置结论：快速连点只发一次请求（settingId 防重复）', async () => {
+    const pending = { id: 'c-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', clubName: '计算机协会', status: 'pending', conclusion: null, reviewFlag: false, rating: null, comment: '', concludedAt: null, myClub: true }
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/conclusions')) return Promise.resolve({ kind: 'completed', data: { items: [pending] } })
+      return Promise.resolve({ kind: 'completed', data: { items: [] } })
+    })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    const admitBtn = wrapper.findAll('button').find((b) => b.text().includes('录用'))!
+    await admitBtn.trigger('click')
+    await nextTick()
+    await admitBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((admitBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: {} })
+    await flushPromises()
+    await nextTick()
+    wrapper.unmount()
+  })
+
+  it('撤回邀请：快速连点只发一次请求（invitationBusy 防重复）', async () => {
+    const concluded = { id: 'c-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', clubName: '计算机协会', status: 'concluded', conclusion: 'admit', reviewFlag: false, rating: 4, comment: '', concludedAt: '2026-01-01T00:00:00', myClub: true }
+    const invitation = { id: 'inv-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', status: 'pending_acceptance', sentAt: '2026-01-01T00:00:00', expiredAt: '2026-02-01T00:00:00' }
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/conclusions')) return Promise.resolve({ kind: 'completed', data: { items: [concluded] } })
+      return Promise.resolve({ kind: 'completed', data: { items: [invitation] } })
+    })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    const withdrawBtn = wrapper.findAll('button').find((b) => b.text().includes('撤回'))!
+    await withdrawBtn.trigger('click')
+    await nextTick()
+    await withdrawBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((withdrawBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: {} })
+    await flushPromises()
+    await nextTick()
+    wrapper.unmount()
+  })
+
+  it('复核：快速连点只发一次请求（reviewBusy 防重复）', async () => {
+    const concluded = { id: 'c-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', clubName: '计算机协会', status: 'concluded', conclusion: 'admit', reviewFlag: true, rating: 4, comment: '', concludedAt: '2026-01-01T00:00:00', myClub: true }
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/conclusions')) return Promise.resolve({ kind: 'completed', data: { items: [concluded] } })
+      return Promise.resolve({ kind: 'completed', data: { items: [] } })
+    })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('复核'))!.trigger('click')
+    await nextTick()
+
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    const keepBtn = wrapper.findAll('button').find((b) => b.text().includes('保持结论'))!
+    await keepBtn.trigger('click')
+    await nextTick()
+    await keepBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((keepBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: {} })
+    await flushPromises()
+    await nextTick()
+    wrapper.unmount()
+  })
+
+  it('发送邀请：快速连点只发一次请求（invitingName 防重复）', async () => {
+    const concluded = { id: 'c-1', applicantId: 'u-1', applicantName: '张三', clubId: 'club-001', clubName: '计算机协会', status: 'concluded', conclusion: 'admit', reviewFlag: false, rating: 4, comment: '', concludedAt: '2026-01-01T00:00:00', myClub: true }
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes('/conclusions')) return Promise.resolve({ kind: 'completed', data: { items: [concluded] } })
+      return Promise.resolve({ kind: 'completed', data: { items: [] } })
+    })
+    const wrapper = mount(JointConclusionPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+
+    let resolvePost!: (v: unknown) => void
+    mockPost.mockReturnValue(new Promise((r) => { resolvePost = r }))
+    const sendBtn = wrapper.findAll('button').find((b) => b.text().includes('发送邀请'))!
+    await sendBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).toContain('发送中...')
+    const busyBtn = wrapper.findAll('button').find((b) => b.text().includes('发送中...'))!
+    await busyBtn.trigger('click')
+    await nextTick()
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect((busyBtn.element as HTMLButtonElement).disabled).toBe(true)
+    resolvePost({ kind: 'completed', data: {} })
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.text()).toContain('发送邀请')
     wrapper.unmount()
   })
 })
