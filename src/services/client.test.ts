@@ -161,6 +161,28 @@ describe('API client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('maps a slow response-body read to dependency_unavailable (IFC-ERR-012) after timeout', async () => {
+    stubWindow()
+    // 响应头已到达，但响应体（json）读取慢于超时窗口
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        status: 200,
+        ok: true,
+        json: () => new Promise((resolve) => setTimeout(() => resolve({ code: 0, data: { ok: true } }), 120)),
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await get('/slow-body', undefined, undefined, 20)
+
+    expect(result).toEqual({
+      kind: 'dependency_unavailable',
+      error: { code: 'IFC-ERR-012', message: ERROR_MESSAGES['IFC-ERR-012'] },
+    })
+    // 响应体超时同样进入自动重试：默认最多 3 次尝试
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('treats 204 No Content as completed with undefined data', async () => {
     stubWindow()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))

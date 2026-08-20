@@ -26,7 +26,7 @@
 
 ## 核心逻辑摘要
 
-- 请求默认 15s 超时（可经 `timeoutMs` 覆盖）：连接挂起时中止并映射为 `dependency_unavailable`（`IFC-ERR-012`），避免页面永久卡 loading / 表单 `submitting` 恒为 true。
+- 请求默认 15s 超时（可经 `timeoutMs` 覆盖）：连接挂起或响应体读取超时时中止并映射为 `dependency_unavailable`（`IFC-ERR-012`），避免页面永久卡 loading / 表单 `submitting` 恒为 true。
 - 超时/503 等 `ERROR_AUTO_RETRY` 标记的可重试错误自动重试（最多 2 次，退避 250ms×n）；重试复用同一幂等键，保证突变安全。
 - 调用方 `AbortSignal` 取消优先于超时，始终以 `AbortError` 语义向上传播（BatchOperationPage 等按取消处理，不触发重试）。
 - 运行时校验不依赖 TypeScript 编译期类型（ADR-013：跨信任边界数据必须运行时校验）。

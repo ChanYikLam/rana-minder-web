@@ -203,9 +203,13 @@ async function request<T>(path: string, options: RequestOptions<T> = {}): Promis
         if (intentFingerprint) pendingIdempotencyKeys.delete(intentFingerprint)
         result = { kind: 'completed', data: undefined as T }
       } else {
+        // 响应体读取同样处于超时窗口内：response.json() 虽不受 signal 直接中断，
+        // 但读取完成后再据 handle.timedOut 判定，避免把慢响应体误判为普通网络错误。
         const responseBody = await response.json().catch(() => ({}))
 
-        if (response.status === 202) {
+        if (handle.timedOut) {
+          result = timeoutError<T>()
+        } else if (response.status === 202) {
           result = httpStatusToResult<T>(response.status, responseBody)
         } else if (!response.ok) {
           result = httpStatusToResult<T>(response.status, responseBody)
@@ -238,10 +242,17 @@ async function request<T>(path: string, options: RequestOptions<T> = {}): Promis
   }
 }
 
+/**
+ * GET 请求。`timeoutMs` 以位置参数传递（与 mutation 通过 `options.timeoutMs` 传递的语义一致），
+ * 缺省为 `DEFAULT_TIMEOUT_MS`（15s）。
+ */
 export async function get<T>(path: string, params?: RequestOptions['params'], signal?: AbortSignal, timeoutMs?: number): Promise<ApiResult<T>> {
   return request<T>(path, { method: 'GET', params, signal, timeoutMs })
 }
 
+/**
+ * GET + 运行时 schema 校验。`timeoutMs` 语义同 `get`。
+ */
 export async function getValidated<T>(path: string, schema: RuntimeSchema<T>, params?: RequestOptions['params'], signal?: AbortSignal, timeoutMs?: number): Promise<ApiResult<T>> {
   return request<T>(path, { method: 'GET', params, signal, schema, timeoutMs })
 }
@@ -262,6 +273,9 @@ export async function del<T>(path: string, options?: Omit<RequestOptions<T>, 'me
   return request<T>(path, { ...options, method: 'DELETE' })
 }
 
+/**
+ * 分页 GET。`timeoutMs` 语义同 `get`。
+ */
 export async function getPaginated<T>(path: string, params?: { cursor?: string; limit?: number } & Record<string, string | number | undefined>, signal?: AbortSignal, timeoutMs?: number): Promise<ApiResult<PaginatedResult<T>>> {
   return get<PaginatedResult<T>>(path, params as Record<string, string | number | undefined>, signal, timeoutMs)
 }
