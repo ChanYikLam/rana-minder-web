@@ -475,7 +475,12 @@ onUnmounted(() => {
       <!-- 动态表单（已提交/已归档/终态后隐藏，展示只读卡片） -->
       <Card v-if="showApplyForm" class="mb-4">
         <h2 class="text-base font-medium text-text-primary mb-4">报名表单</h2>
-        <DynamicForm :fields="formFields" v-model="formData" :field-errors="formErrors" />
+        <DynamicForm
+          :fields="formFields"
+          v-model="formData"
+          :field-errors="formErrors"
+          @update:field-errors="formErrors = $event"
+        />
       </Card>
 
       <!-- 错误提示：操作结果反馈统一走 toast（字段级校验由 formErrors 承载） -->

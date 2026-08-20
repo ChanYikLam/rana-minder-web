@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: DynamicFormValue]
   'resolveConflict': []
   'migrateVersion': []
+  'update:fieldErrors': [value: Record<string, string[]>]
 }>()
 
 // P2-9：legacy 数组数据缺少 _uid 时一次性补齐稳定 key，
@@ -126,6 +127,32 @@ function removeArrayItem(field: FormField, index: number) {
   const current = Array.isArray(fieldValue(field)) ? [...(fieldValue(field) as unknown[])] : []
   current.splice(index, 1)
   updateField(field, current)
+  // P2-13：服务端数组子字段错误 key 采用 `fieldId.index.childId` 下标口径（契约一致）。
+  // 删除中间项后后续项 index 前移，需同步把受影响位置的错误 key 前移一位、并清掉被删项的错误，
+  // 否则错误提示会错位粘到错误的输入框上（潜在回归）。item.id(_uid) 服务端不可见，不能作为查询 key。
+  if (props.fieldErrors) {
+    const fe = { ...props.fieldErrors }
+    const prefix = `${field.id}.`
+    let changed = false
+    for (const key of Object.keys(fe)) {
+      if (!key.startsWith(prefix)) continue
+      const rest = key.slice(prefix.length)
+      const dot = rest.indexOf('.')
+      if (dot === -1) continue // 字段级错误不受数组下标影响
+      const itemIdx = Number(rest.slice(0, dot))
+      if (!Number.isInteger(itemIdx)) continue
+      if (itemIdx === index) {
+        delete fe[key]
+        changed = true
+      } else if (itemIdx > index) {
+        const newKey = `${prefix}${itemIdx - 1}${rest.slice(dot)}`
+        fe[newKey] = fe[key]
+        delete fe[key]
+        changed = true
+      }
+    }
+    if (changed) emit('update:fieldErrors', fe)
+  }
 }
 
 function updateArrayItem(field: FormField, index: number, itemValue: unknown) {
