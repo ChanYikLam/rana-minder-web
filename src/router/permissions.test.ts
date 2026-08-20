@@ -110,6 +110,7 @@ describe('workspacePermissionForRoute', () => {
     expect(workspacePermissionForRoute('P-FORM-list')).toBe('club:form:design')
     // 精确键仍优先于任何前缀匹配
     expect(workspacePermissionForRoute('P-MEM-03-manage')).toBe('club:invite:manage')
+    expect(workspacePermissionForRoute('P-REC-02')).toEqual(INTERVIEW_ACCESS_PERMISSIONS)
   })
 })
 
