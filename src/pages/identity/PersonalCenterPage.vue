@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageStateBoundary, Card, EmptyState } from '@/components/common'
 import { get, post } from '@/services/client'
@@ -34,6 +34,15 @@ const history = ref<HistoryItem[]>([])
 const schedule = ref<ScheduleItem[]>([])
 const confirmingId = ref<string | null>(null)
 const withdrawing = ref(false)
+// P2-16：确认态 5s 超时复位（对照 JointApply/Application 的撤销确认）；切 tab/卸载/执行后清理
+let confirmWithdrawTimer: ReturnType<typeof setTimeout> | null = null
+
+/** P2-16：清理确认态并取消计时器，旧点击不再被误当“确认” */
+function resetConfirmState() {
+  if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+  confirmWithdrawTimer = null
+  confirmingId.value = null
+}
 
 // P2-42：各 tab 数据独立加载，单点失败不再拖垮整页；
 // 页面整体状态由当前激活 tab 决定，其余 tab 失败仅记录，切到该 tab 时再呈现错误
@@ -81,12 +90,17 @@ async function handleWithdraw(item: OngoingItem) {
   if (!item.activityId || withdrawing.value) return
   if (confirmingId.value !== item.id) {
     confirmingId.value = item.id
+    if (confirmWithdrawTimer) clearTimeout(confirmWithdrawTimer)
+    confirmWithdrawTimer = setTimeout(() => {
+      confirmingId.value = null
+      confirmWithdrawTimer = null
+    }, 5000)
     return
   }
+  resetConfirmState()
   withdrawing.value = true
   try {
     const result = await post(`/activity/recruitment/${item.activityId}/withdraw`, { confirm: true })
-    confirmingId.value = null
     if (result.kind === 'completed') {
       toast.success('已退出招新')
       await loadData()
@@ -99,6 +113,8 @@ async function handleWithdraw(item: OngoingItem) {
 }
 
 function switchTab(tab: TabKey) {
+  // P2-16：切 tab 清理确认态，避免旧确认在切换后误触发
+  resetConfirmState()
   const pathMap: Record<TabKey, string> = {
     todo: '/me/todo',
     ongoing: '/me/ongoing',
@@ -119,11 +135,15 @@ function isOverdue(deadline: string): boolean {
 
 // P2-42：切换 tab 时按该 tab 的加载结果刷新整页状态
 watch(activeTab, (key) => {
+  // P2-16：路由级切 tab（浏览器前进/后退等不经 switchTab 的路径）同样清理确认态
+  resetConfirmState()
   if (state.value === 'loading') return
   state.value = tabErrors.value[key] ? errorToPageState(tabErrors.value[key]!) : 'normal'
 })
 
 onMounted(loadData)
+
+onUnmounted(resetConfirmState)
 </script>
 
 <template>

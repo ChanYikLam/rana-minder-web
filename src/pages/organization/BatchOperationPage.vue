@@ -51,9 +51,13 @@ const results = ref<BatchResult[]>([])
 const clubId = computed(() => (typeof route.params.clubId === 'string' ? route.params.clubId : null))
 
 let candidatesAbort: AbortController | null = null
+// P2-16：代次计数器——后发请求 abort 先发请求后，先发请求的 finally 不得复位 loading（其代次已过期）
+let candidatesGeneration = 0
 
 async function loadCandidates() {
   if (!clubId.value) return
+  candidatesGeneration += 1
+  const generation = candidatesGeneration
   if (candidatesAbort) candidatesAbort.abort()
   candidatesAbort = new AbortController()
   loadingCandidates.value = true
@@ -61,6 +65,7 @@ async function loadCandidates() {
   candidatesError.value = false
   try {
     const res = await get<{ items: BatchCandidate[] }>(`/org/${clubId.value}/batch/candidates`, undefined, candidatesAbort.signal)
+    if (generation !== candidatesGeneration) return
     if (res.kind === 'completed') {
       candidates.value = res.data.items
       loadFailed.value = false
@@ -69,12 +74,14 @@ async function loadCandidates() {
       candidatesError.value = true
     }
   } catch (err) {
+    if (generation !== candidatesGeneration) return
     // P2-63：abort 中断属于预期取消，不产生 unhandled rejection
     if (err instanceof DOMException && err.name === 'AbortError') return
     loadFailed.value = true
     candidatesError.value = true
   } finally {
-    loadingCandidates.value = false
+    // 仅最新代次的请求复位 loading，过期请求（已被 abort）不覆盖在途请求的指示
+    if (generation === candidatesGeneration) loadingCandidates.value = false
   }
 }
 

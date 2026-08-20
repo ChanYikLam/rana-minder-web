@@ -221,4 +221,47 @@ describe('ClubSwitcher 社团切换', () => {
 
     expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
   })
+
+  it('P2-16：换账号（user.id 变化）后旧列表作废，再次打开下拉时重新拉取', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
+    const session = seedSession()
+    mocks.getMyClubs.mockResolvedValue({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }] },
+    })
+
+    const wrapper = await mountSwitcher()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
+
+    // 换账号：user.id 变化 → 旧列表立即作废
+    session.user = { ...session.user!, id: 'user-002' }
+    await flushPromises()
+    // 再次打开下拉 → 触发重新拉取（旧逻辑 clubs.length>0 会直接跳过）
+    await wrapper.find('.dd-trigger').trigger('open-change')
+    await flushPromises()
+
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('P2-16：会话重载（lastLoadedAt 更新）后强制刷新社团列表', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
+    const session = seedSession()
+    mocks.getMyClubs.mockResolvedValue({
+      kind: 'completed',
+      data: { clubs: [{ clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' }] },
+    })
+
+    const wrapper = await mountSwitcher()
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(1)
+
+    // 模拟会话重载（加入新社团/角色变更后 loadSession 刷新）：即使 clubs 已缓存也强制拉取
+    session.lastLoadedAt = Date.now()
+    await flushPromises()
+
+    expect(mocks.getMyClubs).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
 })

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SessionInfo, User, ProfileGate, WorkspaceInfo } from '@/types/domain'
 import { getSession, logout as logoutAuth } from '@/services/auth'
+import { useNotificationViewStore } from '@/state/notificationViewStore'
 
 /** 社团切换后的会话权限集：保留 platform:* 等全局权限，仅以新社团权限覆盖 club:* 域 */
 export function mergeClubPermissions(current: readonly string[], clubPermissions: readonly string[]): string[] {
@@ -110,6 +111,8 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     lastLoadedAt.value = null
     lastError.value = null
     stopClock()
+    // P2-16：登出联动清空通知视图缓存，换账号登录前旧未读数/列表不残留
+    useNotificationViewStore().reset()
   }
 
   async function logout() {

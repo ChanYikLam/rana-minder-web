@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Building2, Check, ChevronDown, LoaderCircle } from '@lucide/vue'
 import {
@@ -27,15 +27,21 @@ const clubs = ref<MyClub[]>([])
 const loading = ref(false)
 const loadError = ref(false)
 const switching = ref(false)
+// P2-16：列表缓存与会话绑定——记录最近一次拉取对应的用户，换账号/登出后作废
+let clubsSessionKey: string | null = null
 
-async function loadClubs() {
-  if (clubs.value.length > 0 || loading.value) return
+async function loadClubs(force = false) {
+  if (loading.value) return
+  const sessionKey = session.user?.id ?? null
+  // 缓存命中仅限同用户；force（会话重载/角色变化后）强制刷新
+  if (!force && clubs.value.length > 0 && clubsSessionKey === sessionKey) return
   loading.value = true
   loadError.value = false
   try {
     const result = await identityApi.getMyClubs()
     if (result.kind === 'completed') {
       clubs.value = result.data.clubs
+      clubsSessionKey = sessionKey
     } else {
       // P2-14：拉取失败不再静默——否则菜单误导"暂无加入的社团"
       loadError.value = true
@@ -44,6 +50,19 @@ async function loadClubs() {
     loading.value = false
   }
 }
+
+// P2-16：登出/换账号时旧列表立即作废（不再沿用上一账号的社团菜单）
+watch(() => session.user?.id, (id) => {
+  if (clubsSessionKey !== id) {
+    clubs.value = []
+    clubsSessionKey = null
+  }
+})
+
+// P2-16：会话重载（登录/刷新/加入新社团/角色变更）后强制刷新，clubs.length>0 不再阻止拉取
+watch(() => session.lastLoadedAt, () => {
+  if (session.lastLoadedAt != null) void loadClubs(true)
+})
 
 // P2-6：落点跟随权限（与 loginTarget.ts / 根守卫同一口径），无 club:dashboard:view 时不再硬跳 dashboard
 // 直落无权限页，而是回退个人中心/平台管理
@@ -82,7 +101,7 @@ onMounted(loadClubs)
 </script>
 
 <template>
-  <DropdownMenu @open-change="loadClubs">
+  <DropdownMenu @open-change="() => loadClubs()">
     <DropdownMenuTrigger as-child>
       <button
         class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-primary-subtle transition-colors"
@@ -131,7 +150,7 @@ onMounted(loadClubs)
         </DropdownMenuItem>
         <p v-if="loadError" class="px-2 py-4 text-sm text-text-secondary">
           社团列表加载失败
-          <button class="mt-1 w-full text-primary hover:underline" @click="loadClubs">重试</button>
+          <button class="mt-1 w-full text-primary hover:underline" @click="() => loadClubs()">重试</button>
         </p>
         <p v-else-if="clubs.length === 0" class="px-2 py-4 text-sm text-text-secondary">暂无加入的社团</p>
       </template>

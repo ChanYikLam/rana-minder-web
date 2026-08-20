@@ -99,6 +99,20 @@ describe('notificationViewStore 未读数与列表', () => {
 
     expect(code).toBeNull()
   })
+
+  it('P2-16：reset 清空未读数、列表与 loading（登出/换账号联动）', () => {
+    const store = useNotificationViewStore()
+    store.unreadCount = 5
+    store.items = [makeItem('n-1', false)]
+    store.loading = true
+
+    store.reset()
+
+    expect(store.unreadCount).toBe(0)
+    expect(store.items).toEqual([])
+    expect(store.loading).toBe(false)
+    expect(store.hasUnread).toBe(false)
+  })
 })
 
 describe('notificationViewStore 已读操作', () => {

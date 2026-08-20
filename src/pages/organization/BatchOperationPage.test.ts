@@ -164,3 +164,48 @@ describe('BatchOperationPage 重试失败项', () => {
   })
 })
 
+describe('BatchOperationPage 候选加载代次复位', () => {
+  beforeEach(() => { mockGet.mockReset(); mockPost.mockReset(); vi.clearAllMocks() })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('P2-16：并发重新加载时旧请求的 finally 不覆盖在途请求的 loading（按代次复位）', async () => {
+    // 首次加载失败 → 进入失败态（出现「重新加载」按钮）
+    mockGet.mockResolvedValueOnce({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    // 面试官列表立即返回
+    mockGet.mockResolvedValueOnce({ kind: 'completed', data: { items: [{ id: 'u1', name: '李思颖' }] } })
+    // B1 / B2 均悬起，用可手动 resolve 的 promise 模拟在途请求
+    let resolveB1!: (v: unknown) => void
+    let resolveB2!: (v: unknown) => void
+    mockGet.mockImplementationOnce(() => new Promise((res) => { resolveB1 = res }))
+    mockGet.mockImplementationOnce(() => new Promise((res) => { resolveB2 = res }))
+
+    const wrapper = mount(BatchOperationPage, { global: { stubs: pageStubs } })
+    await flushPromises()
+    // 选择批量类型进入预览后候选卡片才渲染（含重新加载按钮）
+    const typeCard = wrapper.findAll('.card').find((c) => c.text().includes('批量发送邀请'))!
+    await typeCard.trigger('click')
+    await flushPromises()
+    const reloadBtn = wrapper.findAll('button').find((b) => b.text().includes('重新加载'))!
+    expect(reloadBtn, '首次失败后出现重新加载按钮').toBeTruthy()
+
+    // 同一渲染帧内连点两次：B1 启动后立刻被 B2 abort（B1/B2 同时在途）
+    reloadBtn.element.dispatchEvent(new Event('click'))
+    reloadBtn.element.dispatchEvent(new Event('click'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('正在加载候选人...')
+
+    // 旧请求（B1，代次已过期）先完成：不得复位 loading、不得覆盖候选数据
+    resolveB1({ kind: 'completed', data: { items: [{ id: 'mem-001', name: '甲', studentId: '1', department: '计算机', status: 'submitted' }] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('正在加载候选人...')
+    expect(wrapper.text()).not.toContain('甲')
+
+    // 最新请求（B2）完成：才复位 loading 并写入最新数据
+    resolveB2({ kind: 'completed', data: { items: [{ id: 'mem-002', name: '乙', studentId: '2', department: '计算机', status: 'submitted' }] } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('正在加载候选人...')
+    expect(wrapper.text()).toContain('乙')
+    wrapper.unmount()
+  })
+})
+
