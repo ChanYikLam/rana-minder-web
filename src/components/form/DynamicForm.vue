@@ -400,14 +400,14 @@ const inputErrorClass = 'border-danger'
               <textarea
                 v-if="child.type === 'textarea'"
                 :id="`dyn-${field.id}-${item.id}-${child.id}`"
-                :class="[getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 ? inputErrorClass : '']"
+                :class="[getFieldErrors(`${field.id}.${item.id}.${child.id}`).length > 0 ? inputErrorClass : '']"
                 class="w-full rounded-md border border-border bg-elevated px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 rows="2"
                 :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
-                :aria-invalid="getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 || undefined"
-                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.index}.${child.id}`)"
+                :aria-invalid="getFieldErrors(`${field.id}.${item.id}.${child.id}`).length > 0 || undefined"
+                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.id}.${child.id}`)"
                 @input="(e: Event) => {
                   const row = { ...((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>) }
                   row[child.id] = (e.target as HTMLTextAreaElement).value
@@ -419,13 +419,13 @@ const inputErrorClass = 'border-danger'
                 v-else-if="child.type === 'number'"
                 :id="`dyn-${field.id}-${item.id}-${child.id}`"
                 type="number"
-                :class="[getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 ? inputErrorClass : '']"
+                :class="[getFieldErrors(`${field.id}.${item.id}.${child.id}`).length > 0 ? inputErrorClass : '']"
                 class="w-full h-10 rounded-md border border-border bg-elevated px-3 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
-                :aria-invalid="getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 || undefined"
-                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.index}.${child.id}`)"
+                :aria-invalid="getFieldErrors(`${field.id}.${item.id}.${child.id}`).length > 0 || undefined"
+                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.id}.${child.id}`)"
                 @input="(e: Event) => {
                   const row = { ...((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>) }
                   row[child.id] = Number((e.target as HTMLInputElement).value)
@@ -437,13 +437,13 @@ const inputErrorClass = 'border-danger'
                 v-else
                 :id="`dyn-${field.id}-${item.id}-${child.id}`"
                 type="text"
-                :class="[getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 ? inputErrorClass : '']"
+                :class="[getFieldErrors(`${field.id}.${item.id}.${child.id}`).length > 0 ? inputErrorClass : '']"
                 class="w-full h-10 rounded-md border border-border bg-elevated px-3 text-sm text-text-primary focus:outline-2 focus:outline-primary disabled:opacity-60"
                 :value="arrayItemValue(field, item.index, child.id)"
                 :disabled="isReadOnly(field) || child.readonly"
                 :required="child.required"
-                :aria-invalid="getFieldErrors(`${field.id}.${item.index}.${child.id}`).length > 0 || undefined"
-                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.index}.${child.id}`)"
+                :aria-invalid="getFieldErrors(`${field.id}.${item.id}.${child.id}`).length > 0 || undefined"
+                :aria-describedby="fieldErrorDescribedBy(`${field.id}.${item.id}.${child.id}`)"
                 @input="(e: Event) => {
                   const row = { ...((fieldValue(field) as unknown[])[item.index] as Record<string, unknown>) }
                   row[child.id] = (e.target as HTMLInputElement).value
@@ -452,8 +452,8 @@ const inputErrorClass = 'border-danger'
               />
 
               <p
-                v-for="(msg, ei) in getFieldErrors(`${field.id}.${item.index}.${child.id}`)"
-                :id="`dyn-err-${field.id}.${item.index}.${child.id}-${ei}`"
+                v-for="(msg, ei) in getFieldErrors(`${field.id}.${item.id}.${child.id}`)"
+                :id="`dyn-err-${field.id}.${item.id}.${child.id}-${ei}`"
                 :key="`${field.id}.${item.id}.${child.id}-${ei}`"
                 class="text-xs text-danger"
                 role="alert"
