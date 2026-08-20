@@ -110,25 +110,28 @@ async function handleCreate() {
   executing.value = true
   succeeded.value = false
   errorMessage.value = ''
-  const result = await post(`${apiScope.prefix}/exports`, { type: EXPORT_TYPE_MEMBERS })
-  executing.value = false
-  if (result.kind === 'completed') {
-    const task = (result.data as ExportTask) || null
-    if (task) {
-      // MRM-009：POST 可能复用已存在进行中任务（同 scope+type），此时不应重复插入列表，避免同一任务渲染多份
-      const exists = items.value.some((t) => t.id === task.id)
-      if (!exists) items.value = [task, ...items.value]
-      if (task.status === 'generating' || task.status === 'processing') {
-        // startPolling 内部幂等（同 taskId 已有定时器则不重复创建），杜绝重复 setInterval
-        startPolling(task.id, apiScope.prefix)
-      } else if (task.status === 'completed') {
-        toast.success('导出已生成完成，可点击下载')
+  try {
+    const result = await post(`${apiScope.prefix}/exports`, { type: EXPORT_TYPE_MEMBERS })
+    if (result.kind === 'completed') {
+      const task = (result.data as ExportTask) || null
+      if (task) {
+        // MRM-009：POST 可能复用已存在进行中任务（同 scope+type），此时不应重复插入列表，避免同一任务渲染多份
+        const exists = items.value.some((t) => t.id === task.id)
+        if (!exists) items.value = [task, ...items.value]
+        if (task.status === 'generating' || task.status === 'processing') {
+          // startPolling 内部幂等（同 taskId 已有定时器则不重复创建），杜绝重复 setInterval
+          startPolling(task.id, apiScope.prefix)
+        } else if (task.status === 'completed') {
+          toast.success('导出已生成完成，可点击下载')
+        }
       }
+      succeeded.value = true
+      // 弹窗保留在 done 一段时间后由用户关闭
+    } else {
+      errorMessage.value = (result as { error?: { message?: string } }).error?.message || '创建导出失败，请稍后重试'
     }
-    succeeded.value = true
-    // 弹窗保留在 done 一段时间后由用户关闭
-  } else {
-    errorMessage.value = (result as { error?: { message?: string } }).error?.message || '创建导出失败，请稍后重试'
+  } finally {
+    executing.value = false
   }
 }
 
@@ -163,26 +166,29 @@ async function confirmDownload(proof?: string) {
   }
   downloading.value = true
   downloadError.value = ''
-  const result = await post<{ downloadUrl: string }>(`${apiScope.value}/exports/${task.id}/download`, {
-    reason,
-    reauthProof: proof,
-  })
-  downloading.value = false
-  if (result.kind === 'completed') {
-    if (openAuthorizedDownload(result.data.downloadUrl)) {
-      toast.success('已开始下载')
-      downloadConfirmOpen.value = false
-      downloadTarget.value = null
+  try {
+    const result = await post<{ downloadUrl: string }>(`${apiScope.value}/exports/${task.id}/download`, {
+      reason,
+      reauthProof: proof,
+    })
+    if (result.kind === 'completed') {
+      if (openAuthorizedDownload(result.data.downloadUrl)) {
+        toast.success('已开始下载')
+        downloadConfirmOpen.value = false
+        downloadTarget.value = null
+        return
+      }
+      downloadError.value = '下载地址无效，请重新获取'
       return
     }
-    downloadError.value = '下载地址无效，请重新获取'
-    return
+    if (result.kind === 'accepted') {
+      downloadError.value = '导出正在生成中，请稍后重试'
+      return
+    }
+    downloadError.value = '下载失败，请稍后重试'
+  } finally {
+    downloading.value = false
   }
-  if (result.kind === 'accepted') {
-    downloadError.value = '导出正在生成中，请稍后重试'
-    return
-  }
-  downloadError.value = '下载失败，请稍后重试'
 }
 
 const apiScope = ref<string | null>(null)

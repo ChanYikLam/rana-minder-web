@@ -44,19 +44,22 @@ function formatTime(iso: string): string {
 async function handleDownload() {
   downloading.value = true
   downloadError.value = ''
-  const id = route.params.fileId as string
-  const result = await post<{ downloadUrl: string }>(`/files/${id}/download`, {})
-  downloading.value = false
-  if (result.kind === 'completed') {
-    if (openAuthorizedDownload(result.data.downloadUrl)) {
-      toast.success('已开始下载')
+  try {
+    const id = route.params.fileId as string
+    const result = await post<{ downloadUrl: string }>(`/files/${id}/download`, {})
+    if (result.kind === 'completed') {
+      if (openAuthorizedDownload(result.data.downloadUrl)) {
+        toast.success('已开始下载')
+      } else {
+        downloadError.value = '下载地址无效，请重新获取'
+      }
+    } else if (result.kind === 'accepted') {
+      toast.info('文件正在处理中，请稍后重试')
     } else {
-      downloadError.value = '下载地址无效，请重新获取'
+      downloadError.value = '下载失败，请稍后重试'
     }
-  } else if (result.kind === 'accepted') {
-    toast.info('文件正在处理中，请稍后重试')
-  } else {
-    downloadError.value = '下载失败，请稍后重试'
+  } finally {
+    downloading.value = false
   }
 }
 </script>

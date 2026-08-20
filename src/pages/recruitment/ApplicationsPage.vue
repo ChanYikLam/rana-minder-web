@@ -93,63 +93,70 @@ async function runAppAction(app: Application, action: string, input?: Record<str
   if (actionBusy.value) return
   actionBusy.value = true
   const clubId = route.params.clubId as string
-  const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/${action}`, { ...(input || {}) })
-  actionBusy.value = false
-  if (result.kind === 'completed') {
-    expandedId.value = null
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('操作已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  try {
+    const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/${action}`, { ...(input || {}) })
+    if (result.kind === 'completed') {
+      expandedId.value = null
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('操作已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionBusy.value = false
   }
 }
 
 async function runPathAction(app: Application, action: 'decision' | 'waitlist' | 'publish' | 'label', decision?: string, label?: boolean) {
   if (actionBusy.value) return
-  actionBusy.value = true
   const clubId = route.params.clubId as string
   const deptId = deptInput.value[app.id] || app.preferences[0]?.departmentId
   if (!deptId) {
     toast.error('请选择部门')
-    actionBusy.value = false
     return
   }
-  const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/paths/${deptId}/${action}`, decision ? { decision } : action === 'label' ? { label: label ?? true } : {})
-  actionBusy.value = false
-  if (result.kind === 'completed') {
-    expandedId.value = null
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('操作已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  actionBusy.value = true
+  try {
+    const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/paths/${deptId}/${action}`, decision ? { decision } : action === 'label' ? { label: label ?? true } : {})
+    if (result.kind === 'completed') {
+      expandedId.value = null
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('操作已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionBusy.value = false
   }
 }
 
 async function handlePublishResult() {
   const app = publishApp.value
   if (!app || actionBusy.value) return
-  actionBusy.value = true
-  publishSucceeded.value = false
-  publishError.value = ''
   const clubId = route.params.clubId as string
   const deptId = deptInput.value[app.id] || app.preferences[0]?.departmentId
   if (!deptId) {
     publishError.value = '请选择部门'
-    actionBusy.value = false
     return
   }
-  const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/paths/${deptId}/publish`)
-  actionBusy.value = false
-  if (result.kind === 'completed') {
-    publishSucceeded.value = true
-    expandedId.value = null
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('发布已受理，正在后台处理')
-  } else if (result.kind === 'rejected' && result.error) {
-    publishError.value = (result.error as { message?: string }).message || '发布失败，请重试'
+  actionBusy.value = true
+  publishSucceeded.value = false
+  publishError.value = ''
+  try {
+    const result = await post(`/org/${clubId}/recruitment/${app.activityId}/applications/${app.applicantId}/paths/${deptId}/publish`)
+    if (result.kind === 'completed') {
+      publishSucceeded.value = true
+      expandedId.value = null
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('发布已受理，正在后台处理')
+    } else if (result.kind === 'rejected' && result.error) {
+      publishError.value = (result.error as { message?: string }).message || '发布失败，请重试'
+    }
+  } finally {
+    actionBusy.value = false
   }
 }
 

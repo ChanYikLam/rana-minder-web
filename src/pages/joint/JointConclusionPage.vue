@@ -62,21 +62,24 @@ function openEvaluate(c: Conclusion) {
 async function handleEvaluate() {
   if (!selected.value || rating.value === 0) return
   evaluating.value = true
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${selected.value.id}/evaluate`, {
-    rating: rating.value,
-    comment: comment.value,
-  })
-  evaluating.value = false
-  if (result.kind === 'completed') {
-    // P2-38：原乐观更新仅刷新 status/rating/comment/concludedAt，history/versions/authorName 过期。
-    // 直接重载结论列表，保证评价历史/版本/作者与服务端一致。
-    await loadData()
-    selected.value = null
-    rating.value = 0
-    comment.value = ''
-    toast.success('评价已提交')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '评价提交失败')
+  try {
+    const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${selected.value.id}/evaluate`, {
+      rating: rating.value,
+      comment: comment.value,
+    })
+    if (result.kind === 'completed') {
+      // P2-38：原乐观更新仅刷新 status/rating/comment/concludedAt，history/versions/authorName 过期。
+      // 直接重载结论列表，保证评价历史/版本/作者与服务端一致。
+      await loadData()
+      selected.value = null
+      rating.value = 0
+      comment.value = ''
+      toast.success('评价已提交')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '评价提交失败')
+    }
+  } finally {
+    evaluating.value = false
   }
 }
 

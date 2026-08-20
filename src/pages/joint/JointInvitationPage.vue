@@ -35,18 +35,21 @@ async function loadDetail() {
 async function handleRespond(action: 'accept' | 'reject') {
   if (!detail.value || responding.value) return
   responding.value = true
-  const result = await post(`/me/invitations/joint/${detail.value.id}/respond`, { action })
-  responding.value = false
-  if (result.kind === 'completed') {
-    detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
-    if (action === 'accept') {
-      detail.value.casdoorSync = 'processing'
-      toast.success('已接受联合邀请，等待身份同步生效')
-    } else {
-      toast.success('已拒绝邀请')
+  try {
+    const result = await post(`/me/invitations/joint/${detail.value.id}/respond`, { action })
+    if (result.kind === 'completed') {
+      detail.value.status = action === 'accept' ? 'accepted' : 'rejected'
+      if (action === 'accept') {
+        detail.value.casdoorSync = 'processing'
+        toast.success('已接受联合邀请，等待身份同步生效')
+      } else {
+        toast.success('已拒绝邀请')
+      }
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
     }
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败，请稍后重试')
+  } finally {
+    responding.value = false
   }
 }
 
@@ -54,13 +57,16 @@ async function handleRespond(action: 'accept' | 'reject') {
 async function handleSyncConfirm() {
   if (!detail.value || syncing.value) return
   syncing.value = true
-  const result = await post(`/me/invitations/joint/${detail.value.id}/sync-confirm`)
-  syncing.value = false
-  if (result.kind === 'completed') {
-    detail.value.casdoorSync = 'confirmed'
-    toast.success('成员身份已生效')
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
+  try {
+    const result = await post(`/me/invitations/joint/${detail.value.id}/sync-confirm`)
+    if (result.kind === 'completed') {
+      detail.value.casdoorSync = 'confirmed'
+      toast.success('成员身份已生效')
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '确认失败，请稍后重试')
+    }
+  } finally {
+    syncing.value = false
   }
 }
 

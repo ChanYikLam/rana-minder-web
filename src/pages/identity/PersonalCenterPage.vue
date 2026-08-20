@@ -84,14 +84,17 @@ async function handleWithdraw(item: OngoingItem) {
     return
   }
   withdrawing.value = true
-  const result = await post(`/activity/recruitment/${item.activityId}/withdraw`, { confirm: true })
-  withdrawing.value = false
-  confirmingId.value = null
-  if (result.kind === 'completed') {
-    toast.success('已退出招新')
-    await loadData()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '退出失败')
+  try {
+    const result = await post(`/activity/recruitment/${item.activityId}/withdraw`, { confirm: true })
+    confirmingId.value = null
+    if (result.kind === 'completed') {
+      toast.success('已退出招新')
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '退出失败')
+    }
+  } finally {
+    withdrawing.value = false
   }
 }
 

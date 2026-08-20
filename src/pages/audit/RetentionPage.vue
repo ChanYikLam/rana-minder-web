@@ -80,17 +80,20 @@ async function loadData() {
 
 async function handleCreate() {
   creating.value = true
-  const result = await post('/admin/retention', { ...form.value })
-  creating.value = false
-  if (result.kind === 'completed') {
-    toast.success('保留策略草稿已创建')
-    const created = result.data as { id: string; scope: string; retentionDays: number; action: string; status: string; version: number; updatedAt: string; publishedAt: string | null }
-    policies.value.unshift(created)
-    showForm.value = false
-    form.value = { scope: '', retentionDays: 30, action: 'clean' }
-    await loadData()
-  } else {
-    toastError(result, '创建失败，请重试')
+  try {
+    const result = await post('/admin/retention', { ...form.value })
+    if (result.kind === 'completed') {
+      toast.success('保留策略草稿已创建')
+      const created = result.data as { id: string; scope: string; retentionDays: number; action: string; status: string; version: number; updatedAt: string; publishedAt: string | null }
+      policies.value.unshift(created)
+      showForm.value = false
+      form.value = { scope: '', retentionDays: 30, action: 'clean' }
+      await loadData()
+    } else {
+      toastError(result, '创建失败，请重试')
+    }
+  } finally {
+    creating.value = false
   }
 }
 
@@ -100,26 +103,32 @@ async function openPreview(policy: Policy) {
   preview.value = null
   previewTarget.value = policy
   publishReason.value = ''
-  const result = await get<PolicyPreview>(`/admin/retention/${policy.id}/preview`)
-  previewLoading.value = false
-  if (result.kind === 'completed') {
-    preview.value = result.data
-  } else {
-    toastError(result, '影响预览失败，请重试')
-    previewTarget.value = null
+  try {
+    const result = await get<PolicyPreview>(`/admin/retention/${policy.id}/preview`)
+    if (result.kind === 'completed') {
+      preview.value = result.data
+    } else {
+      toastError(result, '影响预览失败，请重试')
+      previewTarget.value = null
+    }
+  } finally {
+    previewLoading.value = false
   }
 }
 
 async function reauthenticate() {
   reauthenticating.value = true
-  const result = await identityApi.reauthenticate()
-  reauthenticating.value = false
-  if (result.kind === 'completed') {
-    reauthProof.value = result.data.proof
-    toast.success('身份验证已完成')
-    return
+  try {
+    const result = await identityApi.reauthenticate()
+    if (result.kind === 'completed') {
+      reauthProof.value = result.data.proof
+      toast.success('身份验证已完成')
+      return
+    }
+    toast.error('身份验证失败，请重新登录后再试')
+  } finally {
+    reauthenticating.value = false
   }
-  toast.error('身份验证失败，请重新登录后再试')
 }
 
 async function handlePublish() {
@@ -133,35 +142,38 @@ async function handlePublish() {
   publishing.value = true
   publishSucceeded.value = false
   publishError.value = ''
-  const result = await post(`/admin/retention/${p.id}/publish`, {
-    reason: publishReason.value.trim(),
-    reauthProof: reauthProof.value,
-    previewVersion: pv.previewVersion,
-  })
-  publishing.value = false
-  if (result.kind === 'completed') {
-    publishSucceeded.value = true
-    publishError.value = ''
-    confirmOpen.value = false
-    toast.success('策略已发布')
-    const data = result.data as { notice?: string | null; auditRef?: string }
-    if (data.notice) toast.info(data.notice)
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    toastAcceptedAction('发布已受理，正在后台处理')
-    await loadData()
-  } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
-    publishSucceeded.value = false
-    publishError.value = '身份验证已失效，请重新认证后重试'
-    reauthProof.value = ''
-  } else if (result.kind === 'concurrency_conflict') {
-    publishSucceeded.value = false
-    publishError.value = '影响预览已过期，请重新预览后发布'
-    preview.value = null
-  } else {
-    publishSucceeded.value = false
-    publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
-    toastError(result, '发布失败，请重试')
+  try {
+    const result = await post(`/admin/retention/${p.id}/publish`, {
+      reason: publishReason.value.trim(),
+      reauthProof: reauthProof.value,
+      previewVersion: pv.previewVersion,
+    })
+    if (result.kind === 'completed') {
+      publishSucceeded.value = true
+      publishError.value = ''
+      confirmOpen.value = false
+      toast.success('策略已发布')
+      const data = result.data as { notice?: string | null; auditRef?: string }
+      if (data.notice) toast.info(data.notice)
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      toastAcceptedAction('发布已受理，正在后台处理')
+      await loadData()
+    } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
+      publishSucceeded.value = false
+      publishError.value = '身份验证已失效，请重新认证后重试'
+      reauthProof.value = ''
+    } else if (result.kind === 'concurrency_conflict') {
+      publishSucceeded.value = false
+      publishError.value = '影响预览已过期，请重新预览后发布'
+      preview.value = null
+    } else {
+      publishSucceeded.value = false
+      publishError.value = (result as { error?: { message?: string } }).error?.message || '发布失败，请重试'
+      toastError(result, '发布失败，请重试')
+    }
+  } finally {
+    publishing.value = false
   }
 }
 
@@ -174,25 +186,28 @@ async function handleExecute(proof?: string) {
   executing.value = true
   executeSucceeded.value = false
   executeError.value = ''
-  const result = await post('/admin/retention/execute', {
-    reason: '例行保留策略执行',
-    reauthProof: proof,
-  })
-  executing.value = false
-  if (result.kind === 'completed') {
-    executeSucceeded.value = true
-    const data = result.data as { totalExecuted: number }
-    toast.success(`保留策略执行完成，共处置 ${data.totalExecuted} 条数据`)
-    await loadData()
-  } else if (result.kind === 'accepted') {
-    // P1：#10 服务端 202/IFC-ERR-013/014 异步受理执行：统一提示已受理，避免误报"执行失败"
-    toastAcceptedAction('保留策略执行已受理，正在后台处理')
-    executeOpen.value = false
-  } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
-    toast.error('身份验证已失效，请重新认证后重试')
-    executeOpen.value = false
-  } else {
-    executeError.value = (result as { error?: { message?: string } }).error?.message || '执行失败，请重试'
+  try {
+    const result = await post('/admin/retention/execute', {
+      reason: '例行保留策略执行',
+      reauthProof: proof,
+    })
+    if (result.kind === 'completed') {
+      executeSucceeded.value = true
+      const data = result.data as { totalExecuted: number }
+      toast.success(`保留策略执行完成，共处置 ${data.totalExecuted} 条数据`)
+      await loadData()
+    } else if (result.kind === 'accepted') {
+      // P1：#10 服务端 202/IFC-ERR-013/014 异步受理执行：统一提示已受理，避免误报"执行失败"
+      toastAcceptedAction('保留策略执行已受理，正在后台处理')
+      executeOpen.value = false
+    } else if (result.kind === 'rejected' && (result.error as { code?: string }).code === 'IFC-ERR-002') {
+      toast.error('身份验证已失效，请重新认证后重试')
+      executeOpen.value = false
+    } else {
+      executeError.value = (result as { error?: { message?: string } }).error?.message || '执行失败，请重试'
+    }
+  } finally {
+    executing.value = false
   }
 }
 

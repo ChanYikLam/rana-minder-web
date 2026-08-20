@@ -166,14 +166,17 @@ async function confirmExecute(proof?: string) {
   confirmOpen.value = false
   step.value = 'execute'
   executing.value = true
-  results.value = []
-  // 重试模式仅重跑失败项；普通执行跑全量选中项
-  const targets = retryingIds.value.length ? retryingIds.value : selectedItems.value
-  const ok = await runBatch(targets, reason, proof)
-  executing.value = false
-  retryingIds.value = []
-  if (ok) step.value = 'result'
-  else step.value = 'preview'
+  try {
+    results.value = []
+    // 重试模式仅重跑失败项；普通执行跑全量选中项
+    const targets = retryingIds.value.length ? retryingIds.value : selectedItems.value
+    const ok = await runBatch(targets, reason, proof)
+    retryingIds.value = []
+    if (ok) step.value = 'result'
+    else step.value = 'preview'
+  } finally {
+    executing.value = false
+  }
 }
 
 // 重试失败项：proof 为一次性凭证，旧 proof 已被首次执行消费，必须重新走重认证确认流程

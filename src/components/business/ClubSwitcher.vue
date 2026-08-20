@@ -32,13 +32,16 @@ async function loadClubs() {
   if (clubs.value.length > 0 || loading.value) return
   loading.value = true
   loadError.value = false
-  const result = await identityApi.getMyClubs()
-  loading.value = false
-  if (result.kind === 'completed') {
-    clubs.value = result.data.clubs
-  } else {
-    // P2-14：拉取失败不再静默——否则菜单误导"暂无加入的社团"
-    loadError.value = true
+  try {
+    const result = await identityApi.getMyClubs()
+    if (result.kind === 'completed') {
+      clubs.value = result.data.clubs
+    } else {
+      // P2-14：拉取失败不再静默——否则菜单误导"暂无加入的社团"
+      loadError.value = true
+    }
+  } finally {
+    loading.value = false
   }
 }
 

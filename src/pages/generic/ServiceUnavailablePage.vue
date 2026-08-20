@@ -15,10 +15,13 @@ const remainingMinutes = computed(() => {
 async function handleRetry() {
   if (retrying.value) return
   retrying.value = true
-  // mock: 模拟重新探测依赖状态
-  await new Promise((r) => setTimeout(r, 1200))
-  retrying.value = false
-  window.location.reload()
+  try {
+    // mock: 模拟重新探测依赖状态
+    await new Promise((r) => setTimeout(r, 1200))
+    window.location.reload()
+  } finally {
+    retrying.value = false
+  }
 }
 </script>
 

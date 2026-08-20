@@ -73,33 +73,39 @@ function formatTime(iso: string): string {
 async function runAction(applicantId: string, action: string, input?: Record<string, unknown>) {
   if (actionLoading.value) return
   actionLoading.value = true
-  const result = await post(
-    `/org/${clubId.value}/joint/${jointId.value}/interviews/${applicantId}/${action}`,
-    { ...(input || {}) }
-  )
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    await loadData()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '操作失败')
+  try {
+    const result = await post(
+      `/org/${clubId.value}/joint/${jointId.value}/interviews/${applicantId}/${action}`,
+      { ...(input || {}) }
+    )
+    if (result.kind === 'completed') {
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '操作失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
 async function handleBook() {
   if (!bookForm.value.applicantId || !bookForm.value.slotId || actionLoading.value) return
   actionLoading.value = true
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviews/book`, {
-    applicantId: bookForm.value.applicantId,
-    slotId: bookForm.value.slotId,
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    toast.success('预约成功')
-    bookOpen.value = false
-    bookForm.value = { applicantId: '', slotId: '' }
-    await loadData()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '预约失败')
+  try {
+    const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviews/book`, {
+      applicantId: bookForm.value.applicantId,
+      slotId: bookForm.value.slotId,
+    })
+    if (result.kind === 'completed') {
+      toast.success('预约成功')
+      bookOpen.value = false
+      bookForm.value = { applicantId: '', slotId: '' }
+      await loadData()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '预约失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -150,31 +156,37 @@ async function handleAssignTask() {
   }
   if (actionLoading.value) return
   actionLoading.value = true
-  const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers`, {
-    userId: taskForm.value.userId,
-    userName: candidate?.name || '',
-  })
-  actionLoading.value = false
-  if (result.kind === 'completed') {
-    taskForm.value = { userId: '' }
-    taskError.value = ''
-    await loadInterviewers()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '指派失败')
+  try {
+    const candidate = candidates.value.find((x) => x.id === taskForm.value.userId)
+    const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers`, {
+      userId: taskForm.value.userId,
+      userName: candidate?.name || '',
+    })
+    if (result.kind === 'completed') {
+      taskForm.value = { userId: '' }
+      taskError.value = ''
+      await loadInterviewers()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '指派失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
 async function handleRevokeTask(taskId: string) {
   if (actionLoading.value) return
   actionLoading.value = true
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers/${taskId}/revoke`, {})
-  actionLoading.value = false
-  revokingTaskId.value = null
-  if (result.kind === 'completed') {
-    await loadInterviewers()
-  } else if (result.kind === 'rejected' && result.error) {
-    toast.error((result.error as { message?: string }).message || '撤销失败')
+  try {
+    const result = await post(`/org/${clubId.value}/joint/${jointId.value}/interviewers/${taskId}/revoke`, {})
+    revokingTaskId.value = null
+    if (result.kind === 'completed') {
+      await loadInterviewers()
+    } else if (result.kind === 'rejected' && result.error) {
+      toast.error((result.error as { message?: string }).message || '撤销失败')
+    }
+  } finally {
+    actionLoading.value = false
   }
 }
 
