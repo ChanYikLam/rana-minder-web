@@ -162,13 +162,13 @@ async function handlePublish() {
     return
   }
   publishing.value = true
+  reauthConfirmOpen.value = false
   try {
     const result = await post(`/admin/config/permission-templates/${t.id}/publish`, {
       reauthProof: reauthProof.value,
       previewVersion: d.previewVersion,
       reason: publishReason.value.trim(),
     })
-    reauthConfirmOpen.value = false
     if (result.kind === 'completed') {
       toast.success('模板已发布')
       await loadData()
