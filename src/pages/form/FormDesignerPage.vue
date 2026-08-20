@@ -23,6 +23,10 @@ const selectedFieldId = ref<string | null>(null)
 const saving = ref(false)
 const previewOpen = ref(false)
 const publishing = ref(false)
+// P2-17：停用/复用/克隆各自独立 pending 标志，任一写操作在途时仅禁用自身按钮，互不影响
+const deprecating = ref(false)
+const reusing = ref(false)
+const cloning = ref(false)
 
 // P1-17：未保存更改追踪——任何字段变更置 dirty，保存/发布成功或重载后复位
 const dirty = ref(false)
@@ -205,8 +209,14 @@ async function handlePublish() {
 async function handleDeprecate() {
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
-  if (!apiScope) return
-  const result = await post(`${apiScope.prefix}/forms/designer/${id}/deprecate`, {})
+  if (!apiScope || deprecating.value) return
+  deprecating.value = true
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`${apiScope.prefix}/forms/designer/${id}/deprecate`, {})
+  } finally {
+    deprecating.value = false
+  }
   if (result.kind === 'completed') {
     toast.success('表单已停用（历史版本保留）')
     await loadData()
@@ -221,8 +231,14 @@ async function handleDeprecate() {
 async function handleReuse() {
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
-  if (!apiScope) return
-  const result = await post(`${apiScope.prefix}/forms/designer/${id}/reuse`, {})
+  if (!apiScope || reusing.value) return
+  reusing.value = true
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`${apiScope.prefix}/forms/designer/${id}/reuse`, {})
+  } finally {
+    reusing.value = false
+  }
   if (result.kind === 'completed') {
     toast.success('表单已复用，可继续编辑')
     await loadData()
@@ -237,8 +253,14 @@ async function handleReuse() {
 async function handleClone() {
   const id = (formId.value || (route.params.formId as string))
   const apiScope = resolveApiScope(route)
-  if (!apiScope) return
-  const result = await post(`${apiScope.prefix}/forms/designer/${id}/clone`, { title: `${formTitle.value}（副本）` })
+  if (!apiScope || cloning.value) return
+  cloning.value = true
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`${apiScope.prefix}/forms/designer/${id}/clone`, { title: `${formTitle.value}（副本）` })
+  } finally {
+    cloning.value = false
+  }
   if (result.kind === 'completed') {
     const data = result.data as { id?: string }
     toast.success('已克隆生成新草稿')
@@ -282,10 +304,10 @@ onBeforeRouteLeave(() => {
         </div>
         <div class="flex gap-2">
           <template v-if="formStatus === 'published' || formStatus === 'deprecated'">
-            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="handleClone"><Copy :size="16" /> 克隆</button>
+            <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle disabled:opacity-60" :disabled="cloning" @click="handleClone"><Copy :size="16" /> {{ cloning ? '处理中...' : '克隆' }}</button>
           </template>
-          <button v-if="formStatus === 'published'" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="handleDeprecate"><Archive :size="16" /> 停用</button>
-          <button v-if="formStatus === 'deprecated'" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="handleReuse"><RotateCcw :size="16" /> 复用</button>
+          <button v-if="formStatus === 'published'" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle disabled:opacity-60" :disabled="deprecating" @click="handleDeprecate"><Archive :size="16" /> {{ deprecating ? '处理中...' : '停用' }}</button>
+          <button v-if="formStatus === 'deprecated'" class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle disabled:opacity-60" :disabled="reusing" @click="handleReuse"><RotateCcw :size="16" /> {{ reusing ? '处理中...' : '复用' }}</button>
           <button class="flex items-center gap-1.5 px-3 h-9 rounded-md border border-border text-sm text-text-primary hover:bg-subtle" @click="previewOpen = true"><Eye :size="16" /> 预览</button>
           <button
             class="flex items-center gap-1.5 px-3 h-9 rounded-md bg-primary text-text-on-primary text-sm font-medium hover:bg-primary-hover disabled:opacity-60"

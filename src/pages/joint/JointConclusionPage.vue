@@ -62,33 +62,39 @@ function openEvaluate(c: Conclusion) {
 async function handleEvaluate() {
   if (!selected.value || rating.value === 0) return
   evaluating.value = true
+  let result: Awaited<ReturnType<typeof post>>
   try {
-    const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${selected.value.id}/evaluate`, {
+    result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${selected.value.id}/evaluate`, {
       rating: rating.value,
       comment: comment.value,
     })
-    if (result.kind === 'completed') {
-      // P2-38：原乐观更新仅刷新 status/rating/comment/concludedAt，history/versions/authorName 过期。
-      // 直接重载结论列表，保证评价历史/版本/作者与服务端一致。
-      await loadData()
-      selected.value = null
-      rating.value = 0
-      comment.value = ''
-      toast.success('评价已提交')
-    } else if (result.kind === 'rejected' && result.error) {
-      toast.error((result.error as { message?: string }).message || '评价提交失败')
-    }
   } finally {
     evaluating.value = false
+  }
+  if (result.kind === 'completed') {
+    // P2-38：原乐观更新仅刷新 status/rating/comment/concludedAt，history/versions/authorName 过期。
+    // 直接重载结论列表，保证评价历史/版本/作者与服务端一致。
+    await loadData()
+    selected.value = null
+    rating.value = 0
+    comment.value = ''
+    toast.success('评价已提交')
+  } else if (result.kind === 'rejected' && result.error) {
+    toast.error((result.error as { message?: string }).message || '评价提交失败')
   }
 }
 
 async function handleInvite(c: Conclusion) {
+  if (invitingName.value !== null) return
   invitingName.value = c.applicantName
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations`, {
-    applicantId: c.applicantId || '',
-  })
-  invitingName.value = null
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations`, {
+      applicantId: c.applicantId || '',
+    })
+  } finally {
+    invitingName.value = null
+  }
   if (result.kind === 'completed') {
     toast.success(`邀请已发送至 ${c.applicantName}`)
     await loadInvitations()
@@ -97,9 +103,17 @@ async function handleInvite(c: Conclusion) {
   }
 }
 
+const settingId = ref<string | null>(null)
+
 async function handleSetConclusion(c: Conclusion, conclusion: 'admit' | 'not_admit') {
-  if (!c.applicantId) return
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/set`, { conclusion })
+  if (!c.applicantId || settingId.value !== null) return
+  settingId.value = c.applicantId
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/set`, { conclusion })
+  } finally {
+    settingId.value = null
+  }
   if (result.kind === 'completed') {
     toast.success(`已设定结论：${conclusion === 'admit' ? '录用' : '不录用'}`)
     await loadData()
@@ -109,13 +123,20 @@ async function handleSetConclusion(c: Conclusion, conclusion: 'admit' | 'not_adm
 }
 
 const reviewingId = ref<string | null>(null)
+const reviewBusy = ref(false)
 
 async function handleReview(c: Conclusion, action: 'keep' | 'modify', newConclusion?: 'admit' | 'not_admit') {
-  if (!c.applicantId) return
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/review`, {
-    action,
-    newConclusion,
-  })
+  if (!c.applicantId || reviewBusy.value) return
+  reviewBusy.value = true
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`/org/${clubId.value}/joint/${jointId.value}/conclusions/${c.applicantId}/review`, {
+      action,
+      newConclusion,
+    })
+  } finally {
+    reviewBusy.value = false
+  }
   if (result.kind === 'completed') {
     toast.success(action === 'keep' ? '结论已保持' : '结论已复核修改')
     reviewingId.value = null
@@ -125,8 +146,17 @@ async function handleReview(c: Conclusion, action: 'keep' | 'modify', newConclus
   }
 }
 
+const invitationBusyId = ref<string | null>(null)
+
 async function handleInvitationAction(invitationId: string, action: string) {
-  const result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations/${invitationId}/${action}`, {})
+  if (invitationBusyId.value !== null) return
+  invitationBusyId.value = invitationId
+  let result: Awaited<ReturnType<typeof post>>
+  try {
+    result = await post(`/org/${clubId.value}/joint/${jointId.value}/invitations/${invitationId}/${action}`, {})
+  } finally {
+    invitationBusyId.value = null
+  }
   if (result.kind === 'completed') {
     toast.success(action === 'withdraw' ? '邀请已撤回' : '邀请已同步生效')
     await loadInvitations()
@@ -223,19 +253,22 @@ onMounted(async () => {
                       <button v-if="c.reviewFlag && c.clubId === clubId" class="text-xs text-primary hover:underline" @click="reviewingId = reviewingId === c.id ? null : c.id">复核</button>
                       <div v-if="c.reviewFlag && c.clubId === clubId && reviewingId === c.id" class="flex items-center gap-1.5">
                         <button
-                          class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
+                          class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          :disabled="reviewBusy"
                           @click="handleReview(c, 'keep')"
                         >
                           保持结论
                         </button>
                         <button
-                          class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted"
+                          class="px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          :disabled="reviewBusy"
                           @click="handleReview(c, 'modify', 'admit')"
                         >
                           改为录用
                         </button>
                         <button
-                          class="px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted"
+                          class="px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          :disabled="reviewBusy"
                           @click="handleReview(c, 'modify', 'not_admit')"
                         >
                           改为不录用
@@ -249,12 +282,14 @@ onMounted(async () => {
                       <div v-if="c.clubId === clubId" class="flex items-center gap-1.5">
                         <button
                           class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-success text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          :disabled="settingId !== null"
                           @click="handleSetConclusion(c, 'admit')"
                         >
                           <ThumbsUp :size="12" /> 录用
                         </button>
                         <button
                           class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-destructive text-xs font-medium hover:bg-muted disabled:opacity-60"
+                          :disabled="settingId !== null"
                           @click="handleSetConclusion(c, 'not_admit')"
                         >
                           <ThumbsDown :size="12" /> 不录用
@@ -309,6 +344,7 @@ onMounted(async () => {
                   <button
                     v-if="inv.status === 'pending_acceptance'"
                     class="flex items-center gap-1 px-2 h-7 rounded-md bg-muted text-text-primary text-xs font-medium hover:bg-border disabled:opacity-60"
+                    :disabled="invitationBusyId === inv.id"
                     @click="handleInvitationAction(inv.id, 'withdraw')"
                   >
                     <XCircle :size="12" /> 撤回
@@ -316,6 +352,7 @@ onMounted(async () => {
                   <button
                     v-if="inv.status === 'accepted'"
                     class="flex items-center gap-1 px-2 h-7 rounded-md bg-primary text-text-on-primary text-xs font-medium hover:bg-primary-hover disabled:opacity-60"
+                    :disabled="invitationBusyId === inv.id"
                     @click="handleInvitationAction(inv.id, 'sync')"
                   >
                     <CheckCircle2 :size="12" /> 同步生效
@@ -323,6 +360,7 @@ onMounted(async () => {
                   <button
                     v-if="['rejected', 'withdrawn', 'expired'].includes(inv.status)"
                     class="flex items-center gap-1 px-2 h-7 rounded-md bg-subtle text-text-primary text-xs font-medium hover:bg-muted disabled:opacity-60"
+                    :disabled="invitingName !== null"
                     @click="handleInviteFor(g.items.find((c) => c.applicantId === inv.applicantId))"
                   >
                     <RefreshCw :size="12" /> {{ invitingName === inv.applicantName ? '发送中...' : '重发' }}
