@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { get, getValidated, getPaginated, post, put, patch, del } from './client'
+import { __testing_pendingIdempotencyKeyCount, __testing_resetPendingIdempotencyKeys } from './idempotency-keys'
 import { ERROR_MESSAGES, errorCodeOf } from './error-map'
 
 afterEach(() => {
@@ -297,5 +298,97 @@ describe('API client', () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(body.idempotencyKey).toBe('client-provided-key')
+  })
+})
+
+describe('幂等键生命周期清理（M-3）', () => {
+  beforeEach(() => {
+    __testing_resetPendingIdempotencyKeys()
+  })
+  afterEach(() => {
+    __testing_resetPendingIdempotencyKeys()
+    vi.useRealTimers()
+  })
+
+  /**
+   * 失败请求（4xx/5xx/网络错误/超时）不删除 pendingIdempotencyKeys 条目，
+   * 因此这些测试用 422 校验失败（IFC-ERR-005）作为“保留条目”的触发器。
+   */
+
+  it('TTL 内：同一 fingerprint 失败请求复用同一 key', async () => {
+    stubWindow()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-07T00:00:00Z'))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'IFC-ERR-005', message: '校验失败' }), { status: 422 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await post('/records/reuse-key', { value: 1 })
+    await post('/records/reuse-key', { value: 1 })
+
+    const firstKey = JSON.parse(fetchMock.mock.calls[0][1].body as string).idempotencyKey
+    const secondKey = JSON.parse(fetchMock.mock.calls[1][1].body as string).idempotencyKey
+    expect(firstKey).toBeTruthy()
+    expect(secondKey).toBe(firstKey)
+  })
+
+  it('TTL 过期后：重新生成 key', async () => {
+    stubWindow()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-07T00:00:00Z'))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'IFC-ERR-005', message: '校验失败' }), { status: 422 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await post('/records/expire-key', { value: 1 })
+    const firstKey = JSON.parse(fetchMock.mock.calls[0][1].body as string).idempotencyKey
+
+    // 推进时间越过 TTL（15 分钟 + 1 ms）
+    vi.setSystemTime(new Date('2026-08-07T00:15:01Z'))
+    await post('/records/expire-key', { value: 1 })
+    const secondKey = JSON.parse(fetchMock.mock.calls[1][1].body as string).idempotencyKey
+
+    expect(secondKey).not.toBe(firstKey)
+  })
+
+  it('过期条目会被清理：跨过清理节流后 Map 不再无限增长', async () => {
+    stubWindow()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-07T00:00:00Z'))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'IFC-ERR-005', message: '校验失败' }), { status: 422 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    // 创建 5 个不同 fingerprint 的失败请求，条目均留在 Map
+    for (let i = 0; i < 5; i += 1) {
+      await post(`/records/cleanup-${i}`, { value: i })
+    }
+    expect(__testing_pendingIdempotencyKeyCount()).toBe(5)
+
+    // 推进时间到 TTL 之后
+    vi.setSystemTime(new Date('2026-08-07T00:15:01Z'))
+    // 触发清理（通过新请求访问，会调用 getIdempotencyKey → cleanupExpiredIdempotencyKeys）
+    await post('/records/cleanup-trigger', { value: 99 })
+
+    // 过期条目已被清理，仅剩最新一条
+    expect(__testing_pendingIdempotencyKeyCount()).toBe(1)
+  })
+
+  it('清理按节流：清理周期内重复访问不重复扫描', async () => {
+    stubWindow()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-07T00:00:00Z'))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'IFC-ERR-005', message: '校验失败' }), { status: 422 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    // 创建 3 个不同 fingerprint 的失败请求
+    for (let i = 0; i < 3; i += 1) {
+      await post(`/records/throttle-${i}`, { value: i })
+    }
+    expect(__testing_pendingIdempotencyKeyCount()).toBe(3)
+
+    // 推进 30 秒（仍在 1 分钟清理节流内）—— 此时新请求不触发清理
+    vi.setSystemTime(new Date('2026-08-07T00:00:30Z'))
+    await post('/records/throttle-x', { value: 0 })
+
+    // 节流内不应删除任何条目，但新请求会添加一条
+    expect(__testing_pendingIdempotencyKeyCount()).toBe(4)
   })
 })

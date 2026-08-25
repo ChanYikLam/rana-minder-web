@@ -1,22 +1,15 @@
 import type { ApiRequest, ApiResult, PaginatedResult } from '@/types/contracts'
 import { errorCodeOf, ERROR_AUTO_RETRY, ERROR_MESSAGES, httpStatusToResult } from './error-map'
+import { getIdempotencyKey, removeIdempotencyKey } from './idempotency-keys'
 
 const BASE_URL = '/api'
 
-const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000
 /** 单次请求超时（毫秒）。连接挂起时触发，超时映射为可重试错误 IFC-ERR-012。 */
 const DEFAULT_TIMEOUT_MS = 15_000
 /** IFC-ERR-012 等可重试错误的最大自动重试次数（不含首次尝试）。 */
 const AUTO_RETRY_MAX = 2
 /** 自动重试递增退避的基准延迟（毫秒）。 */
 const AUTO_RETRY_BASE_DELAY_MS = 250
-const pendingIdempotencyKeys = new Map<string, { key: string; expiresAt: number }>()
-
-function generateIdempotencyKey(): string {
-  return typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `idem-${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join('-')}`
-}
 
 export interface RuntimeSchema<T> {
   safeParse: (value: unknown) => { success: true; data: T } | { success: false }
@@ -46,15 +39,6 @@ function buildUrl(path: string, params?: RequestOptions['params']): string {
     }
   }
   return url.pathname + url.search
-}
-
-function getIdempotencyKey(fingerprint: string): string {
-  const now = Date.now()
-  const existing = pendingIdempotencyKeys.get(fingerprint)
-  if (existing && existing.expiresAt > now) return existing.key
-  const key = generateIdempotencyKey()
-  pendingIdempotencyKeys.set(fingerprint, { key, expiresAt: now + IDEMPOTENCY_TTL_MS })
-  return key
 }
 
 function completedData<T>(body: unknown, schema?: RuntimeSchema<T>): ApiResult<T> {
@@ -200,7 +184,7 @@ async function request<T>(path: string, options: RequestOptions<T> = {}): Promis
       })
 
       if (response.status === 204) {
-        if (intentFingerprint) pendingIdempotencyKeys.delete(intentFingerprint)
+        if (intentFingerprint) removeIdempotencyKey(intentFingerprint)
         result = { kind: 'completed', data: undefined as T }
       } else {
         // 响应体读取同样处于超时窗口内：response.json() 虽不受 signal 直接中断，
@@ -215,7 +199,7 @@ async function request<T>(path: string, options: RequestOptions<T> = {}): Promis
           result = httpStatusToResult<T>(response.status, responseBody)
         } else {
           result = completedData(responseBody, schema)
-          if (result.kind === 'completed' && intentFingerprint) pendingIdempotencyKeys.delete(intentFingerprint)
+          if (result.kind === 'completed' && intentFingerprint) removeIdempotencyKey(intentFingerprint)
         }
       }
     } catch {

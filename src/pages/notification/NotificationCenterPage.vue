@@ -6,6 +6,7 @@ import { NotificationDetail, type NotificationDetailData } from '@/components/fe
 import { useNotificationViewStore } from '@/state/notificationViewStore'
 import { errorToPageState } from '@/services/error-map'
 import { navigateByLink } from '@/router/safeLink'
+import { formatRelativeCn } from '@/lib/date'
 import type { PageState } from '@/types/machine'
 import { toast } from 'vue-sonner'
 import { Bell, CheckCheck, ChevronRight } from '@lucide/vue'
@@ -110,16 +111,6 @@ async function handleMarkAllRead() {
   }
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
-
 onMounted(loadNotifications)
 </script>
 
@@ -216,7 +207,7 @@ onMounted(loadNotifications)
                 <p class="text-xs text-text-secondary mt-1 flex items-center gap-2">
                   <span class="rounded-full border border-border px-1.5 py-0.5">{{ TYPE_LABELS[item.type] || item.type }}</span>
                   <span v-if="item.clubName" class="rounded-full border border-border px-1.5 py-0.5">{{ item.clubName }}</span>
-                  <span>{{ formatTime(item.createdAt) }}</span>
+                  <span>{{ formatRelativeCn(item.createdAt) }}</span>
                 </p>
               </div>
               <ChevronRight :size="16" class="text-text-secondary shrink-0" />

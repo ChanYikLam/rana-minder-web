@@ -126,8 +126,20 @@ export function httpStatusToResult<T>(status: number, body: unknown): ApiResult<
   }
   if (code === 'IFC-ERR-014' || status === 202) {
     const data = body && typeof body === 'object' && 'data' in body ? (body as { data?: unknown }).data : undefined
-    const task = data && typeof data === 'object' ? data as Record<string, unknown> : {}
-    return { kind: 'accepted', data: { taskId: String(task.taskId || ''), status: String(task.status || 'processing') } }
+    const task = data && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    const taskId = task ? String(task.taskId ?? '').trim() : ''
+    // M-4：202 响应缺 taskId 视为协议错误（响应格式异常），不作为 accepted 误用空 taskId：
+    // 空 taskId 无法用于后续轮询，等于在客户端埋下永远 pending 的任务。
+    if (!taskId) {
+      return {
+        kind: 'rejected',
+        error: {
+          code: 'IFC-ERR-016',
+          message: ERROR_MESSAGES['IFC-ERR-016'],
+        },
+      }
+    }
+    return { kind: 'accepted', data: { taskId, status: String(task?.status || 'processing') } }
   }
   if (code === 'IFC-ERR-008' || code === 'IFC-ERR-010') {
     return { kind: 'concurrency_conflict', error, currentData: (body as Record<string, unknown>)?.currentData }
