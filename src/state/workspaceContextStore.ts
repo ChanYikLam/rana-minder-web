@@ -73,50 +73,54 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     const myGen = ++loadGeneration
     const inFlightUserId = session.user?.id ?? null
     loading.value = true
-    // M-2：通过对象持有在飞 Promise，闭包内经属性引用自身，
-    // 避免在 const 声明初始化的闭包里直接引用 `promise` 触发 TS2454(used before assigned)
-    const holder: { promise: Promise<boolean> } = {} as { promise: Promise<boolean> }
-    holder.promise = (async () => {
-      try {
-        const result = await organizationApi.getContext(clubId)
+    // M-2：在飞 Promise 提升到 IIFE 之外的 const,IIFE 内只做业务逻辑;
+    // 副作用（loading 复位、inFlightByClub 清理）通过 `myPromise.finally(...)` 闭包挂在结果 promise 上,
+    // 既消除 `const promise = (async () => { ... })()` 初始化器内自引用导致的 TS2454,
+    // 也避免 `holder` 对象 hack（属性访问绕过类型检查）——这里 `myPromise` 已是真正常量,
+    // 闭包内的引用在 `.finally()` 注册时已被快照
+    const myPromise = (async () => {
+      const result = await organizationApi.getContext(clubId)
 
-        // M-2：代次校验——后发请求（不同 clubId）已使 loadGeneration 递增，
-        // 本次响应视为过期，不写回 store，避免旧上下文覆盖新请求状态
-        if (myGen !== loadGeneration) return false
-        // M-2：会话身份校验——请求期间发生换账号/登出，捕获的 userId 与当前不一致，
-        // 结果丢弃（不写回、不清空），避免旧身份响应污染新身份上下文
-        if (inFlightUserId !== (session.user?.id ?? null)) return false
+      // M-2：代次校验——后发请求（不同 clubId）已使 loadGeneration 递增，
+      // 本次响应视为过期，不写回 store，避免旧上下文覆盖新请求状态
+      if (myGen !== loadGeneration) return false
+      // M-2：会话身份校验——请求期间发生换账号/登出，捕获的 userId 与当前不一致，
+      // 结果丢弃（不写回、不清空），避免旧身份响应污染新身份上下文
+      if (inFlightUserId !== (session.user?.id ?? null)) return false
 
-        if (result.kind !== 'completed') {
-          // 评审 I4：异常时也要复位 loading，避免切社团转圈卡死
-          clearWorkspace()
-          return false
-        }
-
-        setWorkspace(
-          result.data.clubId,
-          result.data.clubName,
-          result.data.role,
-          result.data.permissions,
-          session.user?.id ?? null,
-          result.data.memberId ?? null,
-        )
-        return true
-      } finally {
-        // M-2：仅最新代次的请求复位 loading，过期请求（已被新请求取代）不得干预新请求的 loading 状态
-        if (myGen === loadGeneration) {
-          loading.value = false
-        }
-        // 仅删除仍指向本次请求的 map 条目：避免旧身份请求晚返回时误删新身份请求刚写入的条目，
-        // 破坏新请求的 in-flight 去重
-        if (inFlightByClub.get(clubId)?.promise === holder.promise) {
-          inFlightByClub.delete(clubId)
-        }
+      if (result.kind !== 'completed') {
+        // 评审 I4：异常时也要复位 loading，避免切社团转圈卡死
+        clearWorkspace()
+        return false
       }
+
+      setWorkspace(
+        result.data.clubId,
+        result.data.clubName,
+        result.data.role,
+        result.data.permissions,
+        session.user?.id ?? null,
+        result.data.memberId ?? null,
+      )
+      return true
     })()
 
-    inFlightByClub.set(clubId, { promise: holder.promise, userId: inFlightUserId })
-    return holder.promise
+    // 副作用 1：仅最新代次的请求复位 loading，过期请求（已被新请求取代）不得干预新请求的 loading 状态
+    void myPromise.finally(() => {
+      if (myGen === loadGeneration) {
+        loading.value = false
+      }
+    })
+    // 副作用 2：仅删除仍指向本次请求的 map 条目——避免旧身份请求晚返回时误删新身份请求刚写入的条目,
+    // 破坏新请求的 in-flight 去重
+    void myPromise.finally(() => {
+      if (inFlightByClub.get(clubId)?.promise === myPromise) {
+        inFlightByClub.delete(clubId)
+      }
+    })
+
+    inFlightByClub.set(clubId, { promise: myPromise, userId: inFlightUserId })
+    return myPromise
   }
 
   function clearWorkspace() {
