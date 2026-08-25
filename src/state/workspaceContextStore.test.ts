@@ -184,3 +184,246 @@ describe('workspaceContextStore 工作空间缓存（按用户身份）', () => 
     expect(store.currentUserId).toBe('u-member')
   })
 })
+
+describe('workspaceContextStore M-2 工作空间加载并发防护', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  // 工具：构造一个可手动 resolve 的 promise，挂起 mock 调用
+  function pendingDeferred() {
+    let resolve!: (v: unknown) => void
+    const promise = new Promise((r) => { resolve = r })
+    return { promise, resolve }
+  }
+
+  function ctxFor(clubId: string, clubName: string, role: 'club_leader' | 'member', memberId: string | null = null) {
+    return {
+      kind: 'completed' as const,
+      data: {
+        clubId,
+        clubName,
+        role,
+        permissions: role === 'club_leader' ? ['club:dashboard:view', 'club:member:manage'] : ['club:member:view-self'],
+        memberId,
+      },
+    }
+  }
+
+  it('M-2：后发请求先返回时,旧请求结果不得覆盖新请求上下文（代次校验）', async () => {
+    // A 挂起（晚返回），B 立即成功（早返回）
+    const a = pendingDeferred()
+    mockedGetContext
+      .mockReturnValueOnce(a.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-002', '电子设计协会', 'member', 'mem-B') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    // 不 await：两个请求同时在飞
+    const pA = store.loadWorkspace('club-001')
+    const pB = store.loadWorkspace('club-002')
+
+    // B 先 resolve：等待其 microtask 完成
+    await flushMicrotasks()
+    // 此时 A 仍未 resolve
+    expect(store.currentClubId).toBe('club-002')
+    expect(store.currentMemberId).toBe('mem-B')
+
+    // A 此时才 resolve（晚到）——其结果必须被丢弃
+    a.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-A'))
+    const [rA, rB] = await Promise.all([pA, pB])
+
+    expect(rA).toBe(false) // 旧请求被识别为过期,返回 false
+    expect(rB).toBe(true)
+    // store 最终状态必须保持 B（不被 A 覆盖）
+    expect(store.currentClubId).toBe('club-002')
+    expect(store.currentClubName).toBe('电子设计协会')
+    expect(store.currentMemberId).toBe('mem-B')
+    expect(store.currentRole).toBe('member')
+  })
+
+  it('M-2：同 clubId 并发请求仅触发一次 API 调用（in-flight 去重）', async () => {
+    const a = pendingDeferred()
+    mockedGetContext.mockReturnValueOnce(a.promise as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    // 同一 clubId 的三次并发请求
+    const p1 = store.loadWorkspace('club-001')
+    const p2 = store.loadWorkspace('club-001')
+    const p3 = store.loadWorkspace('club-001')
+
+    // 仅触发一次 API 调用
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    a.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-1'))
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3])
+
+    expect(r1).toBe(true)
+    expect(r2).toBe(true)
+    expect(r3).toBe(true)
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+    expect(store.currentMemberId).toBe('mem-1')
+  })
+
+  it('M-2：旧请求失败时不得清空新请求已成功写入的上下文', async () => {
+    // A 挂起, B 立即成功
+    const a = pendingDeferred()
+    mockedGetContext
+      .mockReturnValueOnce(a.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-002', '电子设计协会', 'member', 'mem-B') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    const pA = store.loadWorkspace('club-001')
+    const pB = store.loadWorkspace('club-002')
+
+    // B 先完成, store 写入 B
+    await pB
+    expect(store.currentClubId).toBe('club-002')
+    expect(store.currentMemberId).toBe('mem-B')
+
+    // A 后失败（rejected）——其错误响应必须被丢弃,不得清空 B 的有效上下文
+    a.resolve({ kind: 'rejected' as const, error: { code: 'IFC-ERR-016', message: 'x' } })
+    await pA
+
+    expect(store.hasWorkspace).toBe(true)
+    expect(store.currentClubId).toBe('club-002')
+    expect(store.currentMemberId).toBe('mem-B')
+    expect(store.currentUserId).toBe('u-leader')
+  })
+
+  it('M-2：换账号（session.user.id 变化）时递增代次,在途旧请求结果不得写回', async () => {
+    const old = pendingDeferred()
+    mockedGetContext.mockReturnValueOnce(old.promise as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    const pOld = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 换账号：触发 store 内部 watcher 递增代次
+    seedUser('u-member')
+    await flushMicrotasks()
+
+    // 旧账号请求此刻才完成, 返回旧数据
+    old.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-leader'))
+    const r = await pOld
+
+    // 旧请求过期, 返回 false 且不写回 store
+    expect(r).toBe(false)
+    expect(store.hasWorkspace).toBe(false)
+    expect(store.currentClubId).toBeNull()
+    expect(store.currentMemberId).toBeNull()
+  })
+
+  it('M-2：同 clubId 在飞请求属于旧身份时,换账号后再次请求应发起新请求而非静默返回 false', async () => {
+    // 旧账号请求挂起（晚返回）
+    const old = pendingDeferred()
+    // 新账号请求立即成功
+    mockedGetContext
+      .mockReturnValueOnce(old.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-001', '计算机协会', 'member', 'mem-new') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    // 旧账号发起 club-001 请求并保持挂起
+    const pOld = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 换账号
+    seedUser('u-member')
+    await flushMicrotasks()
+
+    // 新账号再次请求同一 clubId：不得复用旧身份的过期 Promise（其必返回 false 导致静默失败），
+    // 而应发起一次新请求
+    const pNew = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(2)
+
+    // 新请求先完成, 写入新身份上下文并返回 true
+    const rNew = await pNew
+    expect(rNew).toBe(true)
+    expect(store.currentClubId).toBe('club-001')
+    expect(store.currentMemberId).toBe('mem-new')
+    expect(store.currentUserId).toBe('u-member')
+    expect(store.loading).toBe(false)
+
+    // 旧身份请求晚到, 结果被丢弃且不覆盖新身份上下文
+    old.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-old'))
+    const rOld = await pOld
+    expect(rOld).toBe(false)
+    expect(store.currentMemberId).toBe('mem-new')
+    expect(store.currentUserId).toBe('u-member')
+    expect(store.loading).toBe(false)
+  })
+
+  it('M-2：登出（session.user 为 null）后在飞旧请求不得被复用,应发起新请求', async () => {
+    // 旧请求挂起（仍属于旧账号）
+    const old = pendingDeferred()
+    mockedGetContext
+      .mockReturnValueOnce(old.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-001', '计算机协会', 'member', 'mem-new') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    const pOld = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 登出：session.user 置空
+    useSessionViewStore().user = null
+    await flushMicrotasks()
+
+    // 登出后再次请求同一 clubId：旧在飞请求 userId 为 'u-leader' 而非 null,
+    // 不得复用,应发起新请求
+    const pNew = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(2)
+
+    const rNew = await pNew
+    expect(rNew).toBe(true)
+    expect(store.currentUserId).toBeNull()
+
+    // 旧身份请求晚到, 结果被丢弃
+    old.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-old'))
+    const rOld = await pOld
+    expect(rOld).toBe(false)
+    expect(store.currentMemberId).toBe('mem-new')
+  })
+
+  it('M-2：旧请求成功后,新请求的 loading 仍能正确复位（finally 代次保护）', async () => {
+    const a = pendingDeferred()
+    mockedGetContext
+      .mockReturnValueOnce(a.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-002', '电子设计协会', 'member', 'mem-B') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    const pA = store.loadWorkspace('club-001')
+    const pB = store.loadWorkspace('club-002')
+
+    // 等待 B 完成
+    await pB
+    expect(store.loading).toBe(false) // B 是最新请求, 应复位 loading
+
+    // A 晚完成（过期）, 其 finally 不得错误地把 loading 设为 false 又设回去
+    a.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-A'))
+    await pA
+
+    expect(store.loading).toBe(false)
+    expect(store.currentClubId).toBe('club-002') // 仍为 B, 不被 A 覆盖
+  })
+})
+
+// 测试工具：等待 microtask 队列（Vue/Promise 解锁）
+async function flushMicrotasks() {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}

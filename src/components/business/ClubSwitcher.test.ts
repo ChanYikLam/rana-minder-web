@@ -21,11 +21,14 @@ vi.mock('vue-router', () => ({
 }))
 
 // 下拉菜单（reka-ui）在 happy-dom 下渲染不稳定，改用原生按钮触发内部逻辑
+// M-2：必须声明 emits: ['click'] 阻止 Vue 3 fallthrough——
+// 否则 SFC 的 @click="switchClub(club)" 会同时作为组件事件监听器（由 $emit 触发）
+// 和 DOM fallthrough 监听器（直接绑到 button 上），一次点击导致 switchClub 被调用两次
 vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: { template: '<div class="dd"><slot /></div>' },
   DropdownMenuTrigger: { template: '<div class="dd-trigger"><slot /></div>' },
   DropdownMenuContent: { template: '<div class="dd-content"><slot /></div>' },
-  DropdownMenuItem: { template: '<button type="button" class="dd-item" @click="$emit(\'click\')"><slot /></button>' },
+  DropdownMenuItem: { emits: ['click'], template: '<button type="button" class="dd-item" @click="$emit(\'click\')"><slot /></button>' },
   DropdownMenuLabel: { template: '<div><slot /></div>' },
   DropdownMenuSeparator: { template: '<div />' },
 }))
@@ -368,6 +371,170 @@ describe('ClubSwitcher 社团切换', () => {
     // 重试成功，错误态消失、新社团出现在菜单
     expect(wrapper.text()).not.toContain('社团列表加载失败')
     expect(wrapper.findAll('.dd-item').some((i) => i.text().includes('电子设计协会'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('M-2：快速切换 B→C,C 早返回、B 晚返回时 store 状态与会话工作空间均为 C,导航落点为 C', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001', 'mem-001')
+    const session = seedSession(['platform:club:manage', 'club:dashboard:view'])
+    session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-001' }
+    mocks.getMyClubs.mockResolvedValue({
+      kind: 'completed',
+      data: { clubs: [
+        { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' },
+        { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' },
+        { clubId: 'club-003', clubName: '摄影协会', role: 'member' },
+      ] },
+    })
+    // B 挂起（晚返回）, C 立即成功（早返回）
+    let resolveB!: (v: unknown) => void
+    const promiseB = new Promise((r) => { resolveB = r })
+    mocks.getContext
+      .mockReturnValueOnce(promiseB)
+      .mockResolvedValueOnce({
+        kind: 'completed',
+        data: { clubId: 'club-003', clubName: '摄影协会', role: 'member', permissions: ['club:dashboard:view'], memberId: 'mem-C' },
+      })
+
+    const wrapper = await mountSwitcher()
+    const itemB = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
+    const itemC = wrapper.findAll('.dd-item').find((i) => i.text().includes('摄影协会'))!
+
+    // 快速连点 B 后立即 C（不 await,让两个请求同时在飞）
+    const pClickB = itemB.trigger('click')
+    const pClickC = itemC.trigger('click')
+    await Promise.all([pClickB, pClickC])
+    await flushPromises()
+
+    // C 先返回：store 与 session 应已是 C
+    expect(workspace.currentClubId).toBe('club-003')
+    expect(workspace.currentClubName).toBe('摄影协会')
+    expect(workspace.currentMemberId).toBe('mem-C')
+    expect(session.workspace).toEqual({
+      clubId: 'club-003',
+      clubName: '摄影协会',
+      role: 'member',
+      memberId: 'mem-C',
+    })
+    // 导航落点为 C 的看板
+    expect(mocks.push).toHaveBeenCalledWith('/org/club-003/dashboard')
+
+    // C 先返回：store 与 session 应已是 C
+    expect(workspace.currentClubId).toBe('club-003')
+    expect(workspace.currentClubName).toBe('摄影协会')
+    expect(workspace.currentMemberId).toBe('mem-C')
+    expect(session.workspace).toEqual({
+      clubId: 'club-003',
+      clubName: '摄影协会',
+      role: 'member',
+      memberId: 'mem-C',
+    })
+    // 导航落点为 C 的看板
+    expect(mocks.push).toHaveBeenCalledWith('/org/club-003/dashboard')
+
+    // B 此时才返回（晚到）——store / session / 导航均不得被 B 覆盖
+    resolveB({
+      kind: 'completed',
+      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'hr', permissions: ['club:dashboard:view', 'club:member:view-self'], memberId: 'mem-B' },
+    })
+    await flushPromises()
+
+    expect(workspace.currentClubId).toBe('club-003') // 仍为 C
+    expect(workspace.currentMemberId).toBe('mem-C') // 仍为 C 的 memberId,不是 B 的 mem-B
+    expect(session.workspace?.clubId).toBe('club-003') // 会话仍为 C
+    // 导航只调过一次,落点仍为 C
+    expect(mocks.push).toHaveBeenCalledTimes(1)
+    expect(mocks.push).toHaveBeenCalledWith('/org/club-003/dashboard')
+    wrapper.unmount()
+  })
+
+  it('M-2：快速切换 B→C,B 失败时不得清空已成功写入的 C 上下文', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001')
+    const session = seedSession(['platform:club:manage', 'club:dashboard:view'])
+    session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-001' }
+    mocks.getMyClubs.mockResolvedValue({
+      kind: 'completed',
+      data: { clubs: [
+        { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' },
+        { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' },
+        { clubId: 'club-003', clubName: '摄影协会', role: 'member' },
+      ] },
+    })
+    // B 挂起后失败
+    let resolveB!: (v: unknown) => void
+    const promiseB = new Promise((r) => { resolveB = r })
+    mocks.getContext
+      .mockReturnValueOnce(promiseB)
+      .mockResolvedValueOnce({
+        kind: 'completed',
+        data: { clubId: 'club-003', clubName: '摄影协会', role: 'member', permissions: ['club:dashboard:view'], memberId: 'mem-C' },
+      })
+
+    const wrapper = await mountSwitcher()
+    const itemB = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
+    const itemC = wrapper.findAll('.dd-item').find((i) => i.text().includes('摄影协会'))!
+
+    const pClickB = itemB.trigger('click')
+    const pClickC = itemC.trigger('click')
+    await Promise.all([pClickB, pClickC])
+    await flushPromises()
+
+    // C 已成功写入
+    expect(workspace.currentClubId).toBe('club-003')
+    expect(mocks.push).toHaveBeenCalledWith('/org/club-003/dashboard')
+    expect(session.workspace?.clubId).toBe('club-003') // 会话已同步为 C
+
+    // B 后失败——其错误响应必须被丢弃,不得清空 C 的有效上下文
+    resolveB({ kind: 'rejected', error: { code: 'IFC-ERR-016', message: 'x' } })
+    await flushPromises()
+
+    expect(workspace.hasWorkspace).toBe(true)
+    expect(workspace.currentClubId).toBe('club-003') // C 不被清空
+    expect(workspace.currentMemberId).toBe('mem-C')
+    expect(session.workspace?.clubId).toBe('club-003') // 会话仍为 C,不被 B 失败污染
+    // 导航只调一次（C 触发），不得因 B 失败再次跳走
+    expect(mocks.push).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('M-2：同 clubId 连续点击多次只触发一次 getContext（in-flight 去重）', async () => {
+    const workspace = useWorkspaceContextStore()
+    workspace.setWorkspace('club-001', '计算机协会', 'club_leader', ['club:dashboard:view'], 'user-001', 'mem-001')
+    const session = seedSession()
+    session.workspace = { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader', memberId: 'mem-001' }
+    mocks.getMyClubs.mockResolvedValue({
+      kind: 'completed',
+      data: { clubs: [
+        { clubId: 'club-001', clubName: '计算机协会', role: 'club_leader' },
+        { clubId: 'club-002', clubName: '电子设计协会', role: 'hr' },
+      ] },
+    })
+    // getContext 挂起：让我们能验证多次点击的去重
+    let resolveCtx!: (v: unknown) => void
+    const promiseCtx = new Promise((r) => { resolveCtx = r })
+    mocks.getContext.mockReturnValueOnce(promiseCtx)
+
+    const wrapper = await mountSwitcher()
+    const item = wrapper.findAll('.dd-item').find((i) => i.text().includes('电子设计协会'))!
+
+    // 连续点击 3 次,模拟用户在切换中反复点击
+    const p1 = item.trigger('click')
+    const p2 = item.trigger('click')
+    const p3 = item.trigger('click')
+    await Promise.all([p1, p2, p3])
+    await flushPromises()
+
+    // 仅触发一次 getContext（store 层 inFlightByClub 去重）
+    expect(mocks.getContext).toHaveBeenCalledTimes(1)
+
+    // 清理：resolve 让 promise 完成,避免污染后续测试
+    resolveCtx({
+      kind: 'completed',
+      data: { clubId: 'club-002', clubName: '电子设计协会', role: 'hr', permissions: ['club:dashboard:view'], memberId: 'mem-B' },
+    })
+    await flushPromises()
     wrapper.unmount()
   })
 })
