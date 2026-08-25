@@ -235,11 +235,11 @@ describe('useRequest 页面状态机', () => {
     expect(data.value).toEqual({ id: 'ok' })
   })
 
-  it('poll 抛 AbortError（M-6）：不视为轮询错误，停止轮询但不更新 state', async () => {
+  it('poll 抛 AbortError（M-6）：代际仍有效时不视为轮询错误，保留 loading 且停止轮询', async () => {
     vi.useFakeTimers()
-    // poll 永远 pending，模拟一个在途的 poll（用 stopPolling 主动取消而非自然抛错）
-    const poll = vi.fn(() => new Promise<ApiResult<{ id: string }>>(() => {}))
-    const { execute, state, stopPolling } = useRequest<{ id: string }>(async () => ({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } }), {
+    // 真实场景：调用方在 poll 在途时 abort 底层请求，poll 以 AbortError 拒绝（代际仍有效，未经 stopPolling 失效）
+    const poll = vi.fn(() => Promise.reject(new DOMException('aborted', 'AbortError')))
+    const { execute, state, error, stopPolling } = useRequest<{ id: string }>(async () => ({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } }), {
       poll,
       pollIntervalMs: 1000,
     })
@@ -247,16 +247,77 @@ describe('useRequest 页面状态机', () => {
     await execute()
     expect(state.value).toBe('loading')
 
-    // 让第一次 poll 进入在途
+    // 推进到第一个 tick，poll 以 AbortError 拒绝：代际仍有效但被识别为调用方取消
     await vi.advanceTimersByTimeAsync(1000)
     expect(poll).toHaveBeenCalledTimes(1)
 
-    // 模拟调用方主动取消 → poll 在途被中断
-    stopPolling()
+    // AbortError 不是轮询错误：state 不进入 error，error 保持 null
+    expect(state.value).toBe('loading')
+    expect(error.value).toBeNull()
 
-    // 因为 stopPolling 已使代际失效，poll 即使后续抛错也不会更新 state
+    // catch 内已 stopPolling：不再调度下一轮
     await vi.advanceTimersByTimeAsync(5000)
     expect(poll).toHaveBeenCalledTimes(1)
+    stopPolling()
+  })
+
+  it('poll 抛非 AbortError（M-6 对照）：视为轮询错误，终止为 error 态', async () => {
+    vi.useFakeTimers()
+    // 对照场景：poll 抛普通异常（非调用方取消），应进入 error 态
+    const poll = vi.fn(() => Promise.reject(new Error('poll boom')))
+    const { execute, state, error, stopPolling } = useRequest<{ id: string }>(async () => ({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } }), {
+      poll,
+      pollIntervalMs: 1000,
+    })
+
+    await execute()
+    expect(state.value).toBe('loading')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    // 普通异常应进入 error 态
+    expect(state.value).toBe('error')
+    expect(error.value?.code).toBe('IFC-ERR-016')
+    expect(error.value?.message).toBe('poll boom')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(poll).toHaveBeenCalledTimes(1)
+    stopPolling()
+  })
+
+  it('poll 在途被 abort 后 refresh 可重新加载（M-6 代际与恢复）', async () => {
+    vi.useFakeTimers()
+    let rejectPoll: (e: unknown) => void = () => {}
+    const poll = vi.fn(() => new Promise<ApiResult<{ id: string }>>((_, reject) => { rejectPoll = reject }))
+    const load = vi.fn(async (): Promise<ApiResult<{ id: string }>> => ({ kind: 'completed', data: { id: 'x' } }))
+    const { execute, refresh, state, error, data, stopPolling } = useRequest<{ id: string }>(load, {
+      poll,
+      pollIntervalMs: 1000,
+    })
+
+    // 首次执行返回 accepted 进入轮询
+    load.mockResolvedValueOnce({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } })
+    await execute()
+    expect(state.value).toBe('loading')
+
+    // 推进到第一个 tick，poll 进入在途
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    // 调用方 abort：poll 在途以 AbortError 拒绝（代际仍有效）
+    rejectPoll(new DOMException('aborted', 'AbortError'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    // 不进入 error 态，随后 refresh 能正常重新加载
+    expect(error.value).toBeNull()
+    await refresh()
+    expect(state.value).toBe('normal')
+    expect(data.value).toEqual({ id: 'x' })
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(poll).toHaveBeenCalledTimes(1)
+    stopPolling()
   })
 
   it('执行期间并发调用不丢弃：合并为一次补跑并全部 resolve', async () => {
