@@ -21,8 +21,10 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
   // 旧请求的响应（哪怕晚到）不得覆盖新请求已写入的状态，避免跨社团快速切换时 store 与 UI 不一致
   let loadGeneration = 0
   // M-2：同 clubId 在飞请求去重——同一社团并发点击复用单次 API 调用，
-  // 避免重复请求 + 同一结果被多个调用方分别处理
-  const inFlightByClub = new Map<string, Promise<boolean>>()
+  // 避免重复请求 + 同一结果被多个调用方分别处理。
+  // 同时记录该请求捕获的会话身份：仅在飞请求与当前身份一致时才可复用，
+  // 否则（期间换账号/登出）直接复用会返回过期的 false，导致 ClubSwitcher 静默无响应
+  const inFlightByClub = new Map<string, { promise: Promise<boolean>; userId: string | null }>()
 
   const session = useSessionViewStore()
 
@@ -60,9 +62,11 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
       return true
     }
 
-    // M-2：同 clubId 的并发请求复用同一在飞 Promise，避免重复请求
+    // M-2：同 clubId 的并发请求复用同一在飞 Promise，避免重复请求。
+    // 但仅当在飞请求与当前会话身份一致时才复用；若在飞请求属于旧身份（期间已换账号/登出），
+    // 其返回结果必为 false，复用会导致本次点击静默失败，故应发起一次新请求（并使其代次递增）
     const existing = inFlightByClub.get(clubId)
-    if (existing) return existing
+    if (existing && existing.userId === (session.user?.id ?? null)) return existing.promise
 
     // M-2：捕获本次请求的代次与会话身份——请求返回后逐一校验；
     // 任一变化（被新请求取代 / 会话身份切换）则本次结果视为过期，不写回 store
@@ -100,11 +104,15 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
         if (myGen === loadGeneration) {
           loading.value = false
         }
-        inFlightByClub.delete(clubId)
+        // 仅删除仍指向本次请求的 map 条目：避免旧身份请求晚返回时误删新身份请求刚写入的条目，
+        // 破坏新请求的 in-flight 去重
+        if (inFlightByClub.get(clubId)?.promise === promise) {
+          inFlightByClub.delete(clubId)
+        }
       }
     })()
 
-    inFlightByClub.set(clubId, promise)
+    inFlightByClub.set(clubId, { promise, userId: inFlightUserId })
     return promise
   }
 

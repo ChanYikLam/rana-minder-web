@@ -322,6 +322,80 @@ describe('workspaceContextStore M-2 工作空间加载并发防护', () => {
     expect(store.currentMemberId).toBeNull()
   })
 
+  it('M-2：同 clubId 在飞请求属于旧身份时,换账号后再次请求应发起新请求而非静默返回 false', async () => {
+    // 旧账号请求挂起（晚返回）
+    const old = pendingDeferred()
+    // 新账号请求立即成功
+    mockedGetContext
+      .mockReturnValueOnce(old.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-001', '计算机协会', 'member', 'mem-new') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    // 旧账号发起 club-001 请求并保持挂起
+    const pOld = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 换账号
+    seedUser('u-member')
+    await flushMicrotasks()
+
+    // 新账号再次请求同一 clubId：不得复用旧身份的过期 Promise（其必返回 false 导致静默失败），
+    // 而应发起一次新请求
+    const pNew = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(2)
+
+    // 新请求先完成, 写入新身份上下文并返回 true
+    const rNew = await pNew
+    expect(rNew).toBe(true)
+    expect(store.currentClubId).toBe('club-001')
+    expect(store.currentMemberId).toBe('mem-new')
+    expect(store.currentUserId).toBe('u-member')
+    expect(store.loading).toBe(false)
+
+    // 旧身份请求晚到, 结果被丢弃且不覆盖新身份上下文
+    old.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-old'))
+    const rOld = await pOld
+    expect(rOld).toBe(false)
+    expect(store.currentMemberId).toBe('mem-new')
+    expect(store.currentUserId).toBe('u-member')
+    expect(store.loading).toBe(false)
+  })
+
+  it('M-2：登出（session.user 为 null）后在飞旧请求不得被复用,应发起新请求', async () => {
+    // 旧请求挂起（仍属于旧账号）
+    const old = pendingDeferred()
+    mockedGetContext
+      .mockReturnValueOnce(old.promise as never)
+      .mockResolvedValueOnce(ctxFor('club-001', '计算机协会', 'member', 'mem-new') as never)
+
+    seedUser('u-leader')
+    const store = useWorkspaceContextStore()
+
+    const pOld = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(1)
+
+    // 登出：session.user 置空
+    useSessionViewStore().user = null
+    await flushMicrotasks()
+
+    // 登出后再次请求同一 clubId：旧在飞请求 userId 为 'u-leader' 而非 null,
+    // 不得复用,应发起新请求
+    const pNew = store.loadWorkspace('club-001')
+    expect(mockedGetContext).toHaveBeenCalledTimes(2)
+
+    const rNew = await pNew
+    expect(rNew).toBe(true)
+    expect(store.currentUserId).toBeNull()
+
+    // 旧身份请求晚到, 结果被丢弃
+    old.resolve(ctxFor('club-001', '计算机协会', 'club_leader', 'mem-old'))
+    const rOld = await pOld
+    expect(rOld).toBe(false)
+    expect(store.currentMemberId).toBe('mem-new')
+  })
+
   it('M-2：旧请求成功后,新请求的 loading 仍能正确复位（finally 代次保护）', async () => {
     const a = pendingDeferred()
     mockedGetContext
