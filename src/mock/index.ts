@@ -142,6 +142,36 @@ function isPlatformAdmin(url: string): boolean {
   return getPermissions(resolveMockUser(url), '').includes('platform:delete:execute')
 }
 
+/** M-1：mock 端文件归属登记表（仅 mock 内存态）。
+ * 由 /api/files/upload 写入文件所属用户；/api/files/:fileId/download 必须按归属授权，
+ * 防止未登录/跨用户凭 fileId 猜测下载任意文件。
+ * 真实环境由后端库表 / 对象存储 ACL 承担此约束。 */
+interface MockFileOwner {
+  ownerId: string
+  ownerName: string
+  uploadedAt: string
+}
+const mockFileOwners = new Map<string, MockFileOwner>()
+
+/** 注册文件归属：upload 端点写入，供 download 端点校验 */
+function registerMockFileOwner(fileId: string, ownerId: string, ownerName: string): void {
+  mockFileOwners.set(fileId, {
+    ownerId,
+    ownerName,
+    uploadedAt: new Date().toISOString(),
+  })
+}
+
+/** 读取文件归属；未注册时返回 null（调用方应判定为 404/无权） */
+function getMockFileOwner(fileId: string): MockFileOwner | null {
+  return mockFileOwners.get(fileId) || null
+}
+
+/** 重置文件归属表（测试用例间隔离） */
+export function resetMockFileOwners(): void {
+  mockFileOwners.clear()
+}
+
 /** 有效权限 = 角色权限 ∪ 有效临时面试官任务折算（ORG-037：任务持有者获得面试查看/评价权限） */
 function effectivePermissions(user: MockUser, clubId: string): string[] {
   const base = getPermissions(user, clubId)
@@ -2880,14 +2910,24 @@ response: ({ url }: { url: string }) => {
       return { code: 0, data: result.data }
     },
   },
-  // 文件下载
+  // 文件下载（M-1：端点需鉴权，仅归属人或平台管理员可换取下载地址）
   {
     url: '/api/files/:fileId/download',
     method: 'post',
-    response: ({ query }: { query: Record<string, string> }) => {
+    response: ({ url, query }: { url: string; query: Record<string, string> }) => {
       const fileId = query.fileId || query.id || ''
       if (!/^file-\d+-[a-z0-9]+$/.test(fileId)) {
         return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '文件不存在或已过期', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+      }
+      // M-1：未注册归属的文件（猜测/伪造 fileId）一律视为不存在，避免泄露存在性
+      const owner = getMockFileOwner(fileId)
+      if (!owner) {
+        return { statusCode: 404, body: { code: 'IFC-ERR-015', message: '文件不存在或已过期', supportId: `MOCK-${Date.now().toString(36).toUpperCase()}` } }
+      }
+      // M-1：归属校验——仅文件上传者本人或平台管理员可下载
+      const user = resolveMockUser(url)
+      if (owner.ownerId !== user.id && !isPlatformAdmin(url)) {
+        return forbidden(url, 'post')
       }
       return {
         code: 0,
@@ -2903,9 +2943,12 @@ response: ({ url }: { url: string }) => {
   {
     url: '/api/files/upload',
     method: 'post',
-    response: ({ body }: { body: { input?: { purpose?: string; name?: string } } }) => {
+    response: ({ url, body }: { url: string; body: { input?: { purpose?: string; name?: string } } }) => {
       const fileId = 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
       const name = body.input?.name || 'upload.bin'
+      // M-1：登记文件归属，供 download 端点鉴权
+      const uploader = resolveMockUser(url)
+      registerMockFileOwner(fileId, uploader.id, uploader.name)
       return {
         code: 0,
         data: {
