@@ -73,7 +73,10 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
     const myGen = ++loadGeneration
     const inFlightUserId = session.user?.id ?? null
     loading.value = true
-    const promise = (async () => {
+    // M-2：通过对象持有在飞 Promise，闭包内经属性引用自身，
+    // 避免在 const 声明初始化的闭包里直接引用 `promise` 触发 TS2454(used before assigned)
+    const holder: { promise: Promise<boolean> } = {} as { promise: Promise<boolean> }
+    holder.promise = (async () => {
       try {
         const result = await organizationApi.getContext(clubId)
 
@@ -106,14 +109,14 @@ export const useWorkspaceContextStore = defineStore('workspaceContext', () => {
         }
         // 仅删除仍指向本次请求的 map 条目：避免旧身份请求晚返回时误删新身份请求刚写入的条目，
         // 破坏新请求的 in-flight 去重
-        if (inFlightByClub.get(clubId)?.promise === promise) {
+        if (inFlightByClub.get(clubId)?.promise === holder.promise) {
           inFlightByClub.delete(clubId)
         }
       }
     })()
 
-    inFlightByClub.set(clubId, { promise, userId: inFlightUserId })
-    return promise
+    inFlightByClub.set(clubId, { promise: holder.promise, userId: inFlightUserId })
+    return holder.promise
   }
 
   function clearWorkspace() {
