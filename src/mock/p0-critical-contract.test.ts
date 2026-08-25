@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import handlers from './index'
 import { matchRoute } from '../../mock-plugin'
 import { resolveMockUser, clearMockSession } from './auth'
-import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb } from './reset'
+import { resetRecruitmentDB, resetNotifications, resetCorrections, resetDb, resetOrgDb, resetMockFileOwners } from './reset'
 import * as db from './db'
 
 class MockServerResponse {
@@ -81,6 +81,7 @@ describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
     resetCorrections()
     resetDb()
     resetOrgDb()
+    resetMockFileOwners()
   })
 
   it('MRM-001：畸形百分号编码 %zz 在路由匹配时不抛 URIError，参数回落为原始片段', () => {
@@ -104,7 +105,14 @@ describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
     const out = await invokeHandler('/api/files/:fileId/download', 'post', '/api/files/file-999/download', {})
     expect(out.statusCode).toBe(404)
     expect(out.body.code).toBe('IFC-ERR-015')
-    const ok = await invokeHandler('/api/files/:fileId/download', 'post', '/api/files/file-1754112345678-abc123/download', {})
+    // M-1：已注册归属的文件，归属人本人可换取下载地址
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const uploaded = await invokeHandler('/api/files/upload', 'post', '/api/files/upload?_mock_user=leader', {
+      input: { purpose: 'form-attachment', name: '简历.pdf' },
+    })
+    expect(uploaded.statusCode).toBe(200)
+    const fileId = (uploaded.body.data as { fileId: string }).fileId
+    const ok = await invokeHandler('/api/files/:fileId/download', 'post', `/api/files/${fileId}/download?_mock_user=leader`, {})
     expect(ok.statusCode).toBe(200)
   })
 
@@ -114,6 +122,43 @@ describe('P0 严重修复回归（MRM-001/003/004/005/006）', () => {
     expect(bad.body.code).toBe('IFC-ERR-015')
     const good = await invokeHandler('/api/mock-files/:fileId', 'get', '/api/mock-files/file-001.csv')
     expect(good.statusCode).toBe(200)
+  })
+
+  it('M-1：文件下载端点零鉴权修复——未注册 fileId 视为不存在，返回 404 + IFC-ERR-015', async () => {
+    // 任意猜测的 fileId（即便符合 file-<timestamp>-<rand> 格式）未被 upload 登记过
+    const guess = '/api/files/file-9999999999-guess00/download'
+    const out = await invokeHandler('/api/files/:fileId/download', 'post', guess)
+    expect(out.statusCode).toBe(404)
+    expect(out.body.code).toBe('IFC-ERR-015')
+  })
+
+  it('M-1：非归属人下载他人上传文件 → 403 + IFC-ERR-003，且触发 GOV-006 异常访问事件', async () => {
+    // leader 上传文件并登记归属
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const uploaded = await invokeHandler('/api/files/upload', 'post', '/api/files/upload?_mock_user=leader', {
+      input: { purpose: 'form-attachment', name: '机密.pdf' },
+    })
+    expect(uploaded.statusCode).toBe(200)
+    const fileId = (uploaded.body.data as { fileId: string }).fileId
+    // 切换为普通成员（mock key 为 'member'）尝试下载
+    const out = await invokeHandler('/api/files/:fileId/download', 'post', `/api/files/${fileId}/download?_mock_user=member`, {})
+    expect(out.statusCode).toBe(403)
+    expect(out.body.code).toBe('IFC-ERR-003')
+  })
+
+  it('M-1：平台管理员（platform:delete:execute）可跨用户下载任意已注册文件', async () => {
+    // leader 上传文件
+    resolveMockUser('/api/auth/session?_mock_user=leader')
+    const uploaded = await invokeHandler('/api/files/upload', 'post', '/api/files/upload?_mock_user=leader', {
+      input: { purpose: 'form-attachment', name: 'member-personal.csv' },
+    })
+    const fileId = (uploaded.body.data as { fileId: string }).fileId
+    // admin 域账号
+    const out = await invokeHandler('/api/files/:fileId/download', 'post', `/api/files/${fileId}/download?_mock_user=admin`, {})
+    expect(out.statusCode).toBe(200)
+    const data = out.body.data as { downloadUrl: string; fileId: string }
+    expect(data.fileId).toBe(fileId)
+    expect(data.downloadUrl).toContain(fileId)
   })
 
   it('MRM-004：/api/files/:fileId GET 仅注册一次，且对不存在文件返回 404 + IFC-ERR-015', async () => {
