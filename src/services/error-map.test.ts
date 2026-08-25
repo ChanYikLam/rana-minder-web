@@ -256,9 +256,19 @@ describe('httpStatusToResult', () => {
     expect(kinds.has('dependency_unavailable')).toBe(true)
   })
 
-  it('202 且 body 无错误码时仍返回 accepted（任务缺省占位）', () => {
-    const result = httpStatusToResult(202, {})
-    expect(result).toEqual({ kind: 'accepted', data: { taskId: '', status: 'processing' } })
+  it('202 且 body 无错误码也缺 taskId：返回 rejected（协议异常，不作为 accepted 误用空 taskId）', () => {
+    const result = expectKind(httpStatusToResult(202, {}), 'rejected')
+    expect(result.error.code).toBe('IFC-ERR-016')
+  })
+
+  it('202 含错误码 IFC-ERR-014 但缺 taskId：同样返回 rejected（不允许轮询一个空 taskId）', () => {
+    const result = expectKind(httpStatusToResult(202, { code: 'IFC-ERR-014', data: {} }), 'rejected')
+    expect(result.error.code).toBe('IFC-ERR-016')
+  })
+
+  it('202 含 taskId 但 status 缺省时仍以 processing 占位', () => {
+    const result = httpStatusToResult(202, { code: 'IFC-ERR-014', data: { taskId: 'task-1' } })
+    expect(result).toEqual({ kind: 'accepted', data: { taskId: 'task-1', status: 'processing' } })
   })
 
   it('concurrency_conflict 缺 currentData 时该字段为 undefined', () => {

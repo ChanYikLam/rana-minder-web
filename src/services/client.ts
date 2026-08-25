@@ -4,6 +4,12 @@ import { errorCodeOf, ERROR_AUTO_RETRY, ERROR_MESSAGES, httpStatusToResult } fro
 const BASE_URL = '/api'
 
 const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000
+/**
+ * 过期幂等键清理的最小间隔（毫秒）。
+ * - 选取 1 分钟：与 TTL（15 分钟）同量级，节流遍历开销；
+ * - 仅在生成/查询键时按需触发，不引入额外定时器，避免无活动页面空跑。
+ */
+const IDEMPOTENCY_CLEANUP_INTERVAL_MS = 60 * 1000
 /** 单次请求超时（毫秒）。连接挂起时触发，超时映射为可重试错误 IFC-ERR-012。 */
 const DEFAULT_TIMEOUT_MS = 15_000
 /** IFC-ERR-012 等可重试错误的最大自动重试次数（不含首次尝试）。 */
@@ -11,11 +17,26 @@ const AUTO_RETRY_MAX = 2
 /** 自动重试递增退避的基准延迟（毫秒）。 */
 const AUTO_RETRY_BASE_DELAY_MS = 250
 const pendingIdempotencyKeys = new Map<string, { key: string; expiresAt: number }>()
+let lastIdempotencyCleanupAt = 0
 
 function generateIdempotencyKey(): string {
   return typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `idem-${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join('-')}`
+}
+
+/**
+ * 清理已过期的幂等键条目，避免 Map 随失败请求无限增长（M-3 生命周期缺陷）。
+ * 按 lastIdempotencyCleanupAt 节流，调用方可无负担。
+ */
+function cleanupExpiredIdempotencyKeys(now: number): void {
+  if (now - lastIdempotencyCleanupAt < IDEMPOTENCY_CLEANUP_INTERVAL_MS) return
+  lastIdempotencyCleanupAt = now
+  for (const [fingerprint, entry] of pendingIdempotencyKeys) {
+    if (entry.expiresAt <= now) {
+      pendingIdempotencyKeys.delete(fingerprint)
+    }
+  }
 }
 
 export interface RuntimeSchema<T> {
@@ -50,6 +71,8 @@ function buildUrl(path: string, params?: RequestOptions['params']): string {
 
 function getIdempotencyKey(fingerprint: string): string {
   const now = Date.now()
+  // 顺手清理：访问即触发按节流的过期回收（避免为清理单独开定时器）
+  cleanupExpiredIdempotencyKeys(now)
   const existing = pendingIdempotencyKeys.get(fingerprint)
   if (existing && existing.expiresAt > now) return existing.key
   const key = generateIdempotencyKey()
@@ -278,4 +301,21 @@ export async function del<T>(path: string, options?: Omit<RequestOptions<T>, 'me
  */
 export async function getPaginated<T>(path: string, params?: { cursor?: string; limit?: number } & Record<string, string | number | undefined>, signal?: AbortSignal, timeoutMs?: number): Promise<ApiResult<PaginatedResult<T>>> {
   return get<PaginatedResult<T>>(path, params as Record<string, string | number | undefined>, signal, timeoutMs)
+}
+
+/**
+ * 仅供测试使用：返回当前 pending 幂等键表大小（验证 M-3 过期清理）。
+ * 不要在业务代码中调用。
+ */
+export function __testing_pendingIdempotencyKeyCount(): number {
+  return pendingIdempotencyKeys.size
+}
+
+/**
+ * 仅供测试使用：重置 pending 幂等键表与清理节流（隔离测试用例）。
+ * 不要在业务代码中调用。
+ */
+export function __testing_resetPendingIdempotencyKeys(): void {
+  pendingIdempotencyKeys.clear()
+  lastIdempotencyCleanupAt = 0
 }

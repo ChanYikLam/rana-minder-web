@@ -93,3 +93,37 @@ export function toIso(dateTimeLocal: string): string {
   const d = new Date(dateTimeLocal)
   return Number.isNaN(d.getTime()) ? dateTimeLocal : d.toISOString()
 }
+
+/**
+ * 相对时间格式（M-7 通知中心时区漂移修复）：
+ * - < 1 分钟：刚刚
+ * - < 1 小时：X 分钟前
+ * - < 24 小时：X 小时前
+ * - ≥ 24 小时：平台时区（Asia/Shanghai）的 M月D日
+ *
+ * 关键点：跨日分支使用平台时区（Intl.DateTimeFormat + timeZone: PLATFORM_TIMEZONE），
+ * 避免用户本地时区导致同一时刻在不同客户端显示成不同日期。
+ * 相对时间分支基于 UTC ms 差值，与时区无关，行为稳定。
+ *
+ * @param iso ISO 时刻字符串或 Date
+ * @param now 基准当前时刻，默认 `new Date()`。测试可注入。
+ * @returns 无效输入或未来时刻返回 ''
+ */
+export function formatRelativeCn(iso: string | Date, now: Date = new Date()): string {
+  const d = iso instanceof Date ? iso : new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const diff = now.getTime() - d.getTime()
+  // 未来时刻（时钟漂移/手动设置）不显示相对时间，避免显示负数
+  if (diff < 0) return ''
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  // 跨日：使用平台时区显示 M月D日（复用 formatDateKey 的 en-CA 输出格式，避免依赖 locale 的数字格式）
+  const dateKey = formatDateKey(d)
+  // dateKey 形如 "2026-08-06"
+  const [, month, day] = dateKey.split('-')
+  const monthNum = Number(month)
+  const dayNum = Number(day)
+  if (!Number.isFinite(monthNum) || !Number.isFinite(dayNum)) return ''
+  return `${monthNum}月${dayNum}日`
+}

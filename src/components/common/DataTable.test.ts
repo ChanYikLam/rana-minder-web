@@ -125,3 +125,59 @@ describe('DataTable 行点击', () => {
     expect(wrapper.emitted('update:selectedIds')).toBeDefined()
   })
 })
+
+describe('DataTable 选中残留（M-5）', () => {
+  it('rows 变化剔除已不存在的 id 并 emit 给父级', async () => {
+    const wrapper = mount(DataTable, {
+      props: { columns, rows, selectable: true, selectedIds: ['r1', 'r2'] },
+    })
+
+    // 切换到不含 r1 的新数据（保留 r2）
+    const newRows = [{ id: 'r2', name: '李四', role: '成员' }, { id: 'r3', name: '王五', role: '新人' }]
+    await wrapper.setProps({ rows: newRows, selectedIds: ['r1', 'r2'] })
+
+    const emitted = wrapper.emitted('update:selectedIds')
+    expect(emitted).toBeTruthy()
+    // 仅剔除 r1，保留 r2
+    expect(emitted?.[emitted.length - 1]).toEqual([['r2']])
+  })
+
+  it('rows 变化所有 id 都不在新数据中：清空选择', async () => {
+    const wrapper = mount(DataTable, {
+      props: { columns, rows, selectable: true, selectedIds: ['r1', 'r2'] },
+    })
+
+    const newRows = [{ id: 'r9', name: '新人甲', role: '观察员' }]
+    await wrapper.setProps({ rows: newRows, selectedIds: ['r1', 'r2'] })
+
+    const emitted = wrapper.emitted('update:selectedIds')
+    expect(emitted?.[emitted.length - 1]).toEqual([[]])
+  })
+
+  it('rows 变化但 selectedIds 全部仍有效：不 emit 任何裁剪事件', async () => {
+    const wrapper = mount(DataTable, {
+      props: { columns, rows, selectable: true, selectedIds: ['r1'] },
+    })
+
+    const newRows = [
+      { id: 'r1', name: '张三', role: '负责人' },
+      { id: 'r2', name: '李四', role: '成员' },
+      { id: 'r3', name: '王五', role: '新人' },
+    ]
+    await wrapper.setProps({ rows: newRows, selectedIds: ['r1'] })
+
+    // r1 仍存在，不应触发裁剪 emit
+    expect(wrapper.emitted('update:selectedIds')).toBeUndefined()
+  })
+
+  it('rows 加载完成时初始 selectedIds 包含无效 id：watch 不在挂载时立即触发，行为由 props 联动负责', () => {
+    // 父级负责传入一致的 selectedIds/rows；挂载时 watch 不触发（无 immediate），
+    // 仅在 rows 变化时才裁剪。本测试确认挂载时不会因初始数据不一致而误触发裁剪 emit。
+    const wrapper = mount(DataTable, {
+      props: { columns, rows, selectable: true, selectedIds: ['r0', 'r1', 'r2'] },
+    })
+
+    // 挂载后无任何裁剪 emit
+    expect(wrapper.emitted('update:selectedIds')).toBeUndefined()
+  })
+})

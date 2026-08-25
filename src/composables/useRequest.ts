@@ -98,6 +98,11 @@ export function useRequest<T>(
     error.value = { code: result.error.code, message: result.error.message, supportId: result.error.supportId }
   }
 
+  function isCallerAbort(e: unknown): boolean {
+    // M-6：调用方主动取消（AbortError）是预期行为，不应作为错误态呈现
+    return e instanceof DOMException && e.name === 'AbortError'
+  }
+
   function startPolling() {
     stopPolling()
     // 本轮代际 token：stopPolling 已自增，再自增一次作为本轮 token
@@ -140,7 +145,8 @@ export function useRequest<T>(
         stopPolling()
         applyResult(result)
       } catch (e) {
-        if (gen === pollGeneration) {
+        if (gen === pollGeneration && !isCallerAbort(e)) {
+          // AbortError 是调用方主动取消（含 stopPolling），不视为轮询错误
           state.value = 'error'
           error.value = {
             code: 'IFC-ERR-016',
@@ -155,6 +161,8 @@ export function useRequest<T>(
   }
 
   async function runOnce(): Promise<void> {
+    // 记录进入 loading 之前的状态，AbortError 时恢复（M-6：避免取消后页面停留在 loading 态）
+    const prevState = state.value
     state.value = 'loading'
     error.value = null
     stopPolling()
@@ -163,6 +171,11 @@ export function useRequest<T>(
       const result = await fn()
       applyResult(result)
     } catch (e) {
+      if (isCallerAbort(e)) {
+        // 调用方主动取消：恢复之前的状态（不进入 error 态），与“用户未发起请求”时的观感一致
+        state.value = prevState
+        return
+      }
       state.value = 'error'
       error.value = {
         code: 'IFC-ERR-016',

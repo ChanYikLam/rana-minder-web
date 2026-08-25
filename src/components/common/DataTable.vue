@@ -43,6 +43,28 @@ watch(() => props.selectedIds, (ids) => {
   localSelected.value = new Set(ids)
 })
 
+/**
+ * M-5：当 rows 变化（筛选/刷新/分页/删除）时，剔除已不在当前数据中的选中项并同步给父级。
+ * - 父级持有的 selectedIds 与可见行保持一致，避免“选中残留”导致全选状态错乱；
+ * - 主动 emit 让父级在数据上而非仅 UI 上反映裁剪后的选择，便于批处理/导出等下游。
+ */
+watch(rowIds, (currentIds) => {
+  if (localSelected.value.size === 0) return
+  const currentSet = new Set(currentIds)
+  let changed = false
+  for (const id of localSelected.value) {
+    if (!currentSet.has(id)) {
+      localSelected.value.delete(id)
+      changed = true
+    }
+  }
+  if (changed) {
+    // 触发响应式更新（Set 原地变更 Vue 不会自动检测）
+    localSelected.value = new Set(localSelected.value)
+    emit('update:selectedIds', [...localSelected.value])
+  }
+})
+
 function toggleRow(id: string) {
   if (localSelected.value.has(id)) {
     localSelected.value.delete(id)

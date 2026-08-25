@@ -197,6 +197,68 @@ describe('useRequest 页面状态机', () => {
     expect(error.value).toEqual({ code: 'IFC-ERR-016', message: 'boom' })
   })
 
+  it('fn 抛 AbortError（M-6 调用方主动取消）：不进入 error 态，保留之前的 state/error', async () => {
+    const initial = useRequest<{ id: string }>(async () => ({ kind: 'completed', data: { id: 'init' } }))
+    // 先完成一次，让 state 落到 normal、error 落到 null
+    await initial.execute()
+    expect(initial.state.value).toBe('normal')
+    expect(initial.error.value).toBeNull()
+
+    // 模拟调用方主动取消
+    const { execute, state, error } = useRequest<{ id: string }>(async () => {
+      throw new DOMException('aborted', 'AbortError')
+    })
+
+    await execute()
+
+    // AbortError 不是错误，不应进入 error 态
+    expect(state.value).toBe('normal')
+    expect(error.value).toBeNull()
+  })
+
+  it('fn 抛 AbortError 后再次正常执行：能正常进入 loading 并完成', async () => {
+    let call = 0
+    const fn = vi.fn(async (): Promise<ApiResult<{ id: string }>> => {
+      call += 1
+      if (call === 1) throw new DOMException('aborted', 'AbortError')
+      return { kind: 'completed', data: { id: 'ok' } }
+    })
+    const { execute, state, error, data } = useRequest<{ id: string }>(fn)
+
+    await execute()
+    expect(state.value).toBe('normal')
+    expect(error.value).toBeNull()
+
+    await execute()
+    expect(state.value).toBe('normal')
+    expect(error.value).toBeNull()
+    expect(data.value).toEqual({ id: 'ok' })
+  })
+
+  it('poll 抛 AbortError（M-6）：不视为轮询错误，停止轮询但不更新 state', async () => {
+    vi.useFakeTimers()
+    // poll 永远 pending，模拟一个在途的 poll（用 stopPolling 主动取消而非自然抛错）
+    const poll = vi.fn(() => new Promise<ApiResult<{ id: string }>>(() => {}))
+    const { execute, state, stopPolling } = useRequest<{ id: string }>(async () => ({ kind: 'accepted', data: { taskId: 't1', status: 'processing' } }), {
+      poll,
+      pollIntervalMs: 1000,
+    })
+
+    await execute()
+    expect(state.value).toBe('loading')
+
+    // 让第一次 poll 进入在途
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    // 模拟调用方主动取消 → poll 在途被中断
+    stopPolling()
+
+    // 因为 stopPolling 已使代际失效，poll 即使后续抛错也不会更新 state
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(poll).toHaveBeenCalledTimes(1)
+  })
+
   it('执行期间并发调用不丢弃：合并为一次补跑并全部 resolve', async () => {
     let resolveFn: (r: ApiResult<{ id: string }>) => void = () => {}
     let first = true
