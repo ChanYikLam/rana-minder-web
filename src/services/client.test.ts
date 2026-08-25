@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { get, getValidated, getPaginated, post, put, patch, del, __testing_pendingIdempotencyKeyCount, __testing_resetPendingIdempotencyKeys } from './client'
+import { get, getValidated, getPaginated, post, put, patch, del } from './client'
+import { __testing_pendingIdempotencyKeyCount, __testing_resetPendingIdempotencyKeys } from './idempotency-keys'
 import { ERROR_MESSAGES, errorCodeOf } from './error-map'
 
 afterEach(() => {
