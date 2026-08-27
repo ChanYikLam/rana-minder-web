@@ -69,11 +69,14 @@ export const useSessionViewStore = defineStore('sessionView', () => {
     else stopClock()
   }
 
-  async function loadSession() {
+  async function loadSession(options?: { code?: string; state?: string }) {
     loading.value = true
     lastError.value = null
     try {
-      const result = await getSession()
+      const result = await getSession({
+        ...(options?.code ? { code: options.code } : {}),
+        ...(options?.state ? { state: options.state } : {}),
+      })
 
       if (result.kind === 'completed') {
         const data: SessionInfo = result.data

@@ -11,7 +11,11 @@ const error = ref<string | null>(null)
 
 onMounted(async () => {
   try {
-    await session.loadSession()
+    // Casdoor 回调携带 code/state：契约要求回传后端建立会话（API-AUTH-001）
+    await session.loadSession({
+      ...(typeof route.query.code === 'string' ? { code: route.query.code } : {}),
+      ...(typeof route.query.state === 'string' ? { state: route.query.state } : {}),
+    })
     if (!session.isAuthenticated) {
       error.value = '未能建立登录会话，请返回登录页后重试。'
       return
