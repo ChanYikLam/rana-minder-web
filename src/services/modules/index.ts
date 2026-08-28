@@ -41,8 +41,14 @@ const workspaceContextSchema = z.object({
 })
 
 export const identityApi = {
-  getSession: (mockUser?: string): Promise<ApiResult<SessionInfo>> =>
-    getValidated('/auth/session', sessionSchema, mockUser ? { _mock_user: mockUser } : undefined),
+  getSession: (opts?: { mockUser?: string; code?: string; state?: string }): Promise<ApiResult<SessionInfo>> => {
+    const params: Record<string, string> = {}
+    if (opts?.mockUser) params._mock_user = opts.mockUser
+    // OIDC 回调建立会话：契约要求携带授权码与 state（接口清单 §4 / API-AUTH-001）
+    if (opts?.code) params.code = opts.code
+    if (opts?.state) params.state = opts.state
+    return getValidated('/auth/session', sessionSchema, Object.keys(params).length > 0 ? params : undefined)
+  },
   logout: (): Promise<ApiResult<void>> => del('/auth/logout'),
   getProfile: (): Promise<ApiResult<User>> => get('/auth/profile'),
   updateProfile: (input: Partial<User>): Promise<ApiResult<User>> => put('/auth/profile', input),

@@ -42,15 +42,31 @@ describe('services/auth 认证模式分流', () => {
     expect(sessionStorage.getItem(MOCK_ROLE_STORAGE_KEY)).toBeNull()
   })
 
-  it('oidc 模式：startLogin 跳转统一认证并返回 redirected', async () => {
+  it('oidc 模式：startLogin 取后端 login-url 并跳转', async () => {
     const assign = vi.fn()
     vi.stubGlobal('window', { location: { assign, origin: 'https://app.test' } })
+    const loginUrl = 'http://casdoor.test/login/oauth/authorize?client_id=x'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ url: loginUrl }) }),
+    )
     const { startLogin } = await loadAuth('oidc')
 
     const result = await startLogin('/me/history?a=1')
 
     expect(result).toBe('redirected')
-    expect(assign).toHaveBeenCalledWith('/api/auth/login?redirect=%2Fme%2Fhistory%3Fa%3D1')
+    expect(fetch).toHaveBeenCalledWith('/api/auth/casdoor/login-url', expect.objectContaining({ credentials: 'include' }))
+    expect(assign).toHaveBeenCalledWith(loginUrl)
+  })
+
+  it('oidc 模式：login-url 接口失败时 startLogin 抛错且不跳转', async () => {
+    const assign = vi.fn()
+    vi.stubGlobal('window', { location: { assign, origin: 'https://app.test' } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: () => Promise.resolve(null) }))
+    const { startLogin } = await loadAuth('oidc')
+
+    await expect(startLogin('/me')).rejects.toThrow('OIDC_LOGIN_URL_UNAVAILABLE')
+    expect(assign).not.toHaveBeenCalled()
   })
 
   it('disabled 模式：startLogin 直接返回 disabled', async () => {
@@ -85,7 +101,7 @@ describe('services/auth 认证模式分流', () => {
 
     const result = await getSession()
 
-    expect(mocks.getSession).toHaveBeenCalledWith('hr')
+    expect(mocks.getSession).toHaveBeenCalledWith({ mockUser: 'hr' })
     expect(result.kind).toBe('completed')
   })
 
