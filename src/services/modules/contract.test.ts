@@ -35,7 +35,7 @@ describe('identityApi.getSession 会话契约', () => {
     stubEnv()
     mockFetch.mockResolvedValue(jsonResponse({ code: 0, data: validSession }))
 
-    const result = await identityApi.getSession('club_leader')
+    const result = await identityApi.getSession({ mockUser: 'club_leader' })
 
     expect(result.kind).toBe('completed')
   })
