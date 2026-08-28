@@ -17,7 +17,9 @@ onMounted(async () => {
       ...(typeof route.query.state === 'string' ? { state: route.query.state } : {}),
     })
     if (!session.isAuthenticated) {
-      error.value = '未能建立登录会话，请返回登录页后重试。'
+      // 优先透出后端安全分类原因（账号禁用/删除 IFC-ERR-011、限流、学号冲突等），
+      // 无具体原因时退化为通用文案
+      error.value = session.lastError || '未能建立登录会话，请返回登录页后重试。'
       return
     }
     // 与登录页/根守卫同一落点口径：redirect 校验同源后优先；
@@ -30,7 +32,7 @@ onMounted(async () => {
     })
     await router.replace(target)
   } catch {
-    error.value = '登录回调处理失败，请返回登录页后重试。'
+    error.value = session.lastError || '登录回调处理失败，请返回登录页后重试。'
   }
 })
 </script>

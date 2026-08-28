@@ -49,7 +49,8 @@ export const identityApi = {
     if (opts?.state) params.state = opts.state
     return getValidated('/auth/session', sessionSchema, Object.keys(params).length > 0 ? params : undefined)
   },
-  logout: (): Promise<ApiResult<void>> => del('/auth/logout'),
+  // RP-initiated logout：data.endSessionUrl 为 Casdoor end_session 地址（未配置/失败为 null）
+  logout: (): Promise<ApiResult<{ endSessionUrl?: string | null } | null>> => del('/auth/logout'),
   getProfile: (): Promise<ApiResult<User>> => get('/auth/profile'),
   updateProfile: (input: Partial<User>): Promise<ApiResult<User>> => put('/auth/profile', input),
   resolveSyncConflict: (input: { field: string; chosenValue: string }): Promise<ApiResult<User>> =>

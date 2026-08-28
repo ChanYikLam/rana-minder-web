@@ -66,8 +66,13 @@ async function handleLogin() {
     }
 
     await router.push(resolveTargetAfterLogin())
-  } catch {
-    // 兜底：优先透出会话层具体原因（如账号禁用），再退化为通用文案
+  } catch (error) {
+    // 登录地址获取失败（后端 503：Casdoor OIDC 未配置/暂不可用）→ 明确的运维口径
+    if (error instanceof Error && error.message === 'OIDC_LOGIN_URL_UNAVAILABLE') {
+      toast.error('统一认证暂不可用，请稍后重试；若持续出现请联系管理员')
+      return
+    }
+    // 兜底：优先透出会话层具体原因（如账号禁用、请求过于频繁），再退化为通用文案
     toast.error(session.lastError || '登录失败，请稍后重试')
   } finally {
     loggingIn.value = false

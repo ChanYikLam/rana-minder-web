@@ -120,7 +120,11 @@ export const useSessionViewStore = defineStore('sessionView', () => {
 
   async function logout() {
     try {
-      await logoutAuth()
+      // RP-initiated logout：本地会话清除后跳转 Casdoor end_session 完成上游单点登出；
+      // 无 endSessionUrl（mock / 未配置 / 上游失败）时停留在本地（本地登出已闭环）。
+      const endSessionUrl = await logoutAuth()
+      clearSession()
+      if (endSessionUrl) window.location.assign(endSessionUrl)
     } finally {
       clearSession()
     }

@@ -78,9 +78,20 @@ export function getSession(params?: SessionRequestParams): Promise<ApiResult<Ses
   )
 }
 
-export async function logout(): Promise<void> {
+/**
+ * 登出：清除本地会话并返回 Casdoor RP-initiated 登出地址（oidc 模式）。
+ * 返回非空 endSessionUrl 时调用方应跳转该地址完成上游单点登出；
+ * 失败/未配置时返回 null（本地登出已闭环）。
+ */
+export async function logout(): Promise<string | null> {
   try {
-    if (authMode === 'oidc') await identityApi.logout()
+    if (authMode === 'oidc') {
+      const result = await identityApi.logout()
+      const endSessionUrl =
+        result.kind === 'completed' && result.data ? (result.data.endSessionUrl ?? null) : null
+      return endSessionUrl
+    }
+    return null
   } finally {
     sessionStorage.removeItem(MOCK_ROLE_STORAGE_KEY)
   }

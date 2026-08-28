@@ -329,7 +329,8 @@ describe('sessionViewStore 会话清理与登出', () => {
 
   it('logout 成功时调用认证登出并清空会话', async () => {
     const session = seedLoggedInUser()
-    vi.mocked(logoutAuth).mockResolvedValue(undefined)
+    // logout 现返回 endSessionUrl（RP-initiated）；null 表示无上游登出地址
+    vi.mocked(logoutAuth).mockResolvedValue(null)
 
     await session.logout()
 

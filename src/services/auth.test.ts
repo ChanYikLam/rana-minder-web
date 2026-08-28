@@ -124,6 +124,23 @@ describe('services/auth 认证模式分流', () => {
     expect(sessionStorage.getItem(MOCK_ROLE_STORAGE_KEY)).toBeNull()
   })
 
+  it('oidc 模式：logout 返回 RP-initiated 登出地址（endSessionUrl）', async () => {
+    const { logout } = await loadAuth('oidc')
+    mocks.logout.mockResolvedValue({
+      kind: 'completed',
+      data: { endSessionUrl: 'https://casdoor.test/api/logout?client_id=c1' },
+    })
+
+    await expect(logout()).resolves.toBe('https://casdoor.test/api/logout?client_id=c1')
+  })
+
+  it('oidc 模式：logout 无 endSessionUrl（未配置/失败）时返回 null', async () => {
+    const { logout } = await loadAuth('oidc')
+    mocks.logout.mockResolvedValue({ kind: 'completed', data: null })
+
+    await expect(logout()).resolves.toBeNull()
+  })
+
   it('mock 模式：logout 不调用 identityApi.logout 但清除角色', async () => {
     const { logout } = await loadAuth('mock')
     sessionStorage.setItem(MOCK_ROLE_STORAGE_KEY, 'x')
