@@ -2,7 +2,7 @@ import type { ApiRequest, ApiResult, PaginatedResult } from '@/types/contracts'
 import { errorCodeOf, ERROR_AUTO_RETRY, ERROR_MESSAGES, httpStatusToResult } from './error-map'
 import { getIdempotencyKey, removeIdempotencyKey } from './idempotency-keys'
 
-const BASE_URL = '/api'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 /** 单次请求超时（毫秒）。连接挂起时触发，超时映射为可重试错误 IFC-ERR-012。 */
 const DEFAULT_TIMEOUT_MS = 15_000
